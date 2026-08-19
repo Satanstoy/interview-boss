@@ -19,6 +19,11 @@ Vue Router 页面组件。View 只负责页面编排，业务能力由 `componen
 | `SettingsView.vue` | 设置页：在主工作区外壳内承载 `SettingsPage.vue` |
 | `ResumeView.vue` | 简历保存与优化页（删除有 ConfirmDialog 确认、删除按钮带 aria-label、optimize SSE 离开页面即 abort、岗位选择用 shadcn Select/Checkbox） |
 | `LoginView.vue` | 登录页 |
+| `EvaluationOverviewView.vue` | 测评可视化（评测工作台总览）：统计卡 + 质量健康看板（各目标通过率排名）+ 待处理失败 Run 快捷入口 + 人工 A/B 汇总 |
+| `EvaluationRunView.vue` | 评测运行详情：阶段/汇总/版本信息 + 左侧 Case 导航（筛选/搜索/失败优先）+ 右侧智能渲染证据面板，J/K 键盘切换 |
+| `EvaluationExperimentView.vue` | 评测实验详情：子 Run 列表 + 分数横条（EvalScoreBar）|
+| `EvaluationResultsView.vue` | 评测结果总览：各目标质量分布 + 质量排序 + 状态/目标筛选 + 分数横条（消费 /runs 的 score 与 /overview 的 by_target） |
+| `EvaluationReviewsView.vue` | 人工 A/B：强制双栏固定比较 + 5 项指标卡片 + Hard Gate 证据 + 键盘快捷键（1/2/3/4）+ 进度 |
 | `NotFoundView.vue` | 404 页面：页面不存在提示 + 返回首页按钮 |
 
 ## 核心规则

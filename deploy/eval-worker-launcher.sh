@@ -13,6 +13,15 @@ if [[ ! -f "$DB_PATH" ]]; then
   exit 0
 fi
 
+running_eval_worker="$(docker ps \
+  --filter 'label=com.docker.compose.service=eval-worker' \
+  --filter status=running \
+  --format '{{.Names}}' 2>/dev/null || true)"
+if [[ -n "$running_eval_worker" ]]; then
+  echo "eval-worker already running: $running_eval_worker"
+  exit 0
+fi
+
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "eval-worker preflight failed: Docker is unavailable" >&2
   exit 1

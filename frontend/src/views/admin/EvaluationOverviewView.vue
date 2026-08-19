@@ -5,14 +5,25 @@ import { Activity, CheckCircle2, Clock3, FlaskConical, XCircle } from '@lucide/v
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
-import { fetchEvaluationOverview } from '@/services/evaluationApi.js'
+import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
+import { evaluationTargetLabel, formatDate, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
+import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
+import { Badge } from '@/components/ui/badge'
 
 const router = useRouter()
 const overview = ref(null)
 const loading = ref(true)
 const error = ref('')
 const humanReviews = computed(() => overview.value?.human_reviews || { total: 0, comparison_groups: [] })
+const runs = ref([])
+const byTarget = computed(() => overview.value?.by_target || [])
+const byTargetSort = computed(() => [...byTarget.value].sort((a, b) => (b.failed_count / Math.max(b.run_count, 1)) - (a.failed_count / Math.max(a.run_count, 1))))
+const failedRuns = computed(() => runs.value.filter(r => r.quality_status === 'failed' || r.status === 'failed').slice(0, 6))
+function passRate(item) {
+  if (!item.run_count) return 0
+  return Math.round((item.passed_count / item.run_count) * 100)
+}
 
 const cards = computed(() => [
   { label: '已完成', value: overview.value?.counts?.completed || 0, icon: CheckCircle2, tone: 'text-emerald-600' },
@@ -25,7 +36,9 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    overview.value = await fetchEvaluationOverview()
+    const [overviewData, runData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns()])
+    overview.value = overviewData
+    runs.value = runData.runs || []
   } catch (err) {
     error.value = err.message || '评测总览加载失败'
   } finally {
@@ -37,7 +50,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="h-full overflow-y-auto custom-scrollbar">
+  <div aria-labelledby="eval-overview-title" class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <EvaluationPageHeader
         title="测评可视化"
@@ -65,6 +78,39 @@ onMounted(load)
             </div>
           </AppCard>
         </div>
+
+        <!-- 质量健康看板：按目标通过率排名 -->
+        <AppCard v-if="byTarget.length" class="mt-6" title="质量健康看板" description="各评测目标的通过率与最近分数，按失败率降序排列。">
+          <div aria-live="polite" class="space-y-3">
+            <div v-for="item in byTargetSort" :key="item.target_type" class="rounded-lg border border-border/60 p-3">
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <span class="font-medium">{{ evaluationTargetLabel(item.target_type) }}</span>
+                  <span class="ml-2 text-xs text-muted-foreground">{{ item.run_count }} 次运行</span>
+                  <span class="ml-2 rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">{{ item.failed_count }} 失败</span>
+                </div>
+                <div class="shrink-0 w-36">
+                  <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <EvalProgressBar :value="passRate(item)" variant="success" size="sm" />
+                  </div>
+                  <div class="mt-0.5 text-right text-xs text-muted-foreground">{{ passRate(item) }}% 通过</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </AppCard>
+
+        <!-- 待处理的失败 Run -->
+        <AppCard v-if="failedRuns.length" class="mt-6" title="待处理的失败评测" description="这些评测需要管理员查看原因并决定重跑或接受。">
+          <div class="divide-y divide-border/60">
+            <Button v-for="run in failedRuns" :key="run.id" variant="ghost" size="sm" class="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
+              <span class="font-medium">评测 #{{ run.id }}</span>
+              <Badge variant="default">{{ statusLabel(run.status) }}</Badge>
+              <span v-if="run.target_type" class="text-xs text-muted-foreground">{{ evaluationTargetLabel(run.target_type) }}</span>
+              <span class="ml-auto text-xs text-muted-foreground">{{ formatDate(run.created_at) }}</span>
+            </Button>
+          </div>
+        </AppCard>
 
         <AppCard class="mt-6" title="人工 A/B 汇总" description="人工判断是独立质量证据，用来核验版本差异，不覆盖 Hard Gate 或 Judge。">
           <div class="mb-4 flex items-center justify-between rounded-lg bg-muted/30 px-4 py-3">

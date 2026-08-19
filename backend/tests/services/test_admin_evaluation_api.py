@@ -972,3 +972,79 @@ def test_human_review_persists_ab_choice_and_dimensions(test_db, monkeypatch):
             )
         )
     assert exc_info.value.status_code == 400
+
+def test_list_runs_includes_aggregate_score_and_target_type(test_db, monkeypatch):
+    """列表接口应返回 Run 级聚合分数与目标类型，供结果页分数横条/按目标聚合使用。"""
+    module = _router()
+    context = _context(test_db)
+    service = importlib.import_module("app.services.evaluation_service")
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=5,
+    )
+    # 模拟完成：写 metric_summary 到 summary_json
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'completed', summary_json = ? WHERE id = ?",
+        (
+            '{"metric_summary":{"score":{"final_mean":0.82,"deterministic_mean":0.75,'
+            '"judge_mean":0.9}}}',
+            run["id"],
+        ),
+    )
+    test_db.commit()
+    result = asyncio.run(module.list_runs(status=None, limit=50, admin={"id": 1, "is_admin": 1}))
+    runs = result["runs"]
+    assert runs, "应至少返回一条 run"
+    found = [r for r in runs if r["id"] == run["id"]]
+    assert found, "应包含刚创建的 run"
+    item = found[0]
+    assert item["target_type"] == "fixture", item
+    assert item["score"]["final_mean"] == 0.82, item.get("score")
+    assert item["score"]["deterministic_mean"] == 0.75
+    assert item["score"]["judge_mean"] == 0.9
+
+
+
+def test_overview_includes_by_target_quality_aggregation(test_db, monkeypatch):
+    """总览应返回按目标类型聚合的质量统计，供质量健康看板使用。"""
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    context = _context(test_db)  # target_type = fixture，versions 已 published
+    target, suite_release, protocol, judge, harness, simulator = context
+    # 通过 run：completed + 有分
+    run_ok = service.create_eval_run(
+        test_db, created_by=1, target_release_id=target["id"],
+        benchmark_suite_release_id=suite_release["id"],
+        eval_protocol_release_id=protocol["id"], judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"], replication_count=1, seed=1,
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'completed', summary_json = ? WHERE id = ?",
+        ('{"metric_summary":{"score":{"final_mean":0.9}}}', run_ok["id"]),
+    )
+    # 失败 run：pending item（未完成）→ quality pending
+    run_fail = service.create_eval_run(
+        test_db, created_by=1, target_release_id=target["id"],
+        benchmark_suite_release_id=suite_release["id"],
+        eval_protocol_release_id=protocol["id"], judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"], replication_count=1, seed=2,
+    )
+    test_db.commit()
+    result = asyncio.run(module.overview(admin={"id": 1, "is_admin": 1}))
+    assert "by_target" in result, "overview 应返回 by_target 聚合"
+    by_target = result["by_target"]
+    fixture = [item for item in by_target if item["target_type"] == "fixture"]
+    assert fixture, by_target
+    row = fixture[0]
+    assert row["run_count"] == 2, row
+

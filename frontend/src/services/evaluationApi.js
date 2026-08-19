@@ -11,7 +11,9 @@ export const fetchEvaluationReleases = (params = {}) => {
   const suffix = query.toString() ? `?${query}` : ''
   return get(`${ROOT}/releases${suffix}`, { noCache: true })
 }
+
 export const fetchEvaluationBenchmarks = () => get(`${ROOT}/benchmarks`, { noCache: true })
+
 export const fetchEvaluationRuns = (status = '') => {
   const suffix = status ? `?status=${encodeURIComponent(status)}` : ''
   return get(`${ROOT}/runs${suffix}`, { noCache: true })

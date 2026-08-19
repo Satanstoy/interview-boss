@@ -42,6 +42,16 @@
   .dark .custom-scrollbar:hover::-webkit-scrollbar-thumb:hover {
     background-color: #52525b;
   }
+  /* 常显细滚动条：数据密集页（评测结果等）默认就能看到滚动条提示 */
+  .custom-scrollbar-always::-webkit-scrollbar { width: 6px; height: 6px; }
+  .custom-scrollbar-always::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar-always::-webkit-scrollbar-thumb {
+    background-color: rgba(161, 161, 170, 0.55);
+    border-radius: 20px;
+  }
+  .dark .custom-scrollbar-always::-webkit-scrollbar-thumb {
+    background-color: rgba(82, 82, 91, 0.55);
+  }
 
   /* Prose chat — unified markdown rendering for chat messages */
   .prose-chat p { margin: 0 0 0.5em; }

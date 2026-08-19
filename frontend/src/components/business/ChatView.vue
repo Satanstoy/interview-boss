@@ -291,7 +291,7 @@
       <!-- Input area -->
       <div class="shrink-0">
         <div class="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
-          <form @submit.prevent="handleSend">
+          <form @submit.prevent>
             <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-xl">
               <!-- Textarea -->
               <textarea
@@ -341,11 +341,12 @@
                 </AppTooltip>
                 <AppTooltip v-else text="发送消息">
                   <Button
-                    type="submit"
+                    type="button"
                     aria-label="发送消息"
                     :disabled="!inputText.trim() || sendInFlight"
                     size="icon"
                     class="h-10 min-w-16 shrink-0 justify-center gap-1.5 rounded-lg px-3 sm:h-8 sm:min-w-0 sm:w-8 sm:px-0"
+                    @click="handleSend"
                   >
                     <ArrowUp :size="16" />
                     <span class="text-xs sm:hidden">发送</span>
@@ -463,6 +464,7 @@ const isSending = ref(false)
 // Lock immediately on submit, including the async model check and delayed
 // conversation creation window where isSending has not started yet.
 const sendInFlight = ref(false)
+let _lastSendTs = 0  // debounce guard: ignore rapid duplicate calls
 const streamingContent = ref('')
 const showNewChat = ref(false)
 const creatingConversation = ref(false)
@@ -761,6 +763,9 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     }
   }
   if (!text || isSending.value || sendInFlight.value) return
+  const now = Date.now()
+  if (now - _lastSendTs < 300) return  // debounce: ignore calls within 300ms
+  _lastSendTs = now
   sendInFlight.value = true
   const initialConversationId = activeConversationId.value
 

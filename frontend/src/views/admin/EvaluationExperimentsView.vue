@@ -237,19 +237,31 @@ onMounted(load)
             <EvaluationTargetPicker :model-value="selectedTargetType" :capabilities="capabilities" @update:model-value="selectTargetType" />
             <EvaluationStepCard :number="1" title="选择被测版本" description="决定这次要测哪个 Agent、Workflow 或 Pipeline。">
               <label class="block text-sm font-medium" for="eval-target">被测版本（{{ evaluationTargetLabel(selectedTargetType) }}）</label>
-              <select id="eval-target" v-model="form.target" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required @change="selectTarget">
-                <option value="" disabled>请选择已发布版本</option>
-                <option v-for="release in targets.filter(item => !selectedTargetType || item.target_type === selectedTargetType)" :key="release.id" :value="String(release.id)">{{ release.release_key }}</option>
-              </select>
+              <Select v-model="form.target" @update:model-value="selectTarget">
+                <SelectTrigger class="mt-1.5">
+                  <SelectValue placeholder="请选择被测版本" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="target in targets" :key="target" :value="String(target.id)">
+                    {{ target.release_key }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <p class="mt-1.5 text-xs text-muted-foreground">每个 Agent / Workflow 独立建立自己的评测 Run，便于后续做 A/B。</p>
             </EvaluationStepCard>
 
             <EvaluationStepCard :number="2" title="选择完整评测版本" description="这一个版本整体固定 Benchmark、Judge、模拟器、Harness，以及工具调用和意图识别指标。">
               <label class="block text-sm font-medium" for="eval-release">完整评测版本</label>
-              <select id="eval-release" v-model="form.evaluation" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" required>
-                <option value="" disabled>请选择已发布版本</option>
-                <option v-for="release in evaluations" :key="release.id" :value="String(release.id)">{{ release.release_key }}</option>
-              </select>
+              <Select v-model="form.evaluation">
+                <SelectTrigger class="mt-1.5">
+                  <SelectValue placeholder="请选择完整评测版本" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="release in evaluations" :key="release.id" :value="String(release.id)">
+                    {{ release.release_key }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
               <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评测题集</span><div class="mt-1 font-medium">{{ evaluationConfig.benchmark }} · {{ evaluationConfig.caseCount }} 个 Case</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">固定 Judge</span><div class="mt-1 break-all font-mono font-medium">{{ evaluationConfig.judge }}</div></div>
@@ -260,8 +272,8 @@ onMounted(load)
 
             <EvaluationStepCard :number="3" title="固定运行参数" description="这些参数会写入批次指纹，保证多次 E2E 可以复现和比较。">
               <div class="grid gap-3 sm:grid-cols-2">
-                <label class="text-sm font-medium">每个 Case 重跑次数<input v-model.number="form.replication" type="number" min="1" max="100" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" /></label>
-                <label class="text-sm font-medium">随机种子<input v-model.number="form.seed" type="number" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" /></label>
+                <label class="text-sm font-medium">每个 Case 重跑次数<Input v-model.number="form.replication" type="number" min="1" max="100" class="mt-1.5" /></label>
+                <label class="text-sm font-medium">随机种子<Input v-model.number="form.seed" type="number" class="mt-1.5" /></label>
               </div>
               <label class="mt-3 block text-sm font-medium">运行环境标识<Input v-model="form.environment" class="mt-1.5" placeholder="local-baseline" /></label>
               <label class="mt-3 block text-sm font-medium">版本对比组（可选）<Input v-model="form.comparison" class="mt-1.5" placeholder="release-ab-2026-08" /></label>
@@ -279,7 +291,11 @@ onMounted(load)
             <div>
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                 <label v-for="capability in capabilities" :key="capability.target_type" class="flex cursor-pointer gap-3 rounded-lg border border-border/70 bg-background p-3 text-left has-[:checked]:border-primary has-[:checked]:bg-primary/5" :class="{ 'cursor-not-allowed opacity-60': !capability.can_run }">
-                  <input type="checkbox" class="mt-0.5 size-4 rounded border-input accent-primary" :checked="selectedExperimentTargets.includes(capability.target_type)" :disabled="!capability.can_run" @change="toggleExperimentTarget(capability.target_type)" />
+                  <Checkbox 
+                :checked="selectedExperimentTargets.includes(capability.target_type)" 
+                :disabled="!capability.can_run" 
+                @update:checked="toggleExperimentTarget(capability.target_type)"
+              />
                   <span class="min-w-0"><span class="block text-sm font-medium">{{ evaluationTargetLabel(capability.target_type) }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ capability.case_count || 0 }} 个 Case<span v-if="capability.reason"> · {{ capability.reason }}</span></span></span>
                 </label>
               </div>
@@ -297,9 +313,9 @@ onMounted(load)
           <div class="flex items-center justify-end border-b border-border/60 p-3"><Button size="sm" variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button></div>
           <div v-if="!runs.length" class="p-8 text-center text-sm text-muted-foreground">还没有评测记录。</div>
           <div v-else class="divide-y divide-border/60">
-            <button v-for="run in runs" :key="run.id" type="button" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
+            <Button v-for="run in runs" :key="run.id" variant="ghost" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
               <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">评测 #{{ run.id }}</span><span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span><span v-if="run.comparison_group" class="text-xs text-muted-foreground">对比组：{{ run.comparison_group }}</span></div><div class="mt-1 text-xs text-muted-foreground">被测：{{ run.target_release_key }} · 评测：{{ run.evaluation_release_key || '历史组件模式' }} · {{ formatDate(run.created_at) }}</div></div>
-              <div class="w-36"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 rounded-full bg-muted"><div class="h-full rounded-full bg-primary" :style="{ width: `${runProgress(run)}%` }" /></div></div>
+              <div class="w-36"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 rounded-full bg-muted"><EvalProgressBar :value="runProgress(run)" size="sm" /></div></div>
             </button>
           </div>
         </AppCard>

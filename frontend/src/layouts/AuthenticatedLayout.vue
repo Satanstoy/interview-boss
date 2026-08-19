@@ -241,7 +241,7 @@ const sidebarGroups = computed(() => [
     tabs: [
       { key: 'EvalOverview', label: '测评可视化', route: '/admin/evals/overview' },
       { key: 'EvalReleases', label: '版本与发布', route: '/admin/evals/releases' },
-      { key: 'EvalBenchmarks', label: 'Benchmark', route: '/admin/evals/benchmarks' },
+
       { key: 'EvalExperiments', label: '测评实验', route: '/admin/evals/experiments' },
       { key: 'EvalResults', label: '评测结果', route: '/admin/evals/results' },
       { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },

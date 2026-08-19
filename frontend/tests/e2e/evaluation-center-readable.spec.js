@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test'
 
 const overviewPayload = {
   counts: { completed: 2, running: 1, queued: 0, created: 0, failed: 0, cancelled: 0 },
+  by_target: [
+    { target_type: "interview", target_release_key: "interview-agent@1.0", run_count: 1, passed_count: 0, failed_count: 1, pending_count: 0, avg_score: 0.69 },
+  ],
   human_reviews: {
     total: 3,
     comparison_groups: [
@@ -38,6 +41,9 @@ const runsPayload = {
       completed_items: 60,
       total_items: 60,
       created_at: '2026-08-17T10:00:00Z',
+      score: { final_mean: 0.69, deterministic_mean: 0.66, judge_mean: 0.72 },
+      target_type: 'interview',
+      quality_status: 'failed',
     },
   ],
 }
@@ -154,7 +160,7 @@ async function mockEvaluationApis(page) {
   })
   await page.route('**/api/admin/evals/experiments', route => {
     if (route.request().method() === 'POST') return route.fulfill({ json: experimentPayload })
-    return route.fallback()
+    return route.fulfill({ json: { experiments: [] } })
   })
   await page.route('**/api/admin/evals/experiments/77', route => route.fulfill({ json: experimentPayload }))
   await page.route('**/api/admin/evals/benchmarks', route => route.fulfill({ json: benchmarksPayload }))
@@ -200,17 +206,30 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('最近评测运行')).toBeVisible()
     await expect(page.getByText('评测 #12')).toBeVisible()
   })
+  test('评测结果展示质量分布与分数横条', async ({ page }) => {
+    await page.goto('/admin/evals/results?preview=1')
 
-  test('Run 详情可以展开逐 Case 证据', async ({ page }) => {
+    // 各目标质量分布
+    await expect(page.getByText('各目标质量分布')).toBeVisible()
+    await expect(page.getByText('模拟面试 Agent').first()).toBeVisible()
+    await expect(page.getByText('1 次运行')).toBeVisible()
+
+    // 分数横条与质量徽章在 run 列表区（视口下方），先滚动过去
+    await page.getByText('最近评测运行').scrollIntoViewIfNeeded()
+    await expect(page.getByText('0.690').first()).toBeAttached()
+    await expect(page.getByText('质量未通过').first()).toBeAttached()
+  })
+
+  test('Run 详情显示 Case 导航和证据面板', async ({ page }) => {
     await page.goto('/admin/evals/runs/12?preview=1')
-
-    await expect(page.getByText('逐 Case 结果')).toBeVisible()
-    await page.getByRole('button', { name: /查看证据/ }).click()
-    await expect(page.getByRole('heading', { name: 'Case 证据' })).toBeVisible()
-    await expect(page.getByText('候选人可见输入')).toBeVisible()
-    await expect(page.getByText('工具时机不符合')).toBeVisible()
-    await expect(page.getByText('Attempt #1')).toBeVisible()
-    await expect(page.getByText('质量未通过')).toBeVisible()
+    const navigator = page.locator('[aria-label="Case 导航"]');
+    await expect(navigator).toBeVisible({ timeout: 15000 });
+    await expect(navigator.locator('.eval-case-item').first()).toContainText('tool_timing');
+    const panel = page.locator('[aria-label="Case 证据面板"]');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText('对话记录').first()).toBeVisible();
+    await expect(panel.getByText('工具时机不符合').first()).toBeVisible();
+    await expect(page.getByText('质量未通过')).toBeVisible();
   })
 
   test('Run 详情可以重跑失败 Case', async ({ page }) => {
@@ -224,6 +243,7 @@ test.describe('评测中心可读性', () => {
   test('可以从前端启动全部 Eval 并查看 Experiment 汇总', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
+    await page.getByRole('tab', { name: '批量实验' }).click()
     await page.getByRole('button', { name: '运行全部 Eval' }).click()
     await expect(page).toHaveURL(/\/admin\/evals\/experiments\/77/)
     await expect(page.getByRole('heading', { name: '评测实验 #77' })).toBeVisible()
@@ -239,7 +259,7 @@ test.describe('评测中心可读性', () => {
     const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
     await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
     const labels = await flowSteps.allTextContents()
-    const evaluationLabels = ['版本与发布', 'Benchmark', '测评实验', '评测结果', '人工 A/B']
+    const evaluationLabels = ['版本与发布', '测评实验', '评测结果', '人工 A/B']
     const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
 
     expect(positions.every(position => position >= 0)).toBeTruthy()
@@ -264,7 +284,7 @@ test.describe('评测中心可读性', () => {
   test('评测对象明确展示已接入的目标类型', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
-    await expect(page.getByText('评测对象')).toBeVisible()
+    await expect(page.getByText('评测对象').first()).toBeVisible()
     await expect(page.getByRole('button', { name: /模拟面试 Agent/ })).toBeVisible()
     await expect(page.getByText('可运行完整 E2E')).toBeVisible()
     await expect(page.getByText('面经提取 Agent').first()).toBeVisible()
@@ -287,9 +307,9 @@ test.describe('评测中心可读性', () => {
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {
+    // Benchmark 已合并进版本与发布页（旧路径重定向）
     await page.goto('/admin/evals/benchmarks?preview=1')
-    await expect(page.getByRole('heading', { name: 'Benchmark：这套题集测什么' })).toBeVisible()
-    await expect(page.getByText('这里定义完整评测版本要测什么')).toBeVisible()
+    await expect(page).toHaveURL(/\/admin\/evals\/releases/)
 
     await page.goto('/admin/evals/releases?preview=1')
     await expect(page.getByRole('heading', { name: '版本与发布：决定测谁' })).toBeVisible()

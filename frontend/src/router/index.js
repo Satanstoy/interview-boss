@@ -124,9 +124,7 @@ const routes = [
       },
       {
         path: 'admin/evals/benchmarks',
-        name: 'admin-evals-benchmarks',
-        meta: { adminOnly: true },
-        component: () => import('@/views/admin/EvaluationBenchmarksView.vue'),
+        redirect: '/admin/evals/releases',
       },
       {
         path: 'admin/evals/releases',

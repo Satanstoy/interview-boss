@@ -3,11 +3,15 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Ban, CheckCircle2, Circle, Radio } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
+import EvalCaseNavigator from '@/components/business/EvalCaseNavigator.vue'
+import EvalEvidencePanel from '@/components/business/EvalEvidencePanel.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { cancelEvaluationRun, fetchEvaluationItem, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
-import { checkStatusLabel, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { casePrioritySort, checkStatusLabel, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
+import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
+import { Badge } from '@/components/ui/badge'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,13 +19,25 @@ const run = ref(null)
 const loading = ref(true)
 const error = ref('')
 const lastSequence = ref(0)
-const itemEvidence = ref(null)
+const activeCaseId = ref(null)
+const evidence = ref(null)
 const evidenceLoading = ref(false)
 const evidenceError = ref('')
 const retrying = ref(false)
 const abortController = new AbortController()
 const progress = computed(() => runProgress(run.value))
 const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(run.value?.status))
+
+const sortedItems = computed(() => casePrioritySort(run.value?.items || []))
+function progressStats() {
+  const items = run.value?.items || []
+  const passed = items.filter(i => i.status === 'completed' && i.hard_gate_status === 'passed').length
+  const failed = items.filter(i => i.status === 'failed' || (i.status === 'completed' && i.hard_gate_status === 'failed')).length
+  const running = items.filter(i => i.status === 'running' || i.status === 'queued').length
+  const judgePending = items.filter(i => i.status === 'completed' && i.judge_status === 'pending').length
+  return { total: items.length, passed, failed, running, judgePending }
+}
+
 const phases = [
   { key: 'queue', label: '排队' },
   { key: 'e2e', label: 'E2E 执行' },
@@ -87,6 +103,10 @@ function scoreSummary(item) {
 async function load() {
   try {
     run.value = await fetchEvaluationRun(route.params.runId)
+    if (!activeCaseId.value && sortedItems.value.length) {
+      activeCaseId.value = sortedItems.value[0].id
+      loadEvidence(sortedItems.value[0])
+    }
   } catch (err) {
     error.value = err.message || '评测详情加载失败'
   } finally {
@@ -108,6 +128,16 @@ async function watchEvents() {
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
   }
+}
+
+function navigateCase(direction) {
+  const items = sortedItems.value
+  if (!items.length) return
+  const currentIndex = items.findIndex(i => i.id === activeCaseId.value)
+  const nextIndex = direction === 'next'
+    ? Math.min(currentIndex + 1, items.length - 1)
+    : Math.max(currentIndex - 1, 0)
+  if (nextIndex !== currentIndex) loadEvidence(items[nextIndex])
 }
 
 async function cancel() {
@@ -132,12 +162,14 @@ async function retryFailed() {
   }
 }
 
-async function openEvidence(item) {
-  itemEvidence.value = null
+async function loadEvidence(item) {
+  if (!item) return
+  activeCaseId.value = item.id
+  evidence.value = null
   evidenceError.value = ''
   evidenceLoading.value = true
   try {
-    itemEvidence.value = await fetchEvaluationItem(route.params.runId, item.id)
+    evidence.value = await fetchEvaluationItem(route.params.runId, item.id)
   } catch (err) {
     evidenceError.value = err.message || 'Case 证据加载失败'
   } finally {
@@ -145,57 +177,139 @@ async function openEvidence(item) {
   }
 }
 
+function handleKeydown(e) {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
+  if (e.key === 'j' || e.key === 'J') {
+    e.preventDefault()
+    navigateCase('next')
+  } else if (e.key === 'k' || e.key === 'K') {
+    e.preventDefault()
+    navigateCase('prev')
+  } else if (e.key === 'Escape') {
+    activeCaseId.value = null
+    evidence.value = null
+  }
+}
+
+function onMobileSelect() {
+  const item = (run.value?.items || []).find(i => i.id === Number(activeCaseId.value))
+  if (item) loadEvidence(item)
+}
+
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown)
   await load()
   watchEvents()
 })
 
-onUnmounted(() => abortController.abort())
+onUnmounted(() => {
+  abortController.abort()
+  document.removeEventListener('keydown', handleKeydown)
+})
 </script>
-
 <template>
-  <div class="h-full overflow-y-auto custom-scrollbar">
-    <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader :title="`评测运行 #${route.params.runId}`" description="跟踪完整 E2E 的进度；最终分数由规则指标与固定 Judge 按评测协议合成。" active-key="experiments">
-        <template #actions><Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button><Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button><Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button></template>
-      </EvaluationPageHeader>
-      <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
-      <p v-else-if="error && !run" class="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
-      <template v-else-if="run">
-        <AppCard class="mt-6" title="当前执行阶段" description="实时进度来自可恢复 SSE 事件流，连接中断不会影响后台评测。">
-          <div class="flex flex-wrap items-center gap-3"><span class="text-xs text-muted-foreground">执行</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-xs text-muted-foreground">质量</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span><span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span><span class="text-sm text-muted-foreground">已处理 {{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span class="ml-auto text-2xl font-semibold">{{ progress }}%</span></div>
-          <div class="mt-4 h-2 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all duration-500" :style="{ width: `${progress}%` }" /></div>
-          <div v-if="run.summary?.metric_summary" class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div v-if="run.summary.metric_summary.score" class="rounded-lg bg-primary/5 p-3 text-xs"><div class="font-medium">混合主分（Run 汇总）</div><div class="mt-1 text-muted-foreground">最终 {{ run.summary.metric_summary.score.final_mean == null ? '—' : Number(run.summary.metric_summary.score.final_mean).toFixed(3) }} · 规则 {{ run.summary.metric_summary.score.deterministic_mean == null ? '—' : Number(run.summary.metric_summary.score.deterministic_mean).toFixed(3) }} · Judge {{ run.summary.metric_summary.score.judge_mean == null ? '—' : Number(run.summary.metric_summary.score.judge_mean).toFixed(3) }}</div></div><div v-if="run.summary.metric_summary.tool" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">工具调用效果（Run 汇总）</div><div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.tool.call_count }} 次调用 · {{ run.summary.metric_summary.tool.failed_call_count }} 次失败 · 结果使用率 {{ run.summary.metric_summary.tool.result_used_rate == null ? '—' : `${Math.round(run.summary.metric_summary.tool.result_used_rate * 100)}%` }}</div></div><div v-if="run.summary.metric_summary.intent" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">意图识别效果（Run 汇总）</div><div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.intent.observed_turn_count }} 轮记录 · 覆盖率 {{ run.summary.metric_summary.intent.intent_coverage == null ? '—' : `${Math.round(run.summary.metric_summary.intent.intent_coverage * 100)}%` }} · 准确率 {{ run.summary.metric_summary.intent.accuracy == null ? '—' : `${Math.round(run.summary.metric_summary.intent.accuracy * 100)}%` }}</div></div><div v-if="run.summary.metric_summary.content" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">结构化抽取（Run 汇总）</div><div class="mt-1 text-muted-foreground">字段覆盖 {{ Math.round(run.summary.metric_summary.content.field_coverage * 100) }}% · 题目召回 {{ Math.round(run.summary.metric_summary.content.question_recall * 100) }}%</div></div><div v-if="run.summary.metric_summary.resume" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">简历分析（Run 汇总）</div><div class="mt-1 text-muted-foreground">事实覆盖 {{ Math.round(run.summary.metric_summary.resume.source_fact_coverage * 100) }}% · 岗位匹配 {{ Math.round(run.summary.metric_summary.resume.target_alignment * 100) }}%</div></div><div v-if="run.summary.metric_summary.tagging" class="rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">题目分类（Run 汇总）</div><div class="mt-1 text-muted-foreground">分类合法 {{ Math.round(run.summary.metric_summary.tagging.taxonomy_validity * 100) }}% · 标签准确 {{ Math.round(run.summary.metric_summary.tagging.classification_accuracy * 100) }}%</div></div></div>
-          <div class="mt-6 grid gap-2 sm:grid-cols-5">
-            <div v-for="(phase, index) in phases" :key="phase.key" :class="['rounded-lg border px-3 py-2', phaseClass(index)]"><div class="flex items-center gap-2 text-xs font-medium"><component :is="phaseIcon(index)" class="size-3.5" />{{ phase.label }}</div><div class="mt-1 text-[11px] opacity-80">{{ index < phaseIndex ? '已完成' : index === phaseIndex ? '当前阶段' : '等待中' }}</div></div>
+  <div class="flex flex-col h-full">
+    <div class="shrink-0 border-b border-border/60">
+      <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
+        <EvaluationPageHeader :title="`评测运行 #${route.params.runId}`" description="跟踪完整 E2E 的进度；最终分数由规则指标与固定 Judge 按评测协议合成。" active-key="experiments">
+          <template #actions>
+            <Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button>
+            <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
+            <Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button>
+          </template>
+        </EvaluationPageHeader>
+      </div>
+      <div v-if="run && !loading" class="mx-auto max-w-[1600px] px-4 pb-3 sm:px-6 lg:px-8">
+        <div class="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-2.5">
+          <span class="text-xs text-muted-foreground">执行</span>
+          <Badge variant="default">{{ statusLabel(run.status) }}</Badge>
+          <span class="text-xs text-muted-foreground">质量</span>
+          <span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span>
+          <span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span>
+          <div class="hidden lg:block h-4 w-px bg-border/60" />
+          <div aria-label="Case 进度" class="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Case {{ progressStats().passed + progressStats().failed }} / {{ progressStats().total }}</span>
+            <span class="text-emerald-600">{{ progressStats().passed }} 通过</span>
+            <span class="text-destructive">{{ progressStats().failed }} 失败</span>
+            <span v-if="progressStats().running" class="text-amber-600">{{ progressStats().running }} 进行中</span>
+            <span v-if="progressStats().judgePending" class="text-muted-foreground">{{ progressStats().judgePending }} Judge 待评</span>
           </div>
-          <details class="mt-5 rounded-lg border border-border/60 px-3 py-2"><summary class="cursor-pointer text-xs font-medium text-muted-foreground">查看本次评测绑定的版本</summary><div class="mt-3 grid gap-3 text-xs sm:grid-cols-3"><div>被测版本：<span class="font-mono text-foreground">{{ run.target_release_key }}</span></div><div>完整评测版本：<span class="font-mono text-foreground">{{ run.evaluation_release_key || '历史组件模式' }}</span></div><div>固定 Judge：<span class="font-mono text-foreground">{{ run.judge_model || run.judge_release_key || '—' }}</span></div><div>执行器：<span class="font-mono text-foreground">{{ run.simulator_harness_release_key || '—' }}</span></div><div>候选人模拟器：<span class="font-mono text-foreground">{{ run.candidate_simulator_release_key || '—' }}</span></div><div>对比组：<span class="font-mono text-foreground">{{ run.comparison_group || '—' }}</span></div></div><div v-if="run.snapshot?.evaluation_release?.manifest" class="mt-4 rounded-lg bg-muted/40 p-3 text-xs"><div class="font-medium">本次快照已固定的关键指标</div><div class="mt-2 flex flex-wrap gap-2"><span v-if="run.snapshot.evaluation_release.manifest.tool_evaluation?.enabled" class="rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-700">工具调用效果</span><span v-if="run.snapshot.evaluation_release.manifest.intent_evaluation?.enabled" class="rounded-md bg-emerald-500/10 px-2 py-1 text-emerald-700">意图识别效果</span></div></div></details>
-          <p v-if="error" class="mt-4 rounded-md bg-amber-500/10 p-3 text-sm text-amber-700">{{ error }}</p>
-        </AppCard>
-
-        <AppCard class="mt-6" title="逐 Case 结果" description="先看执行状态和门禁结果；完整 transcript、工具轨迹和 Judge 原文在单个 Artifact 中查看。" no-padding>
-          <div class="overflow-x-auto"><table class="w-full min-w-[1040px] text-left text-sm"><thead class="border-b border-border/60 bg-muted/30 text-xs text-muted-foreground"><tr><th class="px-5 py-3">Case / 重跑</th><th class="px-5 py-3">执行状态</th><th class="px-5 py-3">契约</th><th class="px-5 py-3">规则指标</th><th class="px-5 py-3">硬门禁</th><th class="px-5 py-3">Judge</th><th class="px-5 py-3">混合分</th><th class="px-5 py-3">证据</th></tr></thead><tbody class="divide-y divide-border/60"><tr v-for="item in run.items" :key="item.id" class="hover:bg-muted/20"><td class="px-5 py-3"><div class="font-medium">{{ item.case_key }}</div><div class="text-xs text-muted-foreground">第 {{ item.replication_index }} 次 · seed {{ item.seed }}</div></td><td class="px-5 py-3"><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(item.status)]">{{ statusLabel(item.status) }}</span></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.contract_status) }}</td><td class="px-5 py-3 text-xs"><div>{{ deterministicSummary(item) }}</div><div class="text-[11px] text-muted-foreground">工具 / 意图 / 结构化字段</div></td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.hard_gate_status) }}</td><td class="px-5 py-3 text-xs">{{ checkStatusLabel(item.judge_status) }}</td><td class="px-5 py-3 font-mono"><div>{{ item.score == null ? '—' : Number(item.score).toFixed(3) }}</div><div class="font-sans text-[11px] text-muted-foreground">{{ scoreSummary(item) }}</div></td><td class="px-5 py-3"><Button size="sm" variant="ghost" @click="openEvidence(item)">查看证据</Button></td></tr></tbody></table></div>
-          <div v-if="!run.items?.length" class="p-8 text-center text-sm text-muted-foreground">暂无 Case 结果。</div>
-        </AppCard>
-
-        <AppCard v-if="evidenceLoading || evidenceError || itemEvidence" class="mt-6" title="Case 证据" description="查看冻结输入、生产输出、规则断言、Judge 结果和执行 Attempt。">
-          <div v-if="evidenceLoading" class="py-8 text-center text-sm text-muted-foreground">正在加载 Case 证据...</div>
-          <p v-else-if="evidenceError" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{{ evidenceError }}</p>
-          <div v-else-if="itemEvidence" class="space-y-4 text-sm">
-            <div class="grid gap-4 lg:grid-cols-2">
-              <div class="rounded-lg bg-muted/40 p-3"><div class="font-medium">候选人可见输入</div><pre class="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.case?.input_snapshot || {}, null, 2) }}</pre></div>
-              <div class="rounded-lg bg-muted/40 p-3"><div class="font-medium">确定性契约</div><pre class="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.case?.contract || {}, null, 2) }}</pre></div>
-            </div>
-            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Agent 输出 / 轨迹</div><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.item?.result?.observation?.payload || {}, null, 2) }}</pre></div>
-            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Hard Gate 证据</div><div class="mt-2 space-y-2"><div v-for="assertion in itemEvidence.item?.result?.observation?.hard_assertions || []" :key="assertion.id" class="rounded-md bg-muted/40 p-2 text-xs"><span :class="assertion.passed ? 'text-emerald-600' : 'text-destructive'">{{ assertion.passed ? '通过' : '失败' }}</span><span class="ml-2 font-medium">{{ assertion.id }}</span><span class="ml-2 text-muted-foreground">{{ assertion.evidence }}</span></div><div v-if="!itemEvidence.item?.result?.observation?.hard_assertions?.length" class="text-xs text-muted-foreground">没有断言记录。</div></div></div>
-            <div class="grid gap-4 lg:grid-cols-2">
-              <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Judge 结果</div><pre class="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{{ JSON.stringify(itemEvidence.item?.result?.score || {}, null, 2) }}</pre></div>
-              <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Attempt 记录</div><div v-for="attempt in itemEvidence.attempts || []" :key="attempt.id" class="mt-2 rounded-md bg-muted/40 p-2 text-xs"><div class="font-medium">Attempt #{{ attempt.attempt_index }} · {{ attempt.status }}</div><pre class="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(attempt.raw_observation || {}, null, 2) }}</pre></div></div>
-            </div>
-            <div class="rounded-lg border border-border/60 p-3"><div class="font-medium">Artifact 索引</div><div v-if="!itemEvidence.artifacts?.length" class="mt-2 text-xs text-muted-foreground">暂无独立 Artifact。</div><div v-for="artifact in itemEvidence.artifacts || []" :key="artifact.id" class="mt-2 text-xs text-muted-foreground">{{ artifact.artifact_type }} · {{ artifact.storage_path }} · {{ artifact.digest }}</div></div>
-          </div>
-        </AppCard>
-      </template>
+          <span class="ml-auto text-lg font-semibold">{{ progress }}%</span>
+        </div>
+        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <EvalProgressBar :value="progress" size="sm" />
+        </div>
+      </div>
     </div>
+
+    <!-- 分数汇总 + 阶段指示器 + 版本信息 -->
+    <div v-if="run && !loading" class="mx-auto w-full max-w-[1600px] px-4 pb-4 sm:px-6 lg:px-8">
+      <div v-if="run.summary?.metric_summary" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div v-if="run.summary.metric_summary.score" class="rounded-lg bg-primary/5 p-3 text-xs">
+          <div class="font-medium">混合主分（Run 汇总）</div>
+          <div class="mt-1 text-muted-foreground">最终 {{ run.summary.metric_summary.score.final_mean == null ? '—' : Number(run.summary.metric_summary.score.final_mean).toFixed(3) }} · 规则 {{ run.summary.metric_summary.score.deterministic_mean == null ? '—' : Number(run.summary.metric_summary.score.deterministic_mean).toFixed(3) }} · Judge {{ run.summary.metric_summary.score.judge_mean == null ? '—' : Number(run.summary.metric_summary.score.judge_mean).toFixed(3) }}</div>
+        </div>
+        <div v-if="run.summary.metric_summary.tool" class="rounded-lg bg-muted/40 p-3 text-xs">
+          <div class="font-medium">工具调用效果</div>
+          <div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.tool.call_count }} 次调用 · {{ run.summary.metric_summary.tool.failed_call_count }} 次失败</div>
+        </div>
+        <div v-if="run.summary.metric_summary.intent" class="rounded-lg bg-muted/40 p-3 text-xs">
+          <div class="font-medium">意图识别效果</div>
+          <div class="mt-1 text-muted-foreground">{{ run.summary.metric_summary.intent.observed_turn_count }} 轮 · 覆盖率 {{ run.summary.metric_summary.intent.intent_coverage == null ? '—' : `${Math.round(run.summary.metric_summary.intent.intent_coverage * 100)}%` }}</div>
+        </div>
+        <div v-if="run.summary.metric_summary.content" class="rounded-lg bg-muted/40 p-3 text-xs">
+          <div class="font-medium">结构化抽取</div>
+          <div class="mt-1 text-muted-foreground">字段覆盖 {{ Math.round(run.summary.metric_summary.content.field_coverage * 100) }}% · 题目召回 {{ Math.round((run.summary.metric_summary.content.question_recall || 0) * 100) }}%</div>
+        </div>
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div aria-live="polite" v-for="(phase, index) in phases" :key="phase.key" :class="['rounded-lg border px-3 py-2', phaseClass(index)]">
+          <div class="flex items-center gap-2 text-xs font-medium"><component :is="phaseIcon(index)" class="size-3.5" />{{ phase.label }}</div>
+          <div class="mt-1 text-[11px] opacity-80">{{ index < phaseIndex ? '已完成' : index === phaseIndex ? '当前阶段' : '等待中' }}</div>
+        </div>
+      </div>
+      <details class="mt-4 rounded-lg border border-border/60 px-3 py-2">
+        <summary class="cursor-pointer text-xs font-medium text-muted-foreground">查看本次评测绑定的版本</summary>
+        <div class="mt-3 grid gap-3 text-xs sm:grid-cols-3">
+          <div>被测版本：<span class="font-mono text-foreground">{{ run.target_release_key }}</span></div>
+          <div>完整评测版本：<span class="font-mono text-foreground">{{ run.evaluation_release_key || '历史组件模式' }}</span></div>
+          <div>固定 Judge：<span class="font-mono text-foreground">{{ run.judge_model || run.judge_release_key || '—' }}</span></div>
+          <div>执行器：<span class="font-mono text-foreground">{{ run.simulator_harness_release_key || '—' }}</span></div>
+          <div>候选人模拟器：<span class="font-mono text-foreground">{{ run.candidate_simulator_release_key || '—' }}</span></div>
+          <div>对比组：<span class="font-mono text-foreground">{{ run.comparison_group || '—' }}</span></div>
+        </div>
+      </details>
+    </div>
+
+    <!-- 主工作区 -->
+    <div v-if="loading" class="flex flex-1 items-center justify-center"><AsyncLoading /></div>
+    <p v-else-if="error && !run" class="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
+    <template v-else-if="run">
+      <!-- 移动端 Case 切换下拉 -->
+      <div class="mx-auto w-full max-w-[1600px] px-4 pb-2 md:hidden">
+        <label class="flex items-center gap-2 text-sm">
+          <span class="shrink-0 text-xs text-muted-foreground">Case：</span>
+          <Select v-model="activeCaseId" @update:model-value="onMobileSelect">
+  <SelectTrigger class="flex-1">
+    <SelectValue placeholder="选择 Case" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem v-for="item in filteredItems" :key="item.id" :value="String(item.id)">
+      {{ item.case_key }}
+    </SelectItem>
+  </SelectContent>
+</Select>
+        </label>
+      </div>
+      <div class="flex flex-1 min-h-0 mx-auto w-full max-w-[1600px]">
+        <div class="hidden w-64 shrink-0 border-r border-border/60 md:block">
+          <EvalCaseNavigator :items="run.items || []" :active-id="activeCaseId" sort-mode="priority" @select="id => { const item = (run.items || []).find(i => i.id === id); if (item) loadEvidence(item) }" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <EvalEvidencePanel :item="run.items?.find(i => i.id === activeCaseId)" :evidence="evidence" :loading="evidenceLoading" :error="evidenceError" />
+        </div>
+      </div>
+      <p v-if="error" class="mx-4 mb-4 rounded-md bg-amber-500/10 p-3 text-sm text-amber-700">{{ error }}</p>
+    </template>
   </div>
 </template>

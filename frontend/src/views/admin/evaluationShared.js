@@ -71,8 +71,7 @@ export const EVALUATION_TARGETS = [
 ]
 
 export const EVALUATION_FLOW_STEPS = [
-  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁', route: '/admin/evals/releases' },
-  { key: 'benchmarks', keys: ['EvalBenchmarks', 'admin-evals-benchmarks'], label: 'Benchmark', description: '决定测什么', route: '/admin/evals/benchmarks' },
+  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁与测什么', route: '/admin/evals/releases' },
   { key: 'experiments', keys: ['EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
   { key: 'results', keys: ['EvalResults', 'admin-evals-results'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/results' },
   { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
@@ -147,4 +146,30 @@ export function formatDate(value) {
 export function runProgress(run) {
   if (!run?.total_items) return 0
   return Math.round(((run.completed_items || 0) + (run.failed_items || 0)) / run.total_items * 100)
+}
+
+export function casePrioritySort(items) {
+  if (!items) return []
+  const priority = (item) => {
+    if (item.status === 'failed') return 0
+    if (item.status === 'completed' && item.hard_gate_status === 'failed') return 1
+    if (item.status === 'completed' && item.judge_status === 'pending') return 2
+    if (item.status === 'running' || item.status === 'queued') return 3
+    return 4
+  }
+  return [...items].sort((a, b) => priority(a) - priority(b))
+}
+
+
+export const CASE_KEYBOARD_SHORTCUTS = {
+  a: 'a',
+  b: 'b',
+  tie: 'tie',
+  both_fail: 'both_fail',
+}
+export function scoreBarColorClass(score) {
+  if (score == null) return 'bg-muted'
+  if (score >= 0.8) return 'bg-emerald-500'
+  if (score >= 0.5) return 'bg-amber-500'
+  return 'bg-destructive'
 }

@@ -1,3 +1,4 @@
+import EvalScoreBar from '@/components/business/EvalScoreBar.vue'
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ArrowLeft, Ban, Radio, RefreshCw } from '@lucide/vue'
@@ -121,6 +122,7 @@ onUnmounted(() => abortController.abort())
                 <div class="mt-1 text-xs text-muted-foreground">执行状态：{{ statusLabel(run.status) }} · 创建于 {{ formatDate(run.created_at) }}</div>
               </div>
               <div class="w-48"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 rounded-full bg-muted"><div class="h-full rounded-full bg-primary" :style="{ width: `${runProgress(run)}%` }" /></div></div>
+              <div class="w-48"><EvalScoreBar :deterministic="run.score?.deterministic_mean" :judge="run.score?.judge_mean" :final="run.score?.final_mean" /></div>
               <Button size="sm" variant="outline" @click="openRun(run)">查看 Run 详情</Button>
             </div>
           </div>

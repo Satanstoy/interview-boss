@@ -357,6 +357,52 @@ async def overview(admin: dict = Depends(get_admin_user)):
                 LIMIT 20
                 """
             ).fetchall()
+            all_runs = conn.execute(
+                """
+                SELECT r.id, r.status, r.summary_json, tr.target_type, tr.release_key
+                FROM eval_runs r
+                JOIN eval_releases tr ON tr.id = r.target_release_id
+                ORDER BY r.id
+                """
+            ).fetchall()
+            by_target: dict[str, dict[str, Any]] = {}
+            for run in all_runs:
+                tt = run["target_type"] or "未分类"
+                agg = by_target.setdefault(
+                    tt,
+                    {
+                        "target_type": tt,
+                        "target_release_key": run["release_key"],
+                        "run_count": 0,
+                        "passed_count": 0,
+                        "failed_count": 0,
+                        "pending_count": 0,
+                        "total_score_sum": 0.0,
+                        "scored_run_count": 0,
+                    },
+                )
+                agg["run_count"] += 1
+                quality = _quality_status(conn, run["id"], run["status"])
+                if quality == "passed":
+                    agg["passed_count"] += 1
+                elif quality == "failed":
+                    agg["failed_count"] += 1
+                else:
+                    agg["pending_count"] += 1
+                summary = _decode_json(run["summary_json"], {})
+                final_mean = (summary.get("metric_summary") or {}).get("score") or {}
+                final_mean = final_mean.get("final_mean")
+                if final_mean is not None:
+                    agg["total_score_sum"] += float(final_mean)
+                    agg["scored_run_count"] += 1
+            for agg in by_target.values():
+                agg["avg_score"] = (
+                    round(agg["total_score_sum"] / agg["scored_run_count"], 3)
+                    if agg["scored_run_count"]
+                    else None
+                )
+                agg.pop("total_score_sum", None)
+                agg.pop("scored_run_count", None)
             return {
                 "counts": {row["status"]: row["count"] for row in counts},
                 "latest_runs": [
@@ -373,6 +419,7 @@ async def overview(admin: dict = Depends(get_admin_user)):
                     "total": sum(row["review_count"] for row in review_rows),
                     "comparison_groups": [dict(row) for row in review_rows],
                 },
+                "by_target": sorted(by_target.values(), key=lambda x: x["target_type"]),
             }
 
     return await run_db(_query)
@@ -971,7 +1018,8 @@ async def list_runs(
             rows = conn.execute(
                 f"SELECT r.id, r.status, r.total_items, r.completed_items, r.failed_items, "
                 f"r.comparison_group, r.created_at, r.started_at, r.finished_at, "
-                f"tr.release_key AS target_release_key, "
+                f"r.summary_json, "
+                f"tr.release_key AS target_release_key, tr.target_type, "
                 f"COALESCE(er.release_key, br.release_key) AS evaluation_release_key, "
                 f"br.release_key AS benchmark_suite_release_key "
                 f"FROM eval_runs r JOIN eval_releases tr ON tr.id = r.target_release_id "
@@ -985,6 +1033,13 @@ async def list_runs(
             for row in rows:
                 item = dict(row)
                 item["quality_status"] = _quality_status(conn, row["id"], row["status"])
+                summary = _decode_json(item.pop("summary_json", "{}"), {})
+                metric_score = (summary.get("metric_summary") or {}).get("score") or {}
+                item["score"] = {
+                    "final_mean": metric_score.get("final_mean"),
+                    "deterministic_mean": metric_score.get("deterministic_mean"),
+                    "judge_mean": metric_score.get("judge_mean"),
+                } or None
                 result.append(item)
             return result
 

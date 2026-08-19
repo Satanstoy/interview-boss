@@ -1,0 +1,14 @@
+severity	dim	location	title	fix	effort	confidence
+3	D1	backend/app/routers/questions_pkg/mutations.py	yagni: 609-line router contains full business logic (SQL/JSON/LLM)	Extract business logic to services/question_mutations_service.py, keep only HTTP parsing	large	certain
+3	D1	backend/app/routers/questions_pkg/bulk.py	yagni: 529-line router with direct DB access and business rules	Extract to services/question_bulk_service.py	large	certain
+3	D1	backend/app/routers/bank_build.py	yagni: 416-line router mixing SSE streaming with job management	Extract job management to services/bank_build_service.py	large	certain
+2	D1	backend/app/routers/questions.py:28	shrink: _parse_answer_sources silent swallow of all exceptions	Catch (json.JSONDecodeError, TypeError) instead of bare Exception	small	certain
+2	D1	backend/app/services/question_draw_service.py	shrink: duplicate get_db_connection/get_dynamic_frequency_sql wrappers	Use db.connection directly, remove redundant local wrappers	small	certain
+2	D3	backend/tests/bank/	No integration tests for merge_question and split_question endpoints	Add integration tests that exercise the full endpoint with test_db	medium	certain
+2	D3	backend/tests/services/clustering/	Missing test for question_variant_reconciliation race condition	Add concurrent claim test with two threads racing to claim same question	medium	certain
+2	D3	backend/tests/bank/	No test for SSE stream_job_progress timeout/disconnect behavior	Add test that simulates client disconnect during SSE streaming	small	certain
+2	D4	backend/app/routers/bank_build.py:62	SSE endpoint leaks job error message without sanitization	Sanitize error message before sending to client, log full error server-side	small	certain
+2	D4	backend/app/routers/questions_pkg/mutations.py	split/merge endpoints accept raw JSON for original_questions without size limit	Add Pydantic validation with max_items constraint on original_questions arrays	small	certain
+2	D14	backend/app/routers/questions_pkg/share.py:49-62	find_matching_public_question scans ALL public questions per share	Add index on (owner_id, status, job_position, deleted_at) for performance	medium	certain
+2	D14	backend/app/services/question_draw_service.py:200-217	embedding_supplement uses full table scan for cosine similarity	Use FAISS index manager for vector search instead of Python loop	medium	probable
+2	D14	backend/app/routers/questions_pkg/bulk.py:255	delete_original_question catches Exception but re-raises as generic 500	Log specific exception type and message for debugging	small	certain
