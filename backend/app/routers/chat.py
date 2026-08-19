@@ -342,6 +342,23 @@ async def send_message(
     client_request_id = req.client_request_id or str(uuid.uuid4())
     turn_content = req.content
 
+    # Redis 快速幂等：同一 client_request_id 的重复请求直接拒绝，
+    # 避免走完整 DB 事务。Redis 不可用时 fail-open，由 DB 级幂等兜底。
+    from app.core.cache import try_claim_chat_turn
+
+    if not req.regenerate_message_id:
+        claimed = await try_claim_chat_turn(
+            conversation_id, client_request_id, user["id"]
+        )
+        if not claimed:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "TURN_IDEMPOTENCY_CONFLICT",
+                    "message": "该消息已在处理中，请勿重复发送。",
+                },
+            )
+
     # 回合占用和用户消息必须在同一个事务内完成，避免并发请求先后通过检查。
     try:
         if req.regenerate_message_id:
@@ -622,6 +639,10 @@ async def send_message(
             error_msg = "抱歉，处理您的消息时出现错误，请稍后重试。"
             yield f"data: {json.dumps({'type': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
         finally:
+            # 释放 Redis 幂等锁（让后续相同 client_request_id 的请求可以重试）
+            from app.core.cache import release_chat_turn_claim
+
+            await release_chat_turn_claim(conversation_id, client_request_id)
             try:
                 await run_db(
                     lambda: chat_service.cancel_chat_turn(

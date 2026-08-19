@@ -254,3 +254,49 @@ async def worker_status_get(name: str) -> str | None:
     except (RedisError, TypeError, ValueError):
         return None
 
+
+# ── Chat turn idempotency ─────────────────────────────────────────────
+_CHAT_TURN_IDEMPOTENCY_PREFIX = "interview-boss:chat:turn-idempotency"
+_CHAT_TURN_IDEMPOTENCY_TTL = 600  # 10 minutes
+
+
+async def try_claim_chat_turn(
+    conversation_id: str, client_request_id: str, user_id: int
+) -> bool:
+    """Attempt to atomically claim a chat turn via Redis SET NX.
+
+    Returns True if this is the first request (turn claimed), False if a
+    duplicate request was detected.  Fail-open: returns True when Redis is
+    unavailable so the DB-level idempotency still works as before.
+    """
+    client = get_cache_client()
+    if client is None:
+        return True
+    key = f"{_CHAT_TURN_IDEMPOTENCY_PREFIX}:{conversation_id}:{client_request_id}"
+    try:
+        # NX = only set if key does not exist; EX = auto-expire
+        result = await client.set(
+            key, str(user_id), nx=True, ex=_CHAT_TURN_IDEMPOTENCY_TTL
+        )
+        return result is not None  # True if SET succeeded
+    except (RedisError, TypeError, ValueError):
+        # Fail-open: let DB-level idempotency handle it
+        return True
+
+
+async def release_chat_turn_claim(
+    conversation_id: str, client_request_id: str
+) -> None:
+    """Release the idempotency claim after the turn completes or fails.
+
+    Optional cleanup; the TTL will also expire the key eventually.
+    """
+    client = get_cache_client()
+    if client is None:
+        return
+    key = f"{_CHAT_TURN_IDEMPOTENCY_PREFIX}:{conversation_id}:{client_request_id}"
+    try:
+        await client.delete(key)
+    except (RedisError, TypeError, ValueError):
+        pass
+
