@@ -4,7 +4,7 @@ import { ChevronDown, GitBranch } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { fetchEvaluationBenchmarks, fetchEvaluationReleases } from '@/services/evaluationApi.js'
-import { formatDate, releaseTypeMeta, statusClass, statusLabel } from './evaluationShared.js'
+import { formatDate, releaseTypeMeta, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import { Badge } from '@/components/ui/badge'
 
@@ -65,7 +65,9 @@ function toggle(id) {
 
 async function load() {
   try {
-    releases.value = (await fetchEvaluationReleases()).releases || []
+    const [releaseData, benchmarkData] = await Promise.all([fetchEvaluationReleases(), fetchEvaluationBenchmarks()])
+    releases.value = releaseData.releases || []
+    benchmarks.value = benchmarkData.suites || []
   } catch (err) {
     error.value = err.message || '版本列表加载失败'
   } finally {

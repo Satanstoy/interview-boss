@@ -1,14 +1,14 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Ban, CheckCircle2, Circle, Radio } from '@lucide/vue'
-import AppCard from '@/components/common/AppCard.vue'
+import { ArrowLeft, Ban, CheckCircle2, Circle, Radio, RefreshCw } from '@lucide/vue'
 import EvalCaseNavigator from '@/components/business/EvalCaseNavigator.vue'
 import EvalEvidencePanel from '@/components/business/EvalEvidencePanel.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationRun, fetchEvaluationItem, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
-import { casePrioritySort, checkStatusLabel, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { casePrioritySort, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
 import { Badge } from '@/components/ui/badge'
@@ -65,40 +65,6 @@ function phaseIcon(index) {
   return Circle
 }
 
-function metrics(item) {
-  return item?.result?.observation?.payload || {}
-}
-
-function deterministicSummary(item) {
-  const payload = metrics(item)
-  if (payload.tool_metrics || payload.intent_metrics) {
-    return `工具 ${payload.tool_metrics?.call_count || 0} 次 · 意图覆盖 ${payload.intent_metrics?.intent_coverage == null ? '—' : `${Math.round(payload.intent_metrics.intent_coverage * 100)}%`}`
-  }
-  if (payload.metrics?.field_coverage != null) {
-    return `字段覆盖 ${Math.round(payload.metrics.field_coverage * 100)}% · 题目召回 ${Math.round((payload.metrics.question_recall || 0) * 100)}%`
-  }
-  if (payload.metrics?.source_fact_coverage != null) {
-    return `事实覆盖 ${Math.round(payload.metrics.source_fact_coverage * 100)}% · 岗位匹配 ${Math.round((payload.metrics.target_alignment || 0) * 100)}%`
-  }
-  if (payload.metrics?.taxonomy_validity != null) {
-    return `分类合法 ${Math.round(payload.metrics.taxonomy_validity * 100)}% · 标签准确 ${Math.round((payload.metrics.classification_accuracy || 0) * 100)}%`
-  }
-  return '—'
-}
-
-function scoreSummary(item) {
-  const score = item?.result?.score || {}
-  const sourceLabels = {
-    hybrid: '混合',
-    deterministic_only: '规则独立',
-    judge_only: 'Judge 独立',
-    deterministic_pending_judge: '规则已算',
-  }
-  const source = sourceLabels[score.score_source] || '未计算'
-  const deterministic = score.deterministic_score == null ? '—' : Number(score.deterministic_score).toFixed(3)
-  const judge = score.judge_score == null ? '—' : Number(score.judge_score).toFixed(3)
-  return `${source} · 规则 ${deterministic} · Judge ${judge}`
-}
 
 async function load() {
   try {
@@ -240,6 +206,12 @@ onUnmounted(() => {
           <EvalProgressBar :value="progress" size="sm" />
         </div>
       </div>
+      <!-- SSE 重连状态提示 -->
+      <div v-if="error && !terminal" class="mx-auto max-w-[1600px] px-4 py-1.5 sm:px-6 lg:px-8">
+        <div class="flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700">
+          <RefreshCw class="size-3 animate-spin" />{{ error }}
+        </div>
+      </div>
     </div>
 
     <!-- 分数汇总 + 阶段指示器 + 版本信息 -->
@@ -294,15 +266,15 @@ onUnmounted(() => {
     <SelectValue placeholder="选择 Case" />
   </SelectTrigger>
   <SelectContent>
-    <SelectItem v-for="item in filteredItems" :key="item.id" :value="String(item.id)">
-      {{ item.case_key }}
+    <SelectItem v-for="item in sortedItems" :key="item.id" :value="String(item.id)">
+      <span :title="item.case_key">{{ item.case_key }}</span>
     </SelectItem>
   </SelectContent>
 </Select>
         </label>
       </div>
       <div class="flex flex-1 min-h-0 mx-auto w-full max-w-[1600px]">
-        <div class="hidden w-64 shrink-0 border-r border-border/60 md:block">
+        <div class="hidden w-72 shrink-0 border-r border-border/60 md:block">
           <EvalCaseNavigator :items="run.items || []" :active-id="activeCaseId" sort-mode="priority" @select="id => { const item = (run.items || []).find(i => i.id === id); if (item) loadEvidence(item) }" />
         </div>
         <div class="flex-1 min-w-0">

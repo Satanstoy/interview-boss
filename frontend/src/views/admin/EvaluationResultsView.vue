@@ -1,12 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, RefreshCw } from '@lucide/vue'
+import { RefreshCw } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { evaluationTargetLabel, formatDate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { ArrowRight } from '@lucide/vue'
+import { fetchEvaluationExperiments, fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
+import { buildByTargetSort, evaluationTargetLabel, formatDate, passRate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalScoreBar from '@/components/business/EvalScoreBar.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
@@ -14,6 +16,7 @@ import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
 const router = useRouter()
 const overview = ref(null)
 const runs = ref([])
+const experiments = ref([])
 const loading = ref(true)
 const error = ref('')
 const statusFilter = ref('all')
@@ -58,18 +61,7 @@ const targetOptions = computed(() => {
   return ['__all__', ...set]
 })
 
-const byTargetSort = computed(() => {
-  return [...byTarget.value].sort((a, b) => {
-    const ra = a.failed_count / Math.max(a.run_count, 1)
-    const rb = b.failed_count / Math.max(b.run_count, 1)
-    return rb - ra
-  })
-})
-
-function passRate(item) {
-  if (!item.run_count) return 0
-  return Math.round((item.passed_count / item.run_count) * 100)
-}
+const byTargetSort = computed(() => buildByTargetSort(byTarget.value))
 
 function qualityBadgeClass(q) {
   if (q === 'passed') return 'text-emerald-600 bg-emerald-500/10'
@@ -88,9 +80,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [summary, runData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns()])
+    const [summary, runData, experimentData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns(), fetchEvaluationExperiments()])
     overview.value = summary
     runs.value = runData.runs || []
+    experiments.value = experimentData.experiments || []
   } catch (err) {
     error.value = err.message || '评测结果加载失败'
   } finally {
@@ -180,9 +173,9 @@ onMounted(load)
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-medium">评测 #{{ run.id }}</span>
-                  <span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span>
+                  <Badge :class="statusClass(run.status)">{{ statusLabel(run.status) }}</Badge>
                   <span class="text-[11px] text-muted-foreground">质量</span>
-                  <span :class="['rounded-full px-2 py-0.5 text-xs', qualityBadgeClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span>
+                  <Badge :class="qualityBadgeClass(run.quality_status)">{{ qualityStatusLabel(run.quality_status) }}</Badge>
                   <span v-if="run.target_type" class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{{ evaluationTargetLabel(run.target_type) }}</span>
                   <span v-if="run.comparison_group" class="rounded-full bg-blue-500/10 px-2 py-0.5 text-xs text-blue-700">对比组 {{ run.comparison_group }}</span>
                 </div>
@@ -193,6 +186,18 @@ onMounted(load)
                 <div class="flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div>
               </div>
             </Button>
+          </div>
+        </AppCard>
+
+        <!-- 批量实验历史 -->
+        <AppCard class="mt-6" title="批量实验历史" description="查看一键启动的 Experiment 汇总进度，可进入任意子 Run 查看证据。" no-padding>
+          <div class="flex items-center justify-end border-b border-border/60 p-3"><Button size="sm" variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button></div>
+          <div v-if="!experiments.length" class="p-8 text-center text-sm text-muted-foreground">还没有批量实验记录。</div>
+          <div v-else class="divide-y divide-border/60">
+            <button v-for="experiment in experiments.slice(0, 10)" :key="experiment.id" type="button" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/experiments/${experiment.id}`)">
+              <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">实验 #{{ experiment.id }}</span><span class="text-[11px] text-muted-foreground">执行</span><Badge :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge><span class="text-[11px] text-muted-foreground">质量</span><Badge :class="statusClass(experiment.quality_status)">{{ qualityStatusLabel(experiment.quality_status) }}</Badge></div><div class="mt-1 text-xs text-muted-foreground">{{ experiment.total_runs }} 个子 Run · {{ (experiment.completed_runs || 0) + (experiment.failed_runs || 0) + (experiment.cancelled_runs || 0) }}/{{ experiment.total_runs }} 已完成 · {{ formatDate(experiment.created_at) }}</div></div>
+              <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
+            </button>
           </div>
         </AppCard>
       </template>

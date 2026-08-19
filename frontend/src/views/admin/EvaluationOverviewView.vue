@@ -5,25 +5,18 @@ import { Activity, CheckCircle2, Clock3, FlaskConical, XCircle } from '@lucide/v
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
-import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { evaluationTargetLabel, formatDate, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { fetchEvaluationOverview } from '@/services/evaluationApi.js'
+import { buildByTargetSort, evaluationTargetLabel, passRate } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
-import { Badge } from '@/components/ui/badge'
 
 const router = useRouter()
 const overview = ref(null)
 const loading = ref(true)
 const error = ref('')
 const humanReviews = computed(() => overview.value?.human_reviews || { total: 0, comparison_groups: [] })
-const runs = ref([])
 const byTarget = computed(() => overview.value?.by_target || [])
-const byTargetSort = computed(() => [...byTarget.value].sort((a, b) => (b.failed_count / Math.max(b.run_count, 1)) - (a.failed_count / Math.max(a.run_count, 1))))
-const failedRuns = computed(() => runs.value.filter(r => r.quality_status === 'failed' || r.status === 'failed').slice(0, 6))
-function passRate(item) {
-  if (!item.run_count) return 0
-  return Math.round((item.passed_count / item.run_count) * 100)
-}
+const byTargetSort = computed(() => buildByTargetSort(byTarget.value))
 
 const cards = computed(() => [
   { label: '已完成', value: overview.value?.counts?.completed || 0, icon: CheckCircle2, tone: 'text-emerald-600' },
@@ -36,9 +29,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [overviewData, runData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns()])
-    overview.value = overviewData
-    runs.value = runData.runs || []
+    overview.value = await fetchEvaluationOverview()
   } catch (err) {
     error.value = err.message || '评测总览加载失败'
   } finally {
@@ -100,15 +91,11 @@ onMounted(load)
           </div>
         </AppCard>
 
-        <!-- 待处理的失败 Run -->
-        <AppCard v-if="failedRuns.length" class="mt-6" title="待处理的失败评测" description="这些评测需要管理员查看原因并决定重跑或接受。">
-          <div class="divide-y divide-border/60">
-            <Button v-for="run in failedRuns" :key="run.id" variant="ghost" size="sm" class="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
-              <span class="font-medium">评测 #{{ run.id }}</span>
-              <Badge variant="default">{{ statusLabel(run.status) }}</Badge>
-              <span v-if="run.target_type" class="text-xs text-muted-foreground">{{ evaluationTargetLabel(run.target_type) }}</span>
-              <span class="ml-auto text-xs text-muted-foreground">{{ formatDate(run.created_at) }}</span>
-            </Button>
+        <!-- 查看详细结果 -->
+        <AppCard class="mt-6" title="查看详细结果" description="查看每次完整 E2E 的实时进度、逐 Case 结果和最终聚合状态。">
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-muted-foreground">在「评测结果」页面可以筛选、排序所有 Run，并查看分数和进度。</p>
+            <Button variant="outline" @click="router.push('/admin/evals/results')">查看评测结果</Button>
           </div>
         </AppCard>
 

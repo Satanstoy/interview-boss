@@ -1,13 +1,15 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, CheckCircle2, Play, RefreshCw } from '@lucide/vue'
+import { CheckCircle2, Play } from '@lucide/vue'
 import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { evaluationTargetLabel, formatDate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationReleases } from '@/services/evaluationApi.js'
+import { evaluationTargetLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
 import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
@@ -16,8 +18,6 @@ const router = useRouter()
 const route = useRoute()
 const releases = ref([])
 const capabilities = ref([])
-const runs = ref([])
-const experiments = ref([])
 const benchmarks = ref([])
 const loading = ref(true)
 const submitting = ref(false)
@@ -137,17 +137,13 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [releaseData, runData, capabilityData, experimentData, benchmarkData] = await Promise.all([
+    const [releaseData, capabilityData, benchmarkData] = await Promise.all([
       fetchEvaluationReleases(),
-      fetchEvaluationRuns(),
       fetchEvaluationCapabilities(),
-      fetchEvaluationExperiments(),
       fetchEvaluationBenchmarks(),
     ])
     releases.value = releaseData.releases || []
-    runs.value = runData.runs || []
     capabilities.value = capabilityData.targets || []
-    experiments.value = experimentData.experiments || []
     benchmarks.value = benchmarkData.suites || []
     selectedExperimentTargets.value = runnableCapabilities.value.map(item => item.target_type)
     chooseDefaults()
@@ -309,28 +305,13 @@ onMounted(load)
           </div>
         </AppCard>
 
-        <AppCard title="历史评测" description="选择一条记录查看实时进度、逐 Case 证据和最终聚合结果。" no-padding>
-          <div class="flex items-center justify-end border-b border-border/60 p-3"><Button size="sm" variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button></div>
-          <div v-if="!runs.length" class="p-8 text-center text-sm text-muted-foreground">还没有评测记录。</div>
-          <div v-else class="divide-y divide-border/60">
-            <Button v-for="run in runs" :key="run.id" variant="ghost" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/runs/${run.id}`)">
-              <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">评测 #{{ run.id }}</span><span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span><span v-if="run.comparison_group" class="text-xs text-muted-foreground">对比组：{{ run.comparison_group }}</span></div><div class="mt-1 text-xs text-muted-foreground">被测：{{ run.target_release_key }} · 评测：{{ run.evaluation_release_key || '历史组件模式' }} · {{ formatDate(run.created_at) }}</div></div>
-              <div class="w-36"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 rounded-full bg-muted"><EvalProgressBar :value="runProgress(run)" size="sm" /></div></div>
-            </button>
+        <AppCard class="mt-6" title="查看历史结果" description="查看所有评测 Run 和批量实验的进度、分数和逐 Case 证据。">
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-muted-foreground">在「评测结果」页面可以筛选、排序所有 Run 和 Experiment。</p>
+            <Button variant="outline" @click="router.push('/admin/evals/results')">查看评测结果</Button>
           </div>
         </AppCard>
       </div>
-        <AppCard title="批量实验历史" description="查看一键启动的 Experiment 汇总进度，可进入任意子 Run 查看证据。" no-padding>
-          <div class="flex items-center justify-end border-b border-border/60 p-3"><Button size="sm" variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button></div>
-          <div v-if="!experiments.length" class="p-8 text-center text-sm text-muted-foreground">还没有批量实验记录。</div>
-          <div v-else class="divide-y divide-border/60">
-            <button v-for="experiment in experiments.slice(0, 10)" :key="experiment.id" type="button" class="flex w-full items-center gap-4 p-4 text-left hover:bg-muted/40" @click="router.push(`/admin/evals/experiments/${experiment.id}`)">
-              <div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="font-medium">实验 #{{ experiment.id }}</span><span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(experiment.status)]">{{ statusLabel(experiment.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(experiment.quality_status)]">{{ qualityStatusLabel(experiment.quality_status) }}</span></div><div class="mt-1 text-xs text-muted-foreground">{{ experiment.total_runs }} 个子 Run · {{ (experiment.completed_runs || 0) + (experiment.failed_runs || 0) + (experiment.cancelled_runs || 0) }}/{{ experiment.total_runs }} 已完成 · {{ formatDate(experiment.created_at) }}</div></div>
-              <ArrowRight class="size-4 shrink-0 text-muted-foreground" />
-            </button>
-          </div>
-        </AppCard>
-
     </div>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup>
-const props = defineProps({
+defineProps({
   deterministic: { type: Number, default: null },
   judge: { type: Number, default: null },
   final: { type: Number, default: null },

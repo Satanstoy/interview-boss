@@ -1,10 +1,12 @@
-import EvalScoreBar from '@/components/business/EvalScoreBar.vue'
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ArrowLeft, Ban, Radio, RefreshCw } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppCard from '@/components/common/AppCard.vue'
+import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
+import EvalScoreBar from '@/components/business/EvalScoreBar.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cancelEvaluationExperiment, fetchEvaluationExperiment, streamEvaluationExperiment } from '@/services/evaluationApi.js'
 import { evaluationTargetLabel, formatDate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
@@ -96,13 +98,13 @@ onUnmounted(() => abortController.abort())
       <template v-else-if="experiment">
         <AppCard class="mt-6" title="Experiment 总览" description="执行进度按已完成或失败的 Case 计算；质量是否通过由各子 Run 的 Hard Gate 和 Judge 结果决定。">
           <div class="flex flex-wrap items-center gap-3">
-            <span class="text-xs text-muted-foreground">执行</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(experiment.status)]">{{ statusLabel(experiment.status) }}</span><span class="text-xs text-muted-foreground">质量</span><span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(experiment.quality_status)]">{{ qualityStatusLabel(experiment.quality_status) }}</span>
+            <span class="text-xs text-muted-foreground">执行</span><Badge :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge><span class="text-xs text-muted-foreground">质量</span><Badge :class="statusClass(experiment.quality_status)">{{ qualityStatusLabel(experiment.quality_status) }}</Badge>
             <span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span>
             <span class="text-sm text-muted-foreground">{{ experiment.total_runs }} 个子 Run</span>
             <span class="text-sm text-muted-foreground">{{ experiment.completed_runs || 0 }} 完成 · {{ experiment.failed_runs || 0 }} 失败 · {{ experiment.cancelled_runs || 0 }} 取消</span>
             <span class="ml-auto text-2xl font-semibold">{{ progress }}%</span>
           </div>
-          <div class="mt-4 h-2 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all duration-500" :style="{ width: `${progress}%` }" /></div>
+          <div class="mt-4"><EvalProgressBar :value="progress" size="md" /></div>
           <div class="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">Case 执行</span><div class="mt-1 font-medium">{{ (experiment.completed_items || 0) + (experiment.failed_items || 0) }} / {{ experiment.total_items || 0 }}</div></div>
             <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">运行参数</span><div class="mt-1 font-medium">{{ experiment.replication_count }} 次重跑 · seed {{ experiment.seed }}</div></div>
@@ -117,11 +119,11 @@ onUnmounted(() => abortController.abort())
           <div v-else class="divide-y divide-border/60">
             <div v-for="run in experiment.runs" :key="run.run_id" class="flex flex-wrap items-center gap-4 p-4">
               <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ evaluationTargetLabel(run.target_type) }}</span><span class="text-[11px] text-muted-foreground">执行</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.status)]">{{ statusLabel(run.status) }}</span><span class="text-[11px] text-muted-foreground">质量</span><span :class="['rounded-full px-2 py-0.5 text-xs', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span></div>
+                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ evaluationTargetLabel(run.target_type) }}</span><span class="text-[11px] text-muted-foreground">执行</span><Badge :class="statusClass(run.status)">{{ statusLabel(run.status) }}</Badge><span class="text-[11px] text-muted-foreground">质量</span><Badge :class="statusClass(run.quality_status)">{{ qualityStatusLabel(run.quality_status) }}</Badge></div>
                 <div class="mt-1 text-xs text-muted-foreground">Run #{{ run.run_id }} · 被测 {{ run.target_release_key }} · 评测 {{ run.evaluation_release_key || '—' }}</div>
                 <div class="mt-1 text-xs text-muted-foreground">执行状态：{{ statusLabel(run.status) }} · 创建于 {{ formatDate(run.created_at) }}</div>
               </div>
-              <div class="w-48"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><div class="h-1.5 rounded-full bg-muted"><div class="h-full rounded-full bg-primary" :style="{ width: `${runProgress(run)}%` }" /></div></div>
+              <div class="w-48"><div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><EvalProgressBar :value="runProgress(run)" size="sm" /></div>
               <div class="w-48"><EvalScoreBar :deterministic="run.score?.deterministic_mean" :judge="run.score?.judge_mean" :final="run.score?.final_mean" /></div>
               <Button size="sm" variant="outline" @click="openRun(run)">查看 Run 详情</Button>
             </div>

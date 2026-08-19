@@ -6,11 +6,11 @@ import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { createHumanReview, fetchEvaluationRun, fetchEvaluationRuns, fetchHumanReviews } from '@/services/evaluationApi.js'
 import { formatDate, reviewChoiceLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
-import { Badge } from '@/components/ui/badge'
 
 const runs = ref([])
 const route = useRoute()

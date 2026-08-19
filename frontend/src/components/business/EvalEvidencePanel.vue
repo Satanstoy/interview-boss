@@ -1,4 +1,5 @@
 <script setup>
+import { ref } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { checkStatusLabel as checkLabel } from '@/views/admin/evaluationShared.js'
 
@@ -14,6 +15,31 @@ function metrics(item) { return item?.result?.observation?.payload || {} }
 function hardAssertions(item) { return item?.result?.observation?.hard_assertions || [] }
 function assertionClass(passed) { return passed ? 'text-emerald-600 bg-emerald-500/10' : 'text-destructive bg-destructive/10' }
 function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%' }
+
+/** 提取 input_snapshot 的关键字段摘要 */
+function inputSummaryKeys(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return []
+  const keys = Object.keys(snapshot)
+  return keys.slice(0, 6) // 最多显示 6 个字段
+}
+
+/** 提取 contract 的关键摘要 */
+function contractSummary(contract) {
+  if (!contract || typeof contract !== 'object') return null
+  const hardCount = contract.hard_assertions?.length || 0
+  const rubricKeys = Object.keys(contract.rubric || {})
+  return { hardCount, rubricKeys }
+}
+
+/** 复制文本到剪贴板 */
+const copied = ref('')
+async function copyJson(data) {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+    copied.value = JSON.stringify(data).slice(0, 20)
+    setTimeout(() => { copied.value = '' }, 2000)
+  } catch { /* ignore */ }
+}
 </script>
 
 <template>
@@ -90,10 +116,56 @@ function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%' }
         <details class="rounded-lg border border-border/60 px-3 py-2">
           <summary class="cursor-pointer text-xs font-medium text-muted-foreground">高级详情（输入快照 / 契约 / Attempt / Artifact）</summary>
           <div class="mt-3 space-y-3">
-            <div v-if="evidence"><div class="mb-1 text-xs font-medium">候选人可见输入</div><pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">{{ JSON.stringify(evidence.case?.input_snapshot || {}, null, 2) }}</pre></div>
-            <div v-if="evidence"><div class="mb-1 text-xs font-medium">确定性契约</div><pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">{{ JSON.stringify(evidence.case?.contract || {}, null, 2) }}</pre></div>
-            <div v-if="evidence?.attempts?.length"><div class="mb-1 text-xs font-medium">Attempt 记录</div><div v-for="attempt in evidence.attempts" :key="attempt.id" class="rounded-md bg-muted/40 p-2 text-xs"><div class="font-medium">Attempt #{{ attempt.attempt_index }} · {{ attempt.status }}</div><pre class="mt-1 max-h-28 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(attempt.raw_observation || {}, null, 2) }}</pre></div></div>
-            <div v-if="evidence?.artifacts?.length"><div class="mb-1 text-xs font-medium">Artifact 索引</div><div v-for="artifact in evidence.artifacts" :key="artifact.id" class="text-xs text-muted-foreground">{{ artifact.artifact_type }} · {{ artifact.storage_path }}</div></div>
+            <!-- 候选人可见输入 -->
+            <div v-if="evidence">
+              <div class="mb-1 text-xs font-medium">候选人可见输入</div>
+              <div class="flex flex-wrap gap-1.5 mb-2">
+                <span v-for="key in inputSummaryKeys(evidence.case?.input_snapshot)" :key="key" class="rounded-md bg-muted px-2 py-1 text-xs">
+                  <span class="text-muted-foreground">{{ key }}:</span> {{ String(evidence.case.input_snapshot[key]).slice(0, 40) }}{{ String(evidence.case.input_snapshot[key]).length > 40 ? '...' : '' }}
+                </span>
+              </div>
+              <details class="text-xs">
+                <summary class="cursor-pointer text-muted-foreground hover:text-foreground">查看完整 JSON</summary>
+                <div class="relative mt-1">
+                  <button type="button" class="absolute top-1 right-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground" @click="copyJson(evidence.case?.input_snapshot)">{{ copied === JSON.stringify(evidence.case?.input_snapshot).slice(0, 20) ? '已复制' : '复制' }}</button>
+                  <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-muted-foreground">{{ JSON.stringify(evidence.case?.input_snapshot || {}, null, 2) }}</pre>
+                </div>
+              </details>
+            </div>
+            <!-- 确定性契约 -->
+            <div v-if="evidence">
+              <div class="mb-1 text-xs font-medium">确定性契约</div>
+              <div v-if="contractSummary(evidence.case?.contract)" class="flex flex-wrap gap-1.5 mb-2">
+                <span class="rounded-md bg-muted px-2 py-1 text-xs">硬断言 {{ contractSummary(evidence.case.contract).hardCount }} 项</span>
+                <span v-for="key in contractSummary(evidence.case.contract).rubricKeys.slice(0, 4)" :key="key" class="rounded-md bg-muted px-2 py-1 text-xs">{{ key }}</span>
+              </div>
+              <details class="text-xs">
+                <summary class="cursor-pointer text-muted-foreground hover:text-foreground">查看完整 JSON</summary>
+                <div class="relative mt-1">
+                  <button type="button" class="absolute top-1 right-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground" @click="copyJson(evidence.case?.contract)">{{ copied === JSON.stringify(evidence.case?.contract).slice(0, 20) ? '已复制' : '复制' }}</button>
+                  <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-muted-foreground">{{ JSON.stringify(evidence.case?.contract || {}, null, 2) }}</pre>
+                </div>
+              </details>
+            </div>
+            <!-- Attempt 记录 -->
+            <div v-if="evidence?.attempts?.length">
+              <div class="mb-1 text-xs font-medium">Attempt 记录</div>
+              <div v-for="attempt in evidence.attempts" :key="attempt.id" class="rounded-md bg-muted/40 p-2 text-xs mb-2">
+                <div class="font-medium">Attempt #{{ attempt.attempt_index }} · {{ attempt.status }}</div>
+                <details class="mt-1">
+                  <summary class="cursor-pointer text-muted-foreground hover:text-foreground">查看原始观察</summary>
+                  <div class="relative mt-1">
+                    <button type="button" class="absolute top-1 right-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground" @click="copyJson(attempt.raw_observation)">复制</button>
+                    <pre class="max-h-28 overflow-auto whitespace-pre-wrap text-muted-foreground">{{ JSON.stringify(attempt.raw_observation || {}, null, 2) }}</pre>
+                  </div>
+                </details>
+              </div>
+            </div>
+            <!-- Artifact 索引 -->
+            <div v-if="evidence?.artifacts?.length">
+              <div class="mb-1 text-xs font-medium">Artifact 索引</div>
+              <div v-for="artifact in evidence.artifacts" :key="artifact.id" class="text-xs text-muted-foreground">{{ artifact.artifact_type }} · {{ artifact.storage_path }}</div>
+            </div>
           </div>
         </details>
       </div>

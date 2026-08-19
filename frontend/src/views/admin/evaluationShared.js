@@ -173,3 +173,14 @@ export function scoreBarColorClass(score) {
   if (score >= 0.5) return 'bg-amber-500'
   return 'bg-destructive'
 }
+
+/** 按失败率降序排列 by_target 数组 */
+export function buildByTargetSort(byTarget) {
+  return [...byTarget].sort((a, b) => (b.failed_count / Math.max(b.run_count, 1)) - (a.failed_count / Math.max(a.run_count, 1)))
+}
+
+/** 计算通过率百分比 */
+export function passRate(item) {
+  if (!item.run_count) return 0
+  return Math.round((item.passed_count / item.run_count) * 100)
+}
