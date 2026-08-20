@@ -6,7 +6,7 @@ import AppCard from '@/components/common/AppCard.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
+import { fetchEvaluationCapabilities, fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
 import {
   buildByTargetSort,
   evaluationTargetLabel,
@@ -23,6 +23,7 @@ import EvalOutcomeDistribution from '@/components/business/EvalOutcomeDistributi
 const router = useRouter()
 const overview = ref(null)
 const runs = ref([])
+const capabilities = ref([])
 const loading = ref(true)
 const error = ref('')
 const selectedTarget = ref('__all__')
@@ -55,6 +56,33 @@ function metricCardsForTarget(target) {
 }
 
 const metricCards = computed(() => selectedTargetSummary.value ? metricCardsForTarget(selectedTargetSummary.value) : [])
+
+const evaluationScope = computed(() => {
+  const targetType = selectedTarget.value === '__all__' ? null : selectedTarget.value
+  const capability = targetType ? capabilities.value.find(item => item.target_type === targetType) : null
+  const latestRun = targetType
+    ? runs.value
+      .filter(run => run.target_type === targetType)
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0]
+    : null
+  const evaluationRelease = capability?.evaluation_release || {}
+  const harness = capability?.project_harness || {}
+  const evaluationKey = latestRun?.evaluation_release_key
+    || (latestRun ? '历史数据未记录' : evaluationRelease.release_key || '—')
+  const harnessKey = latestRun
+    ? (latestRun.project_harness_key && latestRun.project_harness_version
+        ? `${latestRun.project_harness_key}@${latestRun.project_harness_version}`
+        : '历史数据未记录')
+    : (harness.harness_key && harness.version
+        ? `${harness.harness_key}@${harness.version}`
+        : evaluationRelease.project_harness_release_key || '—')
+  return {
+    target: targetType ? evaluationTargetLabel(targetType) : '多个评测目标',
+    harness: harnessKey,
+    evaluation: evaluationKey,
+    caseCount: targetType ? (capability?.case_count || selectedDistribution.value?.total || 0) : '—',
+  }
+})
 
 const attentionCases = computed(() => {
   const cases = selectedRuns.value.flatMap(run => (
@@ -120,9 +148,14 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [summary, runData] = await Promise.all([fetchEvaluationOverview(), fetchEvaluationRuns()])
+    const [summary, runData, capabilityData] = await Promise.all([
+      fetchEvaluationOverview(),
+      fetchEvaluationRuns(),
+      fetchEvaluationCapabilities(),
+    ])
     overview.value = summary
     runs.value = runData.runs || []
+    capabilities.value = capabilityData.targets || []
     if (selectedTarget.value === '__all__' && targetSummaries.value.length) {
       selectedTarget.value = targetSummaries.value[0].target_type
     }
@@ -157,6 +190,27 @@ onMounted(load)
       </div>
 
       <template v-else>
+        <AppCard class="mt-6" title="本次评测范围" description="结果和可视化都基于这组固定版本。">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-lg bg-muted/40 p-3">
+              <div class="text-xs text-muted-foreground">评测对象</div>
+              <div class="mt-1 truncate font-medium" :title="evaluationScope.target">{{ evaluationScope.target }}</div>
+            </div>
+            <div class="rounded-lg bg-muted/40 p-3">
+              <div class="text-xs text-muted-foreground">Harness 版本</div>
+              <div class="mt-1 truncate font-mono text-sm font-medium" :title="evaluationScope.harness">{{ evaluationScope.harness }}</div>
+            </div>
+            <div class="rounded-lg bg-muted/40 p-3">
+              <div class="text-xs text-muted-foreground">评测集版本</div>
+              <div class="mt-1 truncate font-mono text-sm font-medium" :title="evaluationScope.evaluation">{{ evaluationScope.evaluation }}</div>
+            </div>
+            <div class="rounded-lg bg-muted/40 p-3">
+              <div class="text-xs text-muted-foreground">Case 数</div>
+              <div class="mt-1 font-medium">{{ evaluationScope.caseCount }}</div>
+            </div>
+          </div>
+        </AppCard>
+
         <section aria-label="评测结果摘要" class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <button
             v-for="card in summaryCards"

@@ -45,6 +45,8 @@ const runsPayload = {
       score: { final_mean: 0.69, deterministic_mean: 0.66, judge_mean: 0.72 },
       target_type: 'interview',
       quality_status: 'failed',
+      project_harness_key: 'interview-harness',
+      project_harness_version: '0.9',
       distribution: { total: 3, passed: 1, poor: 1, failed: 1, pending: 0 },
     },
     {
@@ -149,7 +151,15 @@ const experimentPayload = {
 
 const capabilitiesPayload = {
   targets: [
-    { target_type: 'interview', can_run: true, adapter_available: true, case_count: 12, reason: null },
+    {
+      target_type: 'interview',
+      can_run: true,
+      adapter_available: true,
+      case_count: 12,
+      reason: null,
+      evaluation_release: { id: 2, release_key: 'interview-eval@1.0', version: '1.0' },
+      project_harness: { id: 101, harness_key: 'interview-harness', version: '1.0', status: 'published' },
+    },
     { target_type: 'experience_extraction', can_run: true, adapter_available: true, case_count: 4, reason: null },
     { target_type: 'jd_extraction', can_run: true, adapter_available: true, case_count: 3, reason: null },
     { target_type: 'resume_analysis', can_run: true, adapter_available: true, case_count: 4, reason: null },
@@ -173,6 +183,12 @@ const benchmarksPayload = {
   ],
 }
 
+const harnessesPayload = {
+  harness_releases: [
+    { id: 101, target_type: 'interview', harness_key: 'interview-harness', version: '1.0', status: 'published' },
+  ],
+}
+
 async function mockEvaluationApis(page) {
   let retryRequested = false
   await page.route('**/api/admin/evals/overview', route => route.fulfill({ json: overviewPayload }))
@@ -192,6 +208,7 @@ async function mockEvaluationApis(page) {
   })
   await page.route('**/api/admin/evals/experiments/77', route => route.fulfill({ json: experimentPayload }))
   await page.route('**/api/admin/evals/benchmarks', route => route.fulfill({ json: benchmarksPayload }))
+  await page.route('**/api/admin/evals/harness-releases', route => route.fulfill({ json: harnessesPayload }))
   await page.route('**/api/admin/evals/reviews**', route => route.fulfill({ json: { reviews: [] } }))
   await page.route('**/api/auth/**', route => {
     if (route.request().url().includes('/api/auth/refresh')) {
@@ -224,6 +241,26 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByRole('heading', { name: '失败 Case' })).toBeVisible()
     await expect(page.getByText('评测目标')).toBeVisible()
     await expect(page.getByRole('button', { name: '开始一次评测' }).first()).toBeVisible()
+  })
+
+  test('评测结果合并可视化并承载版本范围', async ({ page }) => {
+    await page.goto('/admin/evals/results')
+
+    const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
+    await expect(sidebar).toHaveCount(1)
+    await expect(sidebar.locator('..').getByText('评测结果', { exact: true })).toBeVisible()
+    await expect(sidebar.locator('..').getByText('人工 A/B', { exact: true })).toBeVisible()
+    await expect(sidebar.locator('..').getByText('版本与评测集', { exact: true })).toHaveCount(0)
+    await expect(sidebar.locator('..').getByText('测评实验', { exact: true })).toHaveCount(0)
+
+    await expect(page.getByText('本次评测范围')).toBeVisible()
+    await expect(page.getByText('Harness 版本')).toBeVisible()
+    await expect(page.getByText('评测集版本')).toBeVisible()
+    await expect(page.getByText('interview-harness@0.9')).toBeVisible()
+    await expect(page.getByText('interview-eval@1.0')).toBeVisible()
+
+    await page.getByRole('tab', { name: '全部目标' }).click()
+    await expect(page.getByText('多个评测目标')).toBeVisible()
   })
 
   test('评测结果独立承载 Run 进度', async ({ page }) => {
@@ -293,17 +330,19 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('12 通过', { exact: true })).toBeVisible()
   })
 
-  test('流程导航按五步顺序排列', async ({ page }) => {
+  test('流程导航只保留结果和人工 A/B 两步', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
     const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
     await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
     const labels = await flowSteps.allTextContents()
-    const evaluationLabels = ['版本与评测集', '测评实验', '评测结果', '人工 A/B']
+    const evaluationLabels = ['评测结果', '人工 A/B']
     const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
 
     expect(positions.every(position => position >= 0)).toBeTruthy()
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    await expect(page.getByText('版本与评测集', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('测评实验', { exact: true })).toHaveCount(0)
   })
 
   test('实验页按步骤解释配置项', async ({ page }) => {
@@ -334,26 +373,23 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('可运行结构化 Eval').first()).toBeVisible()
   })
 
-  test('版本列表使用固定列宽并保持关键固定项可读', async ({ page }) => {
+  test('旧版本入口回到结果页并展示固定评测范围', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
-    await expect(page.getByText('先选择要测的版本，再确认这次评测使用的评测集、执行器和评分规则。')).toBeVisible()
-    const tableLayout = await page.locator('table').first().evaluate(element => getComputedStyle(element).tableLayout)
-    expect(tableLayout).toBe('fixed')
-
-    await page.setViewportSize({ width: 390, height: 844 })
-    const tableWidth = await page.locator('table').first().evaluate(element => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
-    expect(tableWidth.scrollWidth).toBeGreaterThanOrEqual(tableWidth.clientWidth)
+    await expect(page).toHaveURL(/\/admin\/evals\/results\?preview=1/)
+    await expect(page.getByRole('heading', { name: '评测结果' })).toBeVisible()
+    await expect(page.getByText('本次评测范围')).toBeVisible()
+    await expect(page.getByText('Harness 版本')).toBeVisible()
   })
 
   test('其余页面也先展示管理员任务，而不是底层字段', async ({ page }) => {
-    // 评测集已合并进版本与评测集页（旧路径重定向）
+    // 评测集和版本信息已合并进结果页（旧路径重定向）
     await page.goto('/admin/evals/benchmarks?preview=1')
-    await expect(page).toHaveURL(/\/admin\/evals\/releases/)
+    await expect(page).toHaveURL(/\/admin\/evals\/results\?preview=1/)
 
     await page.goto('/admin/evals/releases?preview=1')
-    await expect(page.getByRole('heading', { name: '版本与评测集' })).toBeVisible()
-    await expect(page.getByText('先选择要测的版本，再确认这次评测使用的评测集')).toBeVisible()
+    await expect(page.getByRole('heading', { name: '评测结果' })).toBeVisible()
+    await expect(page.getByText('本次评测范围')).toBeVisible()
 
     await page.goto('/admin/evals/reviews?preview=1')
     await expect(page.getByRole('heading', { name: '人工 A/B：核对版本差异' })).toBeVisible()

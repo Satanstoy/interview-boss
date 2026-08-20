@@ -12,14 +12,10 @@ import {
   Layers,
   Library,
   LayoutDashboard,
-  ChartNoAxesCombined,
   ClipboardCheck,
   Network,
   PanelLeft,
   Target,
-  FlaskConical,
-  Database,
-  GitBranch,
   Scale,
 } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
@@ -74,11 +70,7 @@ const iconMap = {
   InsightsReviews: History,
   Import: FileUp,
   Coding: Code2,
-  EvalOverview: ChartNoAxesCombined,
   EvalResults: ClipboardCheck,
-  EvalExperiments: FlaskConical,
-  EvalBenchmarks: Database,
-  EvalReleases: GitBranch,
   EvalReviews: Scale,
 }
 

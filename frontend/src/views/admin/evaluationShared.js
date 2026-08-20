@@ -71,10 +71,8 @@ export const EVALUATION_TARGETS = [
 ]
 
 export const EVALUATION_FLOW_STEPS = [
-  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与评测集', description: '测谁、用什么 Harness 和哪套 Case', route: '/admin/evals/releases' },
-  { key: 'experiments', keys: ['EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
-  { key: 'results', keys: ['EvalResults', 'admin-evals-results'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/results' },
-  { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
+  { key: 'results', keys: ['results', 'releases', 'experiments', 'run', 'EvalResults', 'EvalOverview', 'EvalExperiments', 'EvalExperiment', 'EvalReleases', 'admin-evals-overview', 'admin-evals-results', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-releases', 'admin-evals-benchmarks', 'admin-evals-run'], label: '评测结果', description: '看指标、进度和 Case 状态', route: '/admin/evals/results' },
+  { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验版本差异', route: '/admin/evals/reviews' },
 ]
 
 export const RELEASE_TYPE_META = {

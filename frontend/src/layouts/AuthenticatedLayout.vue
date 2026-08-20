@@ -25,13 +25,9 @@ import {
   Layers,
   Library,
   LayoutDashboard,
-  ChartNoAxesCombined,
   ClipboardCheck,
   Network,
   Target,
-  FlaskConical,
-  Database,
-  GitBranch,
   Scale,
 } from '@lucide/vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
@@ -97,10 +93,11 @@ const routeToTabMap = {
   'resume': 'Resume',
   'admin-evals-overview': 'EvalResults',
   'admin-evals-results': 'EvalResults',
-  'admin-evals-experiments': 'EvalExperiments',
-  'admin-evals-run': 'EvalExperiments',
-  'admin-evals-benchmarks': 'EvalBenchmarks',
-  'admin-evals-releases': 'EvalReleases',
+  'admin-evals-experiments': 'EvalResults',
+  'admin-evals-experiment': 'EvalResults',
+  'admin-evals-run': 'EvalResults',
+  'admin-evals-benchmarks': 'EvalResults',
+  'admin-evals-releases': 'EvalResults',
   'admin-evals-reviews': 'EvalReviews',
 }
 
@@ -119,9 +116,6 @@ const tabToRouteMap = {
   Settings: '/settings',
   Resume: '/resume',
   EvalResults: '/admin/evals/results',
-  EvalExperiments: '/admin/evals/experiments',
-  EvalBenchmarks: '/admin/evals/benchmarks',
-  EvalReleases: '/admin/evals/releases',
   EvalReviews: '/admin/evals/reviews',
 }
 
@@ -238,8 +232,6 @@ const sidebarGroups = computed(() => [
   ...(displayUser.value?.is_admin ? [{
     label: '评测中心',
     tabs: [
-      { key: 'EvalReleases', label: '版本与评测集', route: '/admin/evals/releases' },
-      { key: 'EvalExperiments', label: '测评实验', route: '/admin/evals/experiments' },
       { key: 'EvalResults', label: '评测结果', route: '/admin/evals/results' },
       { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },
     ],
@@ -261,11 +253,7 @@ const navIconMap = {
   InsightsOverview: LayoutDashboard,
   InsightsReadiness: Target,
   InsightsReviews: History,
-  EvalOverview: ChartNoAxesCombined,
   EvalResults: ClipboardCheck,
-  EvalExperiments: FlaskConical,
-  EvalBenchmarks: Database,
-  EvalReleases: GitBranch,
   EvalReviews: Scale,
 }
 

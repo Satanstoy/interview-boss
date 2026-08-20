@@ -248,17 +248,17 @@ test.describe('管理员流程', () => {
     await expect(page.locator('main')).toBeVisible()
   })
 
-  test('测评可视化使用独立的结果图标', async ({ page }) => {
+  test('评测结果使用独立的结果图标', async ({ page }) => {
     await gotoLoggedIn(page, MOCK_ADMIN)
 
-    const evaluationTab = page.getByRole('button', { name: '测评可视化' })
+    const evaluationTab = page.getByRole('button', { name: '评测结果' })
     const insightsTab = page.getByRole('button', { name: '总览' }).first()
     await expect(evaluationTab).toBeVisible({ timeout: 5000 })
     await expect(insightsTab).toBeVisible({ timeout: 5000 })
 
     const evaluationIcon = await evaluationTab.locator('svg').first().getAttribute('class')
     const insightsIcon = await insightsTab.locator('svg').first().getAttribute('class')
-    expect(evaluationIcon).toContain('lucide-chart-no-axes-combined')
+    expect(evaluationIcon).toContain('lucide-clipboard-check')
     expect(insightsIcon).toContain('lucide-layout-dashboard')
     expect(evaluationIcon).not.toContain('lucide-layout-dashboard')
   })

@@ -122,13 +122,13 @@ const routes = [
       },
       {
         path: 'admin/evals/benchmarks',
-        redirect: '/admin/evals/releases',
+        redirect: to => ({ path: '/admin/evals/results', query: to.query }),
       },
       {
         path: 'admin/evals/releases',
         name: 'admin-evals-releases',
         meta: { adminOnly: true },
-        component: () => import('@/views/admin/EvaluationReleasesView.vue'),
+        redirect: to => ({ path: '/admin/evals/results', query: to.query }),
       },
       {
         path: 'admin/evals/reviews',
