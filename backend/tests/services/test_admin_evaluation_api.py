@@ -142,6 +142,7 @@ def test_capabilities_report_published_target_and_evaluation_pair(test_db, monke
     )
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -507,6 +508,7 @@ def test_retry_failed_enqueue_none_leaves_created_not_queued(test_db, monkeypatc
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -534,6 +536,49 @@ def test_retry_failed_enqueue_none_leaves_created_not_queued(test_db, monkeypatc
         "SELECT COUNT(*) FROM eval_experiment_runs WHERE experiment_id = ?",
         (result["experiment_id"],),
     ).fetchone()[0] == 2
+
+
+def test_create_experiment_honors_version_overrides(test_db, monkeypatch):
+    module = _router()
+    catalog = importlib.import_module("app.evaluation.benchmark_catalog")
+    catalog.sync_builtin_benchmarks(test_db)
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+    monkeypatch.setattr(module, "enqueue_eval_run_job", lambda run_id: None)
+
+    target = test_db.execute(
+        "SELECT id FROM eval_releases WHERE release_type = 'target' AND target_type = 'interview' AND status = 'published' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    evaluation = test_db.execute(
+        "SELECT id FROM eval_releases WHERE release_type = 'evaluation' AND target_type = 'interview' AND status = 'published' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    harness = test_db.execute(
+        "SELECT id FROM harness_releases WHERE target_type = 'interview' AND status = 'published' ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    body = module.CreateEvalExperimentRequest(
+        target_types=["interview"],
+        target_release_ids={"interview": target["id"]},
+        evaluation_release_ids={"interview": evaluation["id"]},
+        project_harness_release_ids={"interview": harness["id"]},
+        replication_count=1,
+    )
+
+    result = asyncio.run(module.create_experiment(body, {"id": 1, "is_admin": 1}))
+    run = test_db.execute(
+        "SELECT target_release_id, evaluation_release_id, harness_release_id FROM eval_runs WHERE id = ?",
+        (result["runs"][0]["run_id"],),
+    ).fetchone()
+    assert dict(run) == {
+        "target_release_id": target["id"],
+        "evaluation_release_id": evaluation["id"],
+        "harness_release_id": harness["id"],
+    }
 
 
 def test_get_experiment_aggregates_child_run_progress(test_db, monkeypatch):
@@ -608,6 +653,7 @@ def test_repeated_experiment_read_does_not_write_or_append_events(test_db, monke
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -666,6 +712,7 @@ def test_list_experiments_returns_summaries_with_runs(test_db, monkeypatch):
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -682,14 +729,24 @@ def test_list_experiments_returns_summaries_with_runs(test_db, monkeypatch):
             {"id": 1, "is_admin": 1},
         )
     )
+    child_run_id = created["runs"][0]["run_id"]
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'running', completed_items = 1, failed_items = 0 WHERE id = ?",
+        (child_run_id,),
+    )
+    test_db.commit()
 
     result = asyncio.run(module.list_experiments(admin={"id": 1, "is_admin": 1}, limit=50))
 
     assert result["experiments"][0]["id"] == created["experiment_id"]
     item = result["experiments"][0]
     assert item["total_runs"] >= 1
-    assert item["status"] in {"created", "queued", "running", "completed", "failed", "cancelled"}
+    assert item["status"] == "running"
+    assert item["completed_items"] == 1
     assert "runs" in item
+    assert "project_harness_key" in item["runs"][0]
+    assert "project_harness_version" in item["runs"][0]
+    assert item["runs"][0]["benchmark_suite_release_key"] == item["runs"][0]["evaluation_release_key"]
 
 
 def test_list_experiments_status_filter(test_db, monkeypatch):
@@ -698,6 +755,7 @@ def test_list_experiments_status_filter(test_db, monkeypatch):
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -713,6 +771,10 @@ def test_list_experiments_status_filter(test_db, monkeypatch):
             module.CreateEvalExperimentRequest(target_types=["interview"], replication_count=1),
             {"id": 1, "is_admin": 1},
         )
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'queued' WHERE id = ?",
+        (created["runs"][0]["run_id"],),
     )
     test_db.execute("UPDATE eval_experiments SET status = 'queued' WHERE id = ?", (created["experiment_id"],))
     test_db.commit()
@@ -730,6 +792,7 @@ def test_cancel_experiment_cancels_queued_children(test_db, monkeypatch):
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()

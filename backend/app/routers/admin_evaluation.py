@@ -55,6 +55,9 @@ class CreateEvalRunRequest(BaseModel):
 
 class CreateEvalExperimentRequest(BaseModel):
     target_types: list[str] | None = Field(default=None, min_length=1, max_length=5)
+    target_release_ids: dict[str, int] = Field(default_factory=dict)
+    evaluation_release_ids: dict[str, int] = Field(default_factory=dict)
+    project_harness_release_ids: dict[str, int] = Field(default_factory=dict)
     replication_count: int = Field(default=5, ge=1, le=100)
     seed: int = 1
     environment_fingerprint: str = ""
@@ -117,12 +120,14 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
                r.created_at, r.started_at, r.finished_at,
                tr.release_key AS target_release_key,
                ev.release_key AS evaluation_release_key,
+               bs.release_key AS benchmark_suite_release_key,
                hr.harness_key AS project_harness_key,
                hr.version AS project_harness_version
         FROM eval_experiment_runs er
         JOIN eval_runs r ON r.id = er.run_id
         JOIN eval_releases tr ON tr.id = r.target_release_id
         LEFT JOIN eval_releases ev ON ev.id = r.evaluation_release_id
+        LEFT JOIN eval_releases bs ON bs.id = r.benchmark_suite_release_id
         LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
         WHERE er.experiment_id = ?
         ORDER BY er.display_order, er.id
@@ -785,11 +790,11 @@ async def list_experiments(
     def _query():
         with get_db_connection() as conn:
             params = []
-            where = ""
-            if status:
-                where = "WHERE e.status = ?"
-                params.append(status)
-            params.append(limit)
+            limit_clause = " LIMIT ?"
+            if not status:
+                params.append(limit)
+            else:
+                limit_clause = ""
             rows = conn.execute(
                 f"""
                 SELECT e.id, e.experiment_key, e.status, e.total_runs,
@@ -798,8 +803,7 @@ async def list_experiments(
                        e.comparison_group, e.created_at, e.started_at, e.finished_at,
                        e.summary_json
                 FROM eval_experiments e
-                {where}
-                ORDER BY e.id DESC LIMIT ?
+                ORDER BY e.id DESC{limit_clause}
                 """,
                 params,
             ).fetchall()
@@ -815,11 +819,16 @@ async def list_experiments(
                            r.status, r.total_items, r.completed_items, r.failed_items,
                            r.created_at, r.started_at, r.finished_at,
                            tr.release_key AS target_release_key,
-                           ev.release_key AS evaluation_release_key
+                           ev.release_key AS evaluation_release_key,
+                           bs.release_key AS benchmark_suite_release_key,
+                           hr.harness_key AS project_harness_key,
+                           hr.version AS project_harness_version
                     FROM eval_experiment_runs er
                     JOIN eval_runs r ON r.id = er.run_id
                     JOIN eval_releases tr ON tr.id = r.target_release_id
                     LEFT JOIN eval_releases ev ON ev.id = r.evaluation_release_id
+                    LEFT JOIN eval_releases bs ON bs.id = r.benchmark_suite_release_id
+                    LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
                     WHERE er.experiment_id = ?
                     ORDER BY er.display_order, er.id
                     """,
@@ -829,14 +838,43 @@ async def list_experiments(
                     child["quality_status"] = _quality_status(conn, child["run_id"], child["status"])
                     child_quality.append(child["quality_status"])
                     item["runs"].append(child)
+                children = item["runs"]
+                item["total_runs"] = len(children)
+                item["completed_runs"] = sum(child["status"] == "completed" for child in children)
+                item["failed_runs"] = sum(child["status"] == "failed" for child in children)
+                item["cancelled_runs"] = sum(child["status"] == "cancelled" for child in children)
+                item["total_items"] = sum(child["total_items"] or 0 for child in children)
+                item["completed_items"] = sum(child["completed_items"] or 0 for child in children)
+                item["failed_items"] = sum(child["failed_items"] or 0 for child in children)
+                item["summary"] = {
+                    **item["summary"],
+                    "total_runs": item["total_runs"],
+                    "completed_runs": item["completed_runs"],
+                    "failed_runs": item["failed_runs"],
+                    "cancelled_runs": item["cancelled_runs"],
+                    "total_items": item["total_items"],
+                    "completed_items": item["completed_items"],
+                    "failed_items": item["failed_items"],
+                }
+                if item["total_runs"] and item["completed_runs"] + item["failed_runs"] + item["cancelled_runs"] == item["total_runs"]:
+                    item["status"] = "failed" if item["failed_runs"] else "cancelled" if item["cancelled_runs"] else "completed"
+                elif any(child["status"] == "running" for child in children):
+                    item["status"] = "running"
+                elif any(child["status"] == "queued" for child in children):
+                    item["status"] = "queued"
+                else:
+                    item["status"] = "created"
                 item["quality_status"] = (
                     "pending" if any(v == "pending" for v in child_quality)
                     else "failed" if any(v == "failed" for v in child_quality)
                     else "not_evaluated" if any(v == "not_evaluated" for v in child_quality)
                     else "passed"
                 )
+                item["summary"]["quality_status"] = item["quality_status"]
+                if status and item["status"] != status:
+                    continue
                 experiments.append(item)
-            return {"experiments": experiments}
+            return {"experiments": experiments[:limit]}
 
     return await run_db(_query)
 
@@ -865,24 +903,66 @@ async def create_experiment(
                     get_target_adapter(target_type)
                 except AdapterNotConfigured as exc:
                     raise ValueError(str(exc)) from exc
-                target = conn.execute(
-                    """
-                    SELECT * FROM eval_releases
-                    WHERE release_type = 'target' AND target_type = ? AND status = 'published'
-                    ORDER BY id DESC LIMIT 1
-                    """,
-                    (target_type,),
-                ).fetchone()
-                evaluation = conn.execute(
-                    """
-                    SELECT * FROM eval_releases
-                    WHERE release_type = 'evaluation' AND target_type = ? AND status = 'published'
-                    ORDER BY id DESC LIMIT 1
-                    """,
-                    (target_type,),
-                ).fetchone()
+                target_release_id = body.target_release_ids.get(target_type)
+                if target_release_id is not None:
+                    target = conn.execute(
+                        """
+                        SELECT * FROM eval_releases
+                        WHERE id = ? AND release_type = 'target'
+                          AND target_type = ? AND status = 'published'
+                        """,
+                        (target_release_id, target_type),
+                    ).fetchone()
+                else:
+                    target = conn.execute(
+                        """
+                        SELECT * FROM eval_releases
+                        WHERE release_type = 'target' AND target_type = ? AND status = 'published'
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (target_type,),
+                    ).fetchone()
+                evaluation_release_id = body.evaluation_release_ids.get(target_type)
+                if evaluation_release_id is not None:
+                    evaluation = conn.execute(
+                        """
+                        SELECT * FROM eval_releases
+                        WHERE id = ? AND release_type = 'evaluation'
+                          AND target_type = ? AND status = 'published'
+                        """,
+                        (evaluation_release_id, target_type),
+                    ).fetchone()
+                else:
+                    evaluation = conn.execute(
+                        """
+                        SELECT * FROM eval_releases
+                        WHERE release_type = 'evaluation' AND target_type = ? AND status = 'published'
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (target_type,),
+                    ).fetchone()
                 if target is None or evaluation is None:
                     raise ValueError(f"{target_type} 没有可用的已发布版本")
+                harness_release_id = body.project_harness_release_ids.get(target_type)
+                if harness_release_id is not None:
+                    harness = conn.execute(
+                        """
+                        SELECT * FROM harness_releases
+                        WHERE id = ? AND target_type = ? AND status = 'published'
+                        """,
+                        (harness_release_id, target_type),
+                    ).fetchone()
+                else:
+                    harness = conn.execute(
+                        """
+                        SELECT * FROM harness_releases
+                        WHERE target_type = ? AND version = ? AND status = 'published'
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (target_type, PROJECT_HARNESS_VERSION),
+                    ).fetchone()
+                if harness is None:
+                    raise ValueError(f"{target_type} 没有可用的已发布 Harness 版本")
                 case_count = conn.execute(
                     """
                     SELECT COUNT(*)
@@ -894,7 +974,7 @@ async def create_experiment(
                 ).fetchone()[0]
                 if not case_count:
                     raise ValueError(f"{target_type} 没有可执行的 Benchmark Case")
-                pairs.append((spec, target, evaluation))
+                pairs.append((spec, target, evaluation, harness))
 
             experiment_key = f"frontend-{uuid.uuid4().hex}"
             comparison_group = body.comparison_group or experiment_key
@@ -925,12 +1005,13 @@ async def create_experiment(
                 {"target_types": requested},
             )
             runs = []
-            for display_order, (spec, target, evaluation) in enumerate(pairs):
+            for display_order, (spec, target, evaluation, harness) in enumerate(pairs):
                 run = create_eval_run(
                     conn,
                     created_by=admin["id"],
                     target_release_id=target["id"],
                     evaluation_release_id=evaluation["id"],
+                    project_harness_release_id=harness["id"],
                     replication_count=body.replication_count,
                     seed=body.seed,
                     environment_fingerprint=body.environment_fingerprint,
@@ -954,6 +1035,9 @@ async def create_experiment(
                         "target_type": spec["target_type"],
                         "target_release_key": target["release_key"],
                         "evaluation_release_key": evaluation["release_key"],
+                        "benchmark_suite_release_key": evaluation["release_key"],
+                        "project_harness_key": harness["harness_key"],
+                        "project_harness_version": harness["version"],
                         "total_items": run["total_items"],
                         "status": run["status"],
                     }

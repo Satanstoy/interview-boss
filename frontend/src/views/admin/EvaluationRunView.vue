@@ -275,6 +275,7 @@ onUnmounted(() => {
         <div class="mt-3 grid gap-3 text-xs sm:grid-cols-3">
           <div>被测版本：<span class="font-mono text-foreground">{{ run.target_release_key }}</span></div>
           <div>完整评测版本：<span class="font-mono text-foreground">{{ run.evaluation_release_key || '历史组件模式' }}</span></div>
+          <div>评测集版本：<span class="font-mono text-foreground">{{ run.benchmark_suite_release_key || run.evaluation_release_key || '历史组件模式' }}</span></div>
           <div>评分模型：<span class="font-mono text-foreground">{{ run.judge_model || run.judge_release_key || '—' }}</span></div>
           <div>项目 Harness：<span class="font-mono text-foreground">{{ run.project_harness_key ? `${run.project_harness_key}@${run.project_harness_version}` : '历史数据未记录' }}</span></div>
           <div>评测执行器：<span class="font-mono text-foreground">{{ run.simulator_harness_release_key || '—' }}</span></div>

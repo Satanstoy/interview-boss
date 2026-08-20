@@ -67,7 +67,7 @@ const evaluationScope = computed(() => {
     : null
   const evaluationRelease = capability?.evaluation_release || {}
   const harness = capability?.project_harness || {}
-  const evaluationKey = latestRun?.evaluation_release_key
+  const evaluationKey = latestRun?.benchmark_suite_release_key || latestRun?.evaluation_release_key
     || (latestRun ? '历史数据未记录' : evaluationRelease.release_key || '—')
   const harnessKey = latestRun
     ? (latestRun.project_harness_key && latestRun.project_harness_version

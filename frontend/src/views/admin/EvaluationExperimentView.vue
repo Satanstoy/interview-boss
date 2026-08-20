@@ -149,7 +149,7 @@ onUnmounted(() => {
             <div v-for="run in experiment.runs" :key="run.run_id" class="flex flex-wrap items-center gap-4 p-4">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ evaluationTargetLabel(run.target_type) }}</span><span class="text-[11px] text-muted-foreground">执行</span><Badge :class="statusClass(run.status)">{{ statusLabel(run.status) }}</Badge><span class="text-[11px] text-muted-foreground">结果</span><Badge :class="statusClass(run.quality_status)">{{ qualityStatusLabel(run.quality_status) }}</Badge></div>
-                <div class="mt-1 text-xs text-muted-foreground">评测 #{{ run.run_id }} · 被测 {{ run.target_release_key }} · 评测配置 {{ run.evaluation_release_key || '—' }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">评测 #{{ run.run_id }} · 被测 {{ run.target_release_key }} · 评测集 {{ run.benchmark_suite_release_key || run.evaluation_release_key || '—' }} · Harness {{ run.project_harness_key && run.project_harness_version ? `${run.project_harness_key}@${run.project_harness_version}` : '—' }}</div>
                 <div class="mt-1 text-xs text-muted-foreground">执行状态：{{ statusLabel(run.status) }} · 创建于 {{ formatDate(run.created_at) }}</div>
               </div>
               <div class="w-48">

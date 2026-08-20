@@ -149,6 +149,37 @@ const experimentPayload = {
   ],
 }
 
+const activeExperimentPayload = {
+  id: 88,
+  experiment_key: 'frontend-running-88',
+  status: 'running',
+  quality_status: 'pending',
+  total_runs: 1,
+  completed_runs: 0,
+  failed_runs: 0,
+  cancelled_runs: 0,
+  total_items: 12,
+  completed_items: 5,
+  failed_items: 1,
+  created_at: '2026-08-20T10:00:00Z',
+  runs: [
+    {
+      run_id: 801,
+      target_type: 'interview',
+      target_release_key: 'interview-agent@1.1',
+      evaluation_release_key: 'interview-eval@1.1',
+      benchmark_suite_release_key: 'interview-benchmark@1.1',
+      project_harness_key: 'interview-harness',
+      project_harness_version: '1.1',
+      status: 'running',
+      total_items: 12,
+      completed_items: 5,
+      failed_items: 1,
+      created_at: '2026-08-20T10:00:00Z',
+    },
+  ],
+}
+
 const capabilitiesPayload = {
   targets: [
     {
@@ -191,6 +222,7 @@ const harnessesPayload = {
 
 async function mockEvaluationApis(page) {
   let retryRequested = false
+  let experimentCreated = false
   await page.route('**/api/admin/evals/overview', route => route.fulfill({ json: overviewPayload }))
   await page.route('**/api/admin/evals/capabilities', route => route.fulfill({ json: capabilitiesPayload }))
   await page.route('**/api/admin/evals/releases**', route => route.fulfill({ json: releasesPayload }))
@@ -203,8 +235,11 @@ async function mockEvaluationApis(page) {
     return route.fulfill({ json: { run_id: 12, status: 'queued', retried_items: 1 } })
   })
   await page.route('**/api/admin/evals/experiments', route => {
-    if (route.request().method() === 'POST') return route.fulfill({ json: experimentPayload })
-    return route.fulfill({ json: { experiments: [] } })
+    if (route.request().method() === 'POST') {
+      experimentCreated = true
+      return route.fulfill({ json: { ...experimentPayload, status: 'running' } })
+    }
+    return route.fulfill({ json: { experiments: [experimentCreated ? { ...activeExperimentPayload, id: 77 } : activeExperimentPayload] } })
   })
   await page.route('**/api/admin/evals/experiments/77', route => route.fulfill({ json: experimentPayload }))
   await page.route('**/api/admin/evals/benchmarks', route => route.fulfill({ json: benchmarksPayload }))
@@ -249,10 +284,10 @@ test.describe('评测中心可读性', () => {
     const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
     await expect(sidebar).toHaveCount(1)
     await expect(sidebar.locator('..').getByText('评测结果', { exact: true })).toBeVisible()
-    await expect(sidebar.locator('..').getByText('发起评测', { exact: true })).toBeVisible()
+    await expect(sidebar.locator('..').getByText('测评实验', { exact: true })).toBeVisible()
     await expect(sidebar.locator('..').getByText('人工 A/B', { exact: true })).toBeVisible()
     await expect(sidebar.locator('..').getByText('版本与评测集', { exact: true })).toHaveCount(0)
-    await expect(sidebar.locator('..').getByText('测评实验', { exact: true })).toHaveCount(0)
+    await expect(sidebar.locator('..').getByText('发起评测', { exact: true })).toHaveCount(0)
 
     await expect(page.getByText('本次评测范围')).toBeVisible()
     await expect(page.getByText('Harness 版本')).toBeVisible()
@@ -264,13 +299,14 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('多个评测目标')).toBeVisible()
   })
 
-  test('侧栏发起评测进入配置页', async ({ page }) => {
+  test('侧栏测评实验进入工作台', async ({ page }) => {
     await page.goto('/admin/evals/results')
 
     const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
-    await sidebar.locator('..').getByText('发起评测', { exact: true }).click()
+    await sidebar.locator('..').getByText('测评实验', { exact: true }).click()
     await expect(page).toHaveURL(/\/admin\/evals\/experiments/)
-    await expect(page.getByRole('heading', { name: '发起一次评测' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '测评实验' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   test('评测结果独立承载 Run 进度', async ({ page }) => {
@@ -327,43 +363,69 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('排队中')).toBeVisible()
   })
 
-  test('可以从前端启动全部 Eval 并查看 Experiment 汇总', async ({ page }) => {
+  test('测评实验默认展示进行中工作台', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
-    await page.getByRole('button', { name: '运行全部 Eval' }).click()
-    await expect(page).toHaveURL(/\/admin\/evals\/experiments\/77/)
-    await expect(page.getByRole('heading', { name: '测评实验 #77' })).toBeVisible()
-    await expect(page.getByText('5 个目标评测')).toBeVisible()
-    await expect(page.getByText('模拟面试 Agent')).toBeVisible()
-    await expect(page.getByText('面试题分类 Agent')).toBeVisible()
-    await expect(page.getByText('各目标质量分别查看')).toBeVisible()
-    await expect(page.getByText('12 通过', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '测评实验' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByText('实验 #88')).toBeVisible()
+    await expect(page.getByText('interview-harness@1.1')).toBeVisible()
+    await expect(page.getByText('interview-benchmark@1.1')).toBeVisible()
+    await expect(page.getByText('5 / 12 Cases')).toBeVisible()
   })
 
-  test('流程导航展示发起评测、结果和人工 A/B', async ({ page }) => {
+  test('测评实验可以切换到创建测评 Tab', async ({ page }) => {
+    await page.goto('/admin/evals/experiments?preview=1')
+
+    await page.getByRole('tab', { name: '创建测评' }).click()
+    await expect(page.getByRole('tab', { name: '创建测评' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('heading', { name: '创建一次测评' })).toBeVisible()
+    await expect(page.getByText('第 1 步：选择被测版本')).toBeVisible()
+  })
+
+  test('可以从创建测评 Tab 启动全部 Eval 并回到进行中列表', async ({ page }) => {
+    await page.goto('/admin/evals/experiments?preview=1')
+
+    await page.getByRole('tab', { name: '创建测评' }).click()
+    await page.getByRole('button', { name: '运行全部 Eval' }).click()
+    await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByText('实验 #77')).toBeVisible()
+  })
+
+  test('创建并开始测评后回到进行中列表', async ({ page }) => {
+    await page.goto('/admin/evals/experiments?preview=1')
+
+    await page.getByRole('tab', { name: '创建测评' }).click()
+    await page.getByRole('button', { name: '创建并开始测评' }).click()
+    await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByText('实验 #77')).toBeVisible()
+  })
+
+  test('流程导航展示测评实验、结果和人工 A/B', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
     const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
     await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
     const labels = await flowSteps.allTextContents()
-    const evaluationLabels = ['发起评测', '评测结果', '人工 A/B']
+    const evaluationLabels = ['测评实验', '评测结果', '人工 A/B']
     const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
 
     expect(positions.every(position => position >= 0)).toBeTruthy()
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
     await expect(page.getByText('版本与评测集', { exact: true })).toHaveCount(0)
-    await expect(page.getByText('测评实验', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('发起评测', { exact: true })).toHaveCount(0)
   })
 
   test('实验页按步骤解释配置项', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
-    await expect(page.getByRole('heading', { name: '发起一次评测' })).toBeVisible()
+    await page.getByRole('tab', { name: '创建测评' }).click()
+    await expect(page.getByRole('heading', { name: '创建一次测评' })).toBeVisible()
     await expect(page.getByText('第 1 步：选择被测版本')).toBeVisible()
     await expect(page.getByText('第 2 步：选择评测配置')).toBeVisible()
     await expect(page.getByText('第 3 步：固定运行参数')).toBeVisible()
     await expect(page.getByText('每个 Case 重跑次数')).toBeVisible()
-    await expect(page.getByRole('button', { name: '创建并开始评测' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '创建并开始测评' })).toBeVisible()
     await expect(page.getByText('interview-eval@1.0').first()).toBeVisible()
     await expect(page.getByText('12 个 Case').first()).toBeVisible()
     await expect(page.getByText('工具调用效果')).toBeVisible()
@@ -373,6 +435,7 @@ test.describe('评测中心可读性', () => {
   test('评测对象明确展示已接入的目标类型', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
+    await page.getByRole('tab', { name: '创建测评' }).click()
     await expect(page.getByText('评测对象').first()).toBeVisible()
     await expect(page.getByRole('button', { name: /模拟面试 Agent/ })).toBeVisible()
     await expect(page.getByText('可运行完整 E2E')).toBeVisible()

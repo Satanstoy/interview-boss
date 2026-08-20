@@ -235,7 +235,7 @@ const sidebarGroups = computed(() => [
     label: '评测中心',
     tabs: [
       { key: 'EvalResults', label: '评测结果', route: '/admin/evals/results' },
-      { key: 'EvalExperiments', label: '发起评测', route: '/admin/evals/experiments' },
+      { key: 'EvalExperiments', label: '测评实验', route: '/admin/evals/experiments' },
       { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },
     ],
   }] : []),
