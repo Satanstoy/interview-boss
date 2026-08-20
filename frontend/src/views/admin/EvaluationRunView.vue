@@ -206,9 +206,9 @@ onUnmounted(() => {
   <div class="h-full overflow-y-auto custom-scrollbar custom-scrollbar-always">
     <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
-        <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`" description="查看每个 Case 的执行进度、业务结果和质量指标。" active-key="experiments">
+        <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`" description="查看每个 Case 的执行进度、业务结果和质量指标。" active-key="results">
           <template #actions>
-            <Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button>
+            <Button variant="ghost" @click="router.push('/admin/evals/results')"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
             <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
             <Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button>
           </template>

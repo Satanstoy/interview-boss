@@ -21,7 +21,7 @@ function isActive(step) {
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
       <div class="shrink-0">
       <div class="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">评测流程</div>
-        <p class="mt-1 text-xs text-muted-foreground">评测结果 → 人工 A/B</p>
+        <p class="mt-1 text-xs text-muted-foreground">发起评测 → 评测结果 → 人工 A/B</p>
       </div>
       <div class="hidden h-px flex-1 bg-border/70 lg:block" />
       <div class="flex min-w-0 flex-wrap items-center gap-2" role="list" aria-label="评测中心流程位置">

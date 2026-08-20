@@ -16,6 +16,7 @@ import {
   Network,
   PanelLeft,
   Target,
+  FlaskConical,
   Scale,
 } from '@lucide/vue'
 import UserMenu from '@/components/business/UserMenu.vue'
@@ -71,6 +72,7 @@ const iconMap = {
   Import: FileUp,
   Coding: Code2,
   EvalResults: ClipboardCheck,
+  EvalExperiments: FlaskConical,
   EvalReviews: Scale,
 }
 

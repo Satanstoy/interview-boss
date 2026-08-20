@@ -71,7 +71,8 @@ export const EVALUATION_TARGETS = [
 ]
 
 export const EVALUATION_FLOW_STEPS = [
-  { key: 'results', keys: ['results', 'releases', 'experiments', 'run', 'EvalResults', 'EvalOverview', 'EvalExperiments', 'EvalExperiment', 'EvalReleases', 'admin-evals-overview', 'admin-evals-results', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-releases', 'admin-evals-benchmarks', 'admin-evals-run'], label: '评测结果', description: '看指标、进度和 Case 状态', route: '/admin/evals/results' },
+  { key: 'experiments', keys: ['experiments', 'EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment'], label: '发起评测', description: '固定版本并启动运行', route: '/admin/evals/experiments' },
+  { key: 'results', keys: ['results', 'releases', 'run', 'EvalResults', 'EvalOverview', 'EvalReleases', 'admin-evals-overview', 'admin-evals-results', 'admin-evals-releases', 'admin-evals-benchmarks', 'admin-evals-run'], label: '评测结果', description: '看指标、进度和 Case 状态', route: '/admin/evals/results' },
   { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验版本差异', route: '/admin/evals/reviews' },
 ]
 

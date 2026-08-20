@@ -249,6 +249,7 @@ test.describe('评测中心可读性', () => {
     const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
     await expect(sidebar).toHaveCount(1)
     await expect(sidebar.locator('..').getByText('评测结果', { exact: true })).toBeVisible()
+    await expect(sidebar.locator('..').getByText('发起评测', { exact: true })).toBeVisible()
     await expect(sidebar.locator('..').getByText('人工 A/B', { exact: true })).toBeVisible()
     await expect(sidebar.locator('..').getByText('版本与评测集', { exact: true })).toHaveCount(0)
     await expect(sidebar.locator('..').getByText('测评实验', { exact: true })).toHaveCount(0)
@@ -261,6 +262,15 @@ test.describe('评测中心可读性', () => {
 
     await page.getByRole('tab', { name: '全部目标' }).click()
     await expect(page.getByText('多个评测目标')).toBeVisible()
+  })
+
+  test('侧栏发起评测进入配置页', async ({ page }) => {
+    await page.goto('/admin/evals/results')
+
+    const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
+    await sidebar.locator('..').getByText('发起评测', { exact: true }).click()
+    await expect(page).toHaveURL(/\/admin\/evals\/experiments/)
+    await expect(page.getByRole('heading', { name: '发起一次评测' })).toBeVisible()
   })
 
   test('评测结果独立承载 Run 进度', async ({ page }) => {
@@ -330,13 +340,13 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('12 通过', { exact: true })).toBeVisible()
   })
 
-  test('流程导航只保留结果和人工 A/B 两步', async ({ page }) => {
+  test('流程导航展示发起评测、结果和人工 A/B', async ({ page }) => {
     await page.goto('/admin/evals/releases?preview=1')
 
     const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
     await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
     const labels = await flowSteps.allTextContents()
-    const evaluationLabels = ['评测结果', '人工 A/B']
+    const evaluationLabels = ['发起评测', '评测结果', '人工 A/B']
     const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
 
     expect(positions.every(position => position >= 0)).toBeTruthy()

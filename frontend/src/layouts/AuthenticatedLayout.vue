@@ -28,6 +28,7 @@ import {
   ClipboardCheck,
   Network,
   Target,
+  FlaskConical,
   Scale,
 } from '@lucide/vue'
 import { useHighlightNav } from '@/composables/useHighlightNav.js'
@@ -93,8 +94,8 @@ const routeToTabMap = {
   'resume': 'Resume',
   'admin-evals-overview': 'EvalResults',
   'admin-evals-results': 'EvalResults',
-  'admin-evals-experiments': 'EvalResults',
-  'admin-evals-experiment': 'EvalResults',
+  'admin-evals-experiments': 'EvalExperiments',
+  'admin-evals-experiment': 'EvalExperiments',
   'admin-evals-run': 'EvalResults',
   'admin-evals-benchmarks': 'EvalResults',
   'admin-evals-releases': 'EvalResults',
@@ -116,6 +117,7 @@ const tabToRouteMap = {
   Settings: '/settings',
   Resume: '/resume',
   EvalResults: '/admin/evals/results',
+  EvalExperiments: '/admin/evals/experiments',
   EvalReviews: '/admin/evals/reviews',
 }
 
@@ -233,6 +235,7 @@ const sidebarGroups = computed(() => [
     label: '评测中心',
     tabs: [
       { key: 'EvalResults', label: '评测结果', route: '/admin/evals/results' },
+      { key: 'EvalExperiments', label: '发起评测', route: '/admin/evals/experiments' },
       { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },
     ],
   }] : []),
@@ -254,6 +257,7 @@ const navIconMap = {
   InsightsReadiness: Target,
   InsightsReviews: History,
   EvalResults: ClipboardCheck,
+  EvalExperiments: FlaskConical,
   EvalReviews: Scale,
 }
 
