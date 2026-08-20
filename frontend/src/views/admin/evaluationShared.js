@@ -139,7 +139,7 @@ export function statusClass(status) {
 
 export function formatDate(value) {
   if (!value) return '—'
-  const date = new Date(String(value).replace(' ', 'T') + (String(value).includes('Z') ? '' : 'Z'))
+  const date = new Date(String(value).replace(' ', 'T'))
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
 }
 
@@ -275,4 +275,59 @@ export function turnMetadata(turn) {
     hasSummary: meta.has_summary ?? meta.hasSummary ?? null,
     events: turn?.events || [],
   }
+}
+
+export const PROGRESS_THRESHOLDS = { poor: 0.6 }
+
+export function classifyItemQuality(item) {
+  if (!item) return 'pending'
+  const hardFailed = item.hard_gate_status === 'failed' || item.status === 'failed' || item.quality_status === 'failed'
+  if (hardFailed) return 'failed'
+  const score = item.score ?? item.result?.score?.score ?? item.result?.score?.final
+  const judgeStatus = item.judge_status ?? item.result?.score?.judge_status
+  if (judgeStatus === 'succeeded' && score != null && Number(score) < PROGRESS_THRESHOLDS.poor) return 'poor'
+  // treat low judge score as poor even without explicit judge_status if score present and hard passed
+  if (item.hard_gate_status === 'passed' && score != null && Number(score) < PROGRESS_THRESHOLDS.poor) return 'poor'
+  if (item.hard_gate_status === 'passed' || item.contract_status === 'passed' || item.status === 'completed') return 'passed'
+  if (item.status === 'running' || item.status === 'queued' || item.status === 'created') return 'pending'
+  // pending judge or not evaluated -> if completed but no score yet, treat as pending for progress gap
+  if (item.status === 'completed' && item.judge_status === 'pending') return 'pending'
+  return item.status === 'completed' ? 'passed' : 'pending'
+}
+
+export function runDistribution(source) {
+  const items = Array.isArray(source) ? source : (source?.items || [])
+  const total = Array.isArray(source) ? items.length : (source?.total_items ?? items.length)
+  if (!total) return { total: 0, passed: 0, poor: 0, failed: 0, pending: 0, pct: { passed: 0, poor: 0, failed: 0, pending: 0 } }
+  const counts = { passed: 0, poor: 0, failed: 0, pending: 0 }
+  for (const it of items) {
+    const cls = classifyItemQuality(it)
+    if (counts[cls] != null) counts[cls]++
+    else counts.pending++
+  }
+  // 补齐 total 与 items 长度差（未拉取全量时）
+  const accounted = counts.passed + counts.poor + counts.failed
+  const pendingFromTotal = Math.max(0, total - accounted)
+  // pending 取 max(已分类pending, 总量补齐)
+  counts.pending = Math.max(counts.pending, pendingFromTotal)
+  // 若三段和超总量（重复计数），规范化 pending
+  if (counts.passed + counts.poor + counts.failed + counts.pending > total) {
+    counts.pending = Math.max(0, total - counts.passed - counts.poor - counts.failed)
+  }
+  const pct = n => (total ? Math.round((n / total) * 100) : 0)
+  // 修正四舍五入和≠100问题：最后一段补齐
+  let pctPassed = pct(counts.passed)
+  let pctPoor = pct(counts.poor)
+  let pctFailed = pct(counts.failed)
+  let pctPending = 100 - pctPassed - pctPoor - pctFailed
+  if (total && pctPending < 0) pctPending = 0
+  if (total && counts.pending === 0) pctPending = 0
+  // 若 pending 为 0 但和≠100，微调 failed
+  const sum = pctPassed + pctPoor + pctFailed + pctPending
+  if (total && sum !== 100 && counts.pending > 0) {
+    pctPending += 100 - sum
+  } else if (total && sum !== 100) {
+    pctFailed += 100 - sum
+  }
+  return { total, ...counts, pct: { passed: pctPassed, poor: pctPoor, failed: pctFailed, pending: pctPending } }
 }

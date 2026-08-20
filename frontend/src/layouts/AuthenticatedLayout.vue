@@ -760,7 +760,7 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         <div class="flex-1 min-h-0 h-full overflow-hidden">
           <router-view v-slot="{ Component }">
             <Transition name="page-route" mode="out-in">
-              <component :is="Component" :key="route.name || route.path" class="h-full min-h-0" />
+              <component :is="Component" :key="route.fullPath" class="h-full min-h-0" />
             </Transition>
           </router-view>
         </div>

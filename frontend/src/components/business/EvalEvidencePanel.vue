@@ -1,6 +1,5 @@
 <script setup>
 import { ref } from 'vue'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { checkStatusLabel as checkLabel } from '@/views/admin/evaluationShared.js'
 import {
   contractSummaryDetailed,
@@ -67,9 +66,9 @@ function questionSourceLabel(src) {
 </script>
 
 <template>
-  <div aria-label="Case 证据面板" class="flex h-full flex-col">
+  <div aria-label="Case 证据面板" class="rounded-xl border border-border/60 bg-card">
     <!-- 顶部：当前 Case 标识 -->
-    <div v-if="item" class="shrink-0 border-b border-border/60 px-4 py-3">
+    <div v-if="item" class="border-b border-border/60 px-4 py-3">
       <div class="flex items-center justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -91,12 +90,11 @@ function questionSourceLabel(src) {
       </div>
     </div>
 
-    <div v-if="!item" class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+    <div v-if="!item" class="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
       选择一个 Case 查看证据
     </div>
 
-    <ScrollArea v-else class="flex-1">
-      <div class="space-y-5 p-4 text-sm">
+    <div v-else class="space-y-5 p-4 text-sm">
         <!-- P1: Case 概览卡 -->
         <section v-if="evidence?.case" aria-label="Case 概览">
           <h3 class="mb-2 text-xs font-semibold text-muted-foreground">Case 概览</h3>
@@ -262,8 +260,8 @@ function questionSourceLabel(src) {
                 <span class="rounded bg-muted px-1.5 py-0.5">观测 {{ metrics(item).intent_metrics.observed_turn_count }} 轮</span>
                 <span v-if="metrics(item).intent_metrics.missing_intent_count" class="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-700">缺失意图 {{ metrics(item).intent_metrics.missing_intent_count }}</span>
               </div>
-              <div v-if="metrics(item).intent_metrics.results?.length" class="mt-3 overflow-auto">
-                <table class="w-full text-xs">
+              <div v-if="metrics(item).intent_metrics.results?.length" class="mt-3 overflow-x-auto -mx-1 px-1">
+                <table class="min-w-[560px] w-full text-xs">
                   <thead class="text-[11px] text-muted-foreground">
                     <tr class="border-b border-border/60"><th class="px-2 py-1 text-left">轮</th><th class="px-2 py-1 text-left">期望</th><th class="px-2 py-1 text-left">实际</th><th class="px-2 py-1 text-left">结果</th></tr>
                   </thead>
@@ -297,8 +295,8 @@ function questionSourceLabel(src) {
                 <div v-if="metrics(item).metrics.target_alignment != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">岗位匹配</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.target_alignment) }}</div></div>
                 <div v-if="metrics(item).metrics.taxonomy_validity != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">分类有效性</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.taxonomy_validity) }} <span class="text-muted-foreground">· 准确 {{ pct(metrics(item).metrics.classification_accuracy) }}</span></div></div>
               </div>
-              <div v-if="metrics(item).metrics.field_results?.length" class="mt-3 overflow-auto">
-                <table class="w-full text-xs">
+              <div v-if="metrics(item).metrics.field_results?.length" class="mt-3 overflow-x-auto -mx-1 px-1">
+                <table class="min-w-[560px] w-full text-xs">
                   <thead class="text-[11px] text-muted-foreground"><tr class="border-b border-border/60"><th class="px-2 py-1 text-left">字段</th><th class="px-2 py-1 text-left">期望</th><th class="px-2 py-1 text-left">实际</th><th class="px-2 py-1 text-left">结果</th></tr></thead>
                   <tbody>
                     <tr v-for="(fr, i) in metrics(item).metrics.field_results" :key="i" class="border-b border-border/30 last:border-0">
@@ -488,6 +486,5 @@ function questionSourceLabel(src) {
           </div>
         </details>
       </div>
-    </ScrollArea>
   </div>
 </template>

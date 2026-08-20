@@ -7,7 +7,6 @@ import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { createHumanReview, fetchEvaluationRun, fetchEvaluationRuns, fetchHumanReviews } from '@/services/evaluationApi.js'
 import { formatDate, reviewChoiceLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
@@ -144,18 +143,18 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
+  <div class="h-full overflow-y-auto custom-scrollbar custom-scrollbar-always">
     <!-- Header -->
-    <div class="shrink-0 border-b border-border/60">
+    <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
         <EvaluationPageHeader title="人工 A/B：核对版本差异" description="先定位同一个完整评测版本下的两条 Run，再阅读同一 Case 的完整 E2E 回答，最后记录你的判断。" active-key="reviews" />
       </div>
     </div>
 
-    <div v-if="loading" class="flex flex-1 items-center justify-center"><AsyncLoading /></div>
+    <div v-if="loading" class="flex min-h-[320px] items-center justify-center"><AsyncLoading /></div>
     <template v-else>
       <!-- Step indicator + progress -->
-      <div class="shrink-0 mx-auto w-full max-w-[1600px] px-4 pt-4 sm:px-6 lg:px-8">
+      <div class="mx-auto w-full max-w-[1600px] px-4 pt-4 sm:px-6 lg:px-8">
         <div class="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-2.5">
           <div aria-live="polite" v-for="step in [{ number: 1, label: '选择比较组' }, { number: 2, label: '选择两个版本' }, { number: 3, label: '选择 Case' }, { number: 4, label: '提交判断' }]" :key="step.number" :class="['flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs', reviewStep >= step.number ? 'border-primary/30 bg-primary/5 text-primary' : 'border-border/70 text-muted-foreground']"><span class="flex size-4 items-center justify-center rounded-full bg-background text-[10px] font-semibold ring-1 ring-border/70">{{ step.number }}</span>{{ step.label }}</div>
           <div v-if="itemKeys.length" class="ml-auto flex items-center gap-2 text-xs text-muted-foreground" aria-label="A/B 审查进度">
@@ -167,7 +166,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
       </div>
 
       <!-- Main content -->
-      <div class="flex-1 min-h-0 mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
+      <div class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
         <div v-if="!groups.length" class="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-10 text-center"><div class="font-medium">还没有可比较的对比组</div><p class="mt-1 text-sm text-muted-foreground">创建评测时填写相同的版本对比组，完成两条 Run 后就能在这里进行人工 A/B。</p></div>
         <template v-else>
           <!-- Config row -->
@@ -177,7 +176,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
     <SelectValue placeholder="请选择对比组" />
   </SelectTrigger>
   <SelectContent>
-    <SelectItem v-for="group in comparisonGroups" :key="group" :value="group">
+    <SelectItem v-for="group in groups" :key="group" :value="group">
       {{ group }}
     </SelectItem>
   </SelectContent>
@@ -187,10 +186,10 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
           </div>
 
           <!-- Forced side-by-side comparison -->
-          <div class="grid gap-4 lg:grid-cols-2 h-[calc(100vh-340px)] min-h-[400px]">
-            <article v-for="entry in [{ item: itemA, label: '回答 A', run: runA }, { item: itemB, label: '回答 B', run: runB }]" :key="entry.label" class="flex flex-col rounded-xl border border-border/70 bg-muted/20 overflow-hidden">
-              <div class="shrink-0 flex items-start gap-3 border-b border-border/60 p-4"><div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-border/70"><ArrowLeftRight class="size-4" /></div><div><h3 class="font-medium">{{ entry.label }}</h3><p class="mt-0.5 text-xs text-muted-foreground">{{ entry.run?.target_release_key || '选择版本后显示' }}</p></div></div>
-              <ScrollArea class="flex-1">
+          <div class="grid gap-4 lg:grid-cols-2">
+            <article v-for="entry in [{ item: itemA, label: '回答 A', run: runA }, { item: itemB, label: '回答 B', run: runB }]" :key="entry.label" class="flex min-h-[400px] flex-col rounded-xl border border-border/70 bg-muted/20">
+              <div class="flex items-start gap-3 border-b border-border/60 p-4"><div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-border/70"><ArrowLeftRight class="size-4" /></div><div><h3 class="font-medium">{{ entry.label }}</h3><p class="mt-0.5 text-xs text-muted-foreground">{{ entry.run?.target_release_key || '选择版本后显示' }}</p></div></div>
+              <div class="flex-1">
                 <div class="p-4 space-y-3 text-sm">
                   <div v-if="entry.item" class="grid gap-2 text-xs sm:grid-cols-2">
                     <div v-if="metrics(entry.item).tool_metrics" class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">工具调用效果</div><div class="mt-1 text-muted-foreground">{{ metrics(entry.item).tool_metrics?.call_count || 0 }} 次调用 · {{ metrics(entry.item).tool_metrics?.failed_call_count || 0 }} 次失败</div></div>
@@ -218,7 +217,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
                   </div>
                   <div v-else class="flex min-h-40 items-center justify-center text-center text-sm text-muted-foreground">选择两个版本和 Case 后显示完整回答。</div>
                 </div>
-              </ScrollArea>
+              </div>
             </article>
           </div>
 

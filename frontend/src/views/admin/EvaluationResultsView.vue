@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ArrowRight } from '@lucide/vue'
 import { fetchEvaluationExperiments, fetchEvaluationOverview, fetchEvaluationRuns } from '@/services/evaluationApi.js'
-import { buildByTargetSort, evaluationTargetLabel, formatDate, passRate, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { buildByTargetSort, evaluationTargetLabel, formatDate, passRate, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalScoreBar from '@/components/business/EvalScoreBar.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
@@ -67,6 +67,16 @@ function qualityBadgeClass(q) {
   if (q === 'passed') return 'text-emerald-600 bg-emerald-500/10'
   if (q === 'failed') return 'text-destructive bg-destructive/10'
   return 'text-muted-foreground bg-muted'
+}
+
+function progressSegmentsForRun(run) {
+  const d = runDistribution(run)
+  if (!d.total) return null
+  return [
+    { key: 'passed', label: '通过', value: d.passed, pct: d.pct.passed, color: 'bg-emerald-500' },
+    { key: 'poor', label: '不佳', value: d.poor, pct: d.pct.poor, color: 'bg-amber-500' },
+    { key: 'failed', label: '失败', value: d.failed, pct: d.pct.failed, color: 'bg-destructive' },
+  ]
 }
 
 const cards = computed(() => [
@@ -153,9 +163,9 @@ onMounted(load)
         <AppCard class="mt-6" title="最近评测运行" description="默认失败/未通过优先；点击一条查看完整 E2E 详情。">
           <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2">
             <span class="text-xs text-muted-foreground">状态：</span>
-            <Button v-for="f in [{ key: 'all', label: '全部' }, { key: 'completed', label: '完成' }, { key: 'failed', label: '失败/异常' }, { key: 'running', label: '进行中' }]" :key="f.key" variant="ghost" size="sm" :class="['rounded-md px-2 py-1 text-xs transition-colors', statusFilter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="statusFilter = f.key">{{ f.label }}</Button>
+            <Button v-for="f in [{ key: 'all', label: '全部' }, { key: 'completed', label: '完成' }, { key: 'failed', label: '失败/异常' }, { key: 'running', label: '进行中' }]" :key="f.key" variant="ghost" size="sm" :aria-pressed="statusFilter === f.key" :class="['rounded-md px-2 py-1 text-xs transition-colors', statusFilter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="statusFilter = f.key">{{ f.label }}</Button>
             <span class="ml-2 text-xs text-muted-foreground">目标：</span>
-            <Button v-for="target in targetOptions" :key="target" variant="ghost" size="sm" :class="['rounded-md px-2 py-1 text-xs transition-colors', targetFilter === target ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="targetFilter = target">{{ target === '__all__' ? '全部目标' : evaluationTargetLabel(target) }}</Button>
+            <Button v-for="target in targetOptions" :key="target" variant="ghost" size="sm" :aria-pressed="targetFilter === target" :class="['rounded-md px-2 py-1 text-xs transition-colors', targetFilter === target ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="targetFilter = target">{{ target === '__all__' ? '全部目标' : evaluationTargetLabel(target) }}</Button>
           </div>
           <div v-if="!filteredRuns.length" class="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-10 text-center">
             <div class="font-medium">还没有评测记录</div>
@@ -163,11 +173,11 @@ onMounted(load)
             <Button class="mt-4" size="sm" @click="router.push('/admin/evals/experiments')">开始一次完整评测</Button>
           </div>
           <div aria-live="polite" v-else class="divide-y divide-border/60">
-            <Button
+            <button
               v-for="run in filteredRuns"
               :key="run.id"
-              variant="ghost" size="sm"
-              class="flex w-full flex-col gap-3 p-4 text-left transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-4"
+              type="button"
+              class="flex w-full min-w-0 flex-col gap-3 p-4 text-left transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-4"
               @click="router.push(`/admin/evals/runs/${run.id}`)"
             >
               <div class="min-w-0 flex-1">
@@ -181,11 +191,12 @@ onMounted(load)
                 </div>
                 <div class="mt-1 text-xs text-muted-foreground">{{ formatDate(run.created_at) }} · 被测：{{ run.target_release_key || '未命名' }}</div>
               </div>
-              <div class="w-full sm:w-48 shrink-0 space-y-1">
+              <div class="w-full shrink-0 space-y-1 sm:w-52">
                 <EvalScoreBar :deterministic="run.score?.deterministic_mean" :judge="run.score?.judge_mean" :final="run.score?.final_mean" />
-                <div class="flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div>
+                <EvalProgressBar :segments="progressSegmentsForRun(run)" size="sm" />
+                <div class="flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} 已跑</span><span class="inline-flex gap-1"><span class="text-emerald-600">{{ runDistribution(run).passed }}通</span><span class="text-amber-600">{{ runDistribution(run).poor }}不佳</span><span class="text-destructive">{{ runDistribution(run).failed }}败</span></span></div>
               </div>
-            </Button>
+            </button>
           </div>
         </AppCard>
 

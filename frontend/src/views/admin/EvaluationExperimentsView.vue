@@ -227,7 +227,7 @@ onMounted(load)
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <EvaluationPageHeader title="发起一次评测" description="选择一个被测版本和一个完整评测版本，系统会冻结所有参数，启动可恢复的多轮 E2E。" active-key="experiments" />
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
-      <div v-else class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,500px)_minmax(0,1fr)]">
+      <div v-else class="mt-6 grid gap-6 xl:grid-cols-[minmax(280px,520px)_minmax(0,1fr)]">
         <AppCard title="评测配置" description="一个完整评测版本就是一套一致的题集、规则、模型和 Harness；同一批次内不会混用。">
           <form class="space-y-3" @submit.prevent="submit">
             <EvaluationTargetPicker :model-value="selectedTargetType" :capabilities="capabilities" @update:model-value="selectTargetType" />
@@ -286,7 +286,7 @@ onMounted(load)
           <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <div>
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                <label v-for="capability in capabilities" :key="capability.target_type" class="flex cursor-pointer gap-3 rounded-lg border border-border/70 bg-background p-3 text-left has-[:checked]:border-primary has-[:checked]:bg-primary/5" :class="{ 'cursor-not-allowed opacity-60': !capability.can_run }">
+                <label v-for="capability in capabilities" :key="capability.target_type" :class="['flex cursor-pointer gap-3 rounded-lg border p-3 text-left', selectedExperimentTargets.includes(capability.target_type) ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-border/70 bg-background has-[:checked]:border-primary has-[:checked]:bg-primary/5', { 'cursor-not-allowed opacity-60': !capability.can_run }]">
                   <Checkbox 
                 :checked="selectedExperimentTargets.includes(capability.target_type)" 
                 :disabled="!capability.can_run" 

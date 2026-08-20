@@ -61,22 +61,25 @@ function itemDotClass(item) {
       </label>
     </div>
     <!-- 筛选 -->
-    <div class="flex gap-1 border-b border-border/60 px-3 py-2">
-      <button v-for="f in [{ key: 'all', label: '全部' }, { key: 'failed', label: '失败' }, { key: 'running', label: '进行中' }]" :key="f.key" type="button" :class="['rounded-md px-2 py-1 text-[11px] transition-colors', filter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="filter = f.key">{{ f.label }}</button>
+    <div class="flex gap-1 border-b border-border/60 px-3 py-2" role="group" aria-label="Case 筛选">
+      <button v-for="f in [{ key: 'all', label: '全部' }, { key: 'failed', label: '失败' }, { key: 'running', label: '进行中' }]" :key="f.key" type="button" :aria-pressed="filter === f.key" :class="['rounded-md px-2 py-1 text-[11px] transition-colors', filter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="filter = f.key">{{ f.label }}</button>
     </div>
-    <div class="flex-1 overflow-y-auto custom-scrollbar">
+    <div class="flex-1 overflow-y-auto custom-scrollbar" role="listbox" aria-label="Case 列表">
       <button
         v-for="item in filteredItems"
         :key="item.id"
         type="button"
+        role="option"
+        :aria-selected="activeId === item.id"
         :aria-current="activeId === item.id ? 'true' : undefined"
+        :title="`${item.case_key} #${item.replication_index} ${gateMeta(item).label} ${scoreDisplay(item)}`"
         :class="[
           'eval-case-item flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors border-b border-border/30',
           activeId === item.id ? 'bg-primary/10 text-primary border-l-2 border-l-primary' : 'hover:bg-muted/40 text-foreground border-l-2 border-l-transparent',
         ]"
         @click="selectItem(item)"
       >
-        <span :class="['size-1.5 shrink-0 rounded-full', itemDotClass(item)]" />
+        <span :class="['size-1.5 shrink-0 rounded-full', itemDotClass(item)]" aria-hidden="true" />
         <span class="min-w-0 flex-1 truncate">
           <span class="font-medium">{{ item.case_key }}</span>
           <span class="ml-1 text-[10px] text-muted-foreground">#{{ item.replication_index }}</span>

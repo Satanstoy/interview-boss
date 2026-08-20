@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Ban, CheckCircle2, Circle, Radio, RefreshCw } from '@lucide/vue'
 import EvalCaseNavigator from '@/components/business/EvalCaseNavigator.vue'
@@ -8,7 +8,7 @@ import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationRun, fetchEvaluationItem, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
-import { casePrioritySort, qualityStatusLabel, runProgress, statusClass, statusLabel } from './evaluationShared.js'
+import { casePrioritySort, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
 import { Badge } from '@/components/ui/badge'
@@ -24,18 +24,24 @@ const evidence = ref(null)
 const evidenceLoading = ref(false)
 const evidenceError = ref('')
 const retrying = ref(false)
-const abortController = new AbortController()
-const progress = computed(() => runProgress(run.value))
+let abortController = new AbortController()
+let stopped = false
 const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(run.value?.status))
 
 const sortedItems = computed(() => casePrioritySort(run.value?.items || []))
+const distribution = computed(() => runDistribution(run.value))
+const progressSegments = computed(() => [
+  { key: 'passed', label: '通过', value: distribution.value.passed, pct: distribution.value.pct.passed, color: 'bg-emerald-500' },
+  { key: 'poor', label: '不佳', value: distribution.value.poor, pct: distribution.value.pct.poor, color: 'bg-amber-500' },
+  { key: 'failed', label: '失败', value: distribution.value.failed, pct: distribution.value.pct.failed, color: 'bg-destructive' },
+])
 function progressStats() {
+  const d = distribution.value
+  // 保留旧字段兼容，同时补充 poor/pending
   const items = run.value?.items || []
-  const passed = items.filter(i => i.status === 'completed' && i.hard_gate_status === 'passed').length
-  const failed = items.filter(i => i.status === 'failed' || (i.status === 'completed' && i.hard_gate_status === 'failed')).length
   const running = items.filter(i => i.status === 'running' || i.status === 'queued').length
   const judgePending = items.filter(i => i.status === 'completed' && i.judge_status === 'pending').length
-  return { total: items.length, passed, failed, running, judgePending }
+  return { total: d.total, passed: d.passed, poor: d.poor, failed: d.failed, pending: d.pending, running, judgePending }
 }
 
 const phases = [
@@ -81,15 +87,17 @@ async function load() {
 }
 
 async function watchEvents() {
-  while (!abortController.signal.aborted && !terminal.value) {
+  while (!abortController.signal.aborted && !terminal.value && !stopped) {
     try {
       await streamEvaluationRun(route.params.runId, event => {
+        if (stopped) return
         lastSequence.value = Math.max(lastSequence.value, Number(event.sequence || 0))
         load()
       }, { signal: abortController.signal, headers: lastSequence.value ? { 'Last-Event-ID': String(lastSequence.value) } : {} })
+      if (stopped) return
       await load()
     } catch (err) {
-      if (err.name === 'AbortError') return
+      if (stopped || err.name === 'AbortError') return
       error.value = err.message || '进度流中断，正在重连'
       await new Promise(resolve => setTimeout(resolve, 1000))
     }
@@ -162,6 +170,22 @@ function onMobileSelect() {
   if (item) loadEvidence(item)
 }
 
+watch(() => route.params.runId, async (newId, oldId) => {
+  if (newId === oldId) return
+  stopped = true
+  abortController.abort()
+  abortController = new AbortController()
+  stopped = false
+  lastSequence.value = 0
+  run.value = null
+  activeCaseId.value = null
+  evidence.value = null
+  loading.value = true
+  error.value = ''
+  await load()
+  watchEvents()
+})
+
 onMounted(async () => {
   document.addEventListener('keydown', handleKeydown)
   await load()
@@ -169,13 +193,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopped = true
   abortController.abort()
   document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 <template>
-  <div class="flex flex-col h-full">
-    <div class="shrink-0 border-b border-border/60">
+  <div class="h-full overflow-y-auto custom-scrollbar custom-scrollbar-always">
+    <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
         <EvaluationPageHeader :title="`评测运行 #${route.params.runId}`" description="跟踪完整 E2E 的进度；最终分数由规则指标与固定 Judge 按评测协议合成。" active-key="experiments">
           <template #actions>
@@ -193,17 +218,18 @@ onUnmounted(() => {
           <span :class="['rounded-full px-2.5 py-1 text-sm', statusClass(run.quality_status)]">{{ qualityStatusLabel(run.quality_status) }}</span>
           <span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span>
           <div class="hidden lg:block h-4 w-px bg-border/60" />
-          <div aria-label="Case 进度" class="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Case {{ progressStats().passed + progressStats().failed }} / {{ progressStats().total }}</span>
-            <span class="text-emerald-600">{{ progressStats().passed }} 通过</span>
-            <span class="text-destructive">{{ progressStats().failed }} 失败</span>
+          <div aria-label="Case 进度" class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Case {{ distribution.passed + distribution.poor + distribution.failed }} / {{ distribution.total }}</span>
+            <span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-emerald-500" />{{ distribution.passed }} 通过</span>
+            <span v-if="distribution.poor" class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-amber-500" />{{ distribution.poor }} 不佳</span>
+            <span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-destructive" />{{ distribution.failed }} 失败</span>
+            <span v-if="distribution.pending" class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-muted-foreground/30" />{{ distribution.pending }} 未跑</span>
             <span v-if="progressStats().running" class="text-amber-600">{{ progressStats().running }} 进行中</span>
-            <span v-if="progressStats().judgePending" class="text-muted-foreground">{{ progressStats().judgePending }} Judge 待评</span>
           </div>
-          <span class="ml-auto text-lg font-semibold">{{ progress }}%</span>
+          <span class="ml-auto text-lg font-semibold">{{ distribution.total ? Math.round(((distribution.passed + distribution.poor + distribution.failed)/distribution.total)*100) : 0 }}%</span>
         </div>
-        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <EvalProgressBar :value="progress" size="sm" />
+        <div class="mt-2">
+          <EvalProgressBar :segments="progressSegments" size="sm" show-legend />
         </div>
       </div>
       <!-- SSE 重连状态提示 -->
@@ -215,7 +241,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 分数汇总 + 阶段指示器 + 版本信息 -->
-    <div v-if="run && !loading" class="mx-auto w-full max-w-[1600px] px-4 pb-4 sm:px-6 lg:px-8">
+    <div v-if="run && !loading" class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
       <div v-if="run.summary?.metric_summary" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div v-if="run.summary.metric_summary.score" class="rounded-lg bg-primary/5 p-3 text-xs">
           <div class="font-medium">混合主分（Run 汇总）</div>
@@ -254,7 +280,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 主工作区 -->
-    <div v-if="loading" class="flex flex-1 items-center justify-center"><AsyncLoading /></div>
+    <div v-if="loading" class="flex min-h-[320px] items-center justify-center"><AsyncLoading /></div>
     <p v-else-if="error && !run" class="m-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
     <template v-else-if="run">
       <!-- 移动端 Case 切换下拉 -->
@@ -273,15 +299,17 @@ onUnmounted(() => {
 </Select>
         </label>
       </div>
-      <div class="flex flex-1 min-h-0 mx-auto w-full max-w-[1600px]">
-        <div class="hidden w-72 shrink-0 border-r border-border/60 md:block">
-          <EvalCaseNavigator :items="run.items || []" :active-id="activeCaseId" sort-mode="priority" @select="id => { const item = (run.items || []).find(i => i.id === id); if (item) loadEvidence(item) }" />
+      <div class="mx-auto flex w-full max-w-[1600px] gap-4 px-4 pb-6 sm:px-6 lg:px-8">
+        <div class="hidden w-72 shrink-0 md:block">
+          <div class="sticky top-4">
+            <EvalCaseNavigator :items="run.items || []" :active-id="activeCaseId" sort-mode="priority" @select="id => { const item = (run.items || []).find(i => i.id === id); if (item) loadEvidence(item) }" />
+          </div>
         </div>
-        <div class="flex-1 min-w-0">
+        <div class="min-w-0 flex-1">
           <EvalEvidencePanel :item="run.items?.find(i => i.id === activeCaseId)" :evidence="evidence" :loading="evidenceLoading" :error="evidenceError" />
         </div>
       </div>
-      <p v-if="error" class="mx-4 mb-4 rounded-md bg-amber-500/10 p-3 text-sm text-amber-700">{{ error }}</p>
+      <p v-if="error" class="mx-auto max-w-[1600px] px-4 pb-6 text-sm text-amber-700">{{ error }}</p>
     </template>
   </div>
 </template>
