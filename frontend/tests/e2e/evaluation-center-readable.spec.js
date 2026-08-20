@@ -291,6 +291,7 @@ test.describe('评测中心可读性', () => {
     await expect(sidebar.locator('..').getByText('发起评测', { exact: true })).toHaveCount(0)
 
     await expect(page.getByText('本次评测范围')).toBeVisible()
+    await expect(page.locator('[aria-label="评测流程"]')).toHaveCount(0)
     await expect(page.getByText('Harness 版本')).toBeVisible()
     await expect(page.getByText('评测集版本')).toBeVisible()
     await expect(page.getByText('interview-harness@0.9')).toBeVisible()
@@ -306,7 +307,7 @@ test.describe('评测中心可读性', () => {
     const sidebar = page.locator('[data-sidebar-section]').filter({ hasText: '评测中心' })
     await sidebar.locator('..').getByText('测评实验', { exact: true }).click()
     await expect(page).toHaveURL(/\/admin\/evals\/experiments/)
-    await expect(page.getByRole('heading', { name: '测评实验' })).toBeVisible()
+    await expect(page.locator('[data-evaluation-workbench]')).toBeVisible()
     await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
   })
 
@@ -367,7 +368,7 @@ test.describe('评测中心可读性', () => {
   test('测评实验默认展示进行中工作台', async ({ page }) => {
     await page.goto('/admin/evals/experiments?preview=1')
 
-    await expect(page.getByRole('heading', { name: '测评实验' })).toBeVisible()
+    await expect(page.locator('[data-evaluation-workbench]')).toBeVisible()
     await expect(page.getByRole('tab', { name: /进行中的测评/ })).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByText('实验 #88')).toBeVisible()
     await expect(page.getByText('interview-harness@1.1')).toBeVisible()
@@ -404,17 +405,15 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('实验 #77')).toBeVisible()
   })
 
-  test('流程导航展示测评实验、结果和人工 A/B', async ({ page }) => {
-    await page.goto('/admin/evals/releases?preview=1')
+  test('评测实验工作区不展示重复标题和流程导航', async ({ page }) => {
+    await page.goto('/admin/evals/experiments?preview=1')
 
-    const flowSteps = page.locator('[aria-label="评测中心流程位置"] > div')
-    await expect(flowSteps.first()).toBeVisible({ timeout: 15000 })
-    const labels = await flowSteps.allTextContents()
-    const evaluationLabels = ['测评实验', '评测结果', '人工 A/B']
-    const positions = evaluationLabels.map(label => labels.findIndex(text => text.includes(label)))
-
-    expect(positions.every(position => position >= 0)).toBeTruthy()
-    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    const workbench = page.locator('[data-evaluation-workbench]')
+    await expect(workbench).toBeVisible({ timeout: 15000 })
+    await expect(workbench.getByText('管理正在运行的测评实验，或创建一次固定版本、固定参数的评测。', { exact: true })).toHaveCount(0)
+    await expect(workbench.getByText('评测流程', { exact: true })).toHaveCount(0)
+    await expect(workbench.locator('[aria-label="评测中心流程位置"]')).toHaveCount(0)
+    await expect(workbench.getByRole('heading', { name: '测评实验', exact: true })).toHaveCount(0)
     await expect(page.getByText('版本与评测集', { exact: true })).toHaveCount(0)
     await expect(page.getByText('发起评测', { exact: true })).toHaveCount(0)
   })
@@ -469,6 +468,7 @@ test.describe('评测中心可读性', () => {
 
     await page.goto('/admin/evals/reviews?preview=1')
     await expect(page.getByRole('heading', { name: '人工 A/B：核对版本差异' })).toBeVisible()
+    await expect(page.locator('[aria-label="评测流程"]')).toHaveCount(0)
     await expect(page.getByText('先定位同一个完整评测版本下的两条 Run')).toBeVisible()
   })
 })

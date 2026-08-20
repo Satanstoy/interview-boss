@@ -1,13 +1,10 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import AppPageHeader from '@/components/common/AppPageHeader.vue'
-import EvaluationFlowNav from './EvaluationFlowNav.vue'
 
 defineProps({
   title: { type: String, required: true },
   description: { type: String, required: true },
-  activeKey: { type: String, default: '' },
-  showFlow: { type: Boolean, default: true },
 })
 
 const router = useRouter()
@@ -29,6 +26,5 @@ function navigate(crumb) {
         <slot name="actions" />
       </template>
     </AppPageHeader>
-    <EvaluationFlowNav v-if="showFlow" :active-key="activeKey" />
   </div>
 </template>

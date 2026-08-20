@@ -194,7 +194,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
     <!-- Header -->
     <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
-        <EvaluationPageHeader title="人工 A/B：核对版本差异" description="先定位同一个完整评测版本下的两条 Run，再阅读同一 Case 的完整 E2E 回答，最后记录你的判断。" active-key="reviews" />
+        <EvaluationPageHeader title="人工 A/B：核对版本差异" description="先定位同一个完整评测版本下的两条 Run，再阅读同一 Case 的完整 E2E 回答，最后记录你的判断。" />
       </div>
     </div>
 

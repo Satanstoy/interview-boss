@@ -175,7 +175,6 @@ onMounted(load)
       <EvaluationPageHeader
         title="评测结果"
         description="先看哪些 Case 没达标，再进入评测详情查看执行表现和业务结果。"
-        active-key="results"
       >
         <template #actions>
           <Button variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新结果</Button>

@@ -70,12 +70,6 @@ export const EVALUATION_TARGETS = [
   },
 ]
 
-export const EVALUATION_FLOW_STEPS = [
-  { key: 'experiments', keys: ['experiments', 'EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment'], label: '测评实验', description: '创建实验并跟踪运行', route: '/admin/evals/experiments' },
-  { key: 'results', keys: ['results', 'releases', 'run', 'EvalResults', 'EvalOverview', 'EvalReleases', 'admin-evals-overview', 'admin-evals-results', 'admin-evals-releases', 'admin-evals-benchmarks', 'admin-evals-run'], label: '评测结果', description: '看指标、进度和 Case 状态', route: '/admin/evals/results' },
-  { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验版本差异', route: '/admin/evals/reviews' },
-]
-
 export const RELEASE_TYPE_META = {
   target: { title: '被测版本', description: '待评测的 Agent、Workflow 或 Pipeline。' },
   evaluation: { title: '完整评测版本', description: '一次评测所使用的题集、规则、模型、Harness 和模拟器整体版本。' },

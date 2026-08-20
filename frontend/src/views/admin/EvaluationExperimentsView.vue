@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationExperiment, createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
 import { evaluationTargetLabel, formatDate, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
-import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
 import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
 
@@ -384,14 +383,7 @@ onUnmounted(() => {
 <template>
   <div class="h-full min-h-0 overflow-hidden custom-scrollbar" data-evaluation-workbench>
     <div class="mx-auto flex h-full min-h-0 max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-      <EvaluationPageHeader title="测评实验" description="管理正在运行的测评实验，或创建一次固定版本、固定参数的评测。" active-key="experiments">
-        <template #actions>
-          <Button v-if="activeTab === 'active'" @click="selectTab('create')"><Play class="mr-1.5 size-4" />创建测评</Button>
-          <Button v-else variant="outline" @click="selectTab('active')"><Eye class="mr-1.5 size-4" />查看进行中</Button>
-        </template>
-      </EvaluationPageHeader>
-
-      <div class="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm">
         <div role="tablist" aria-label="测评实验工作区" class="flex shrink-0 items-center gap-1 border-b border-border/70 px-3 pt-2 sm:px-5">
           <button role="tab" type="button" :aria-selected="activeTab === 'active'" :class="['inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition-colors', activeTab === 'active' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground']" @click="selectTab('active')">
             进行中的测评
