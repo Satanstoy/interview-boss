@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationExperiment, createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
-import { evaluationTargetLabel, formatDate, statusClass, statusLabel } from './evaluationShared.js'
+import { evaluationTargetLabel, formatDate, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
 import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
@@ -47,6 +47,34 @@ function experimentProgress(experiment) {
     return Math.round((((experiment.completed_runs || 0) + (experiment.failed_runs || 0) + (experiment.cancelled_runs || 0)) / experiment.total_runs) * 100)
   }
   return 0
+}
+
+function experimentDistribution(experiment) {
+  const distributions = (experiment?.runs || []).map(run => runDistribution(run)).filter(item => item.total)
+  if (!distributions.length) {
+    const total = Number(experiment?.total_items || 0)
+    const failed = Number(experiment?.failed_items || 0)
+    const pending = Math.max(0, total - Number(experiment?.completed_items || 0) - failed)
+    return runDistribution({ distribution: { total, passed: 0, poor: 0, failed, pending } })
+  }
+  const counts = distributions.reduce((total, item) => ({
+    total: total.total + item.total,
+    passed: total.passed + item.passed,
+    poor: total.poor + item.poor,
+    failed: total.failed + item.failed,
+    pending: total.pending + item.pending,
+  }), { total: 0, passed: 0, poor: 0, failed: 0, pending: 0 })
+  return runDistribution({ distribution: counts })
+}
+
+function experimentOutcomeSegments(experiment) {
+  const distribution = experimentDistribution(experiment)
+  return [
+    { key: 'passed', label: '通过', value: distribution.passed, pct: distribution.pct.passed, color: 'bg-emerald-500' },
+    { key: 'poor', label: '不佳', value: distribution.poor, pct: distribution.pct.poor, color: 'bg-amber-500' },
+    { key: 'failed', label: '失败', value: distribution.failed, pct: distribution.pct.failed, color: 'bg-destructive' },
+    { key: 'pending', label: '未完成', value: distribution.pending, pct: distribution.pct.pending, color: 'bg-muted-foreground/30', pattern: true },
+  ]
 }
 
 function experimentTargets(experiment) {
@@ -420,8 +448,10 @@ onUnmounted(() => {
                   <td class="px-4 py-4"><Badge :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge></td>
                   <td class="w-44 px-4 py-4">
                     <div class="flex items-center justify-between gap-2 text-xs"><span class="font-medium">{{ experimentProgress(experiment) }}%</span><span class="text-muted-foreground">{{ experiment.completed_items || 0 }} / {{ experiment.total_items || 0 }} Cases</span></div>
-                    <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${experimentProgress(experiment)}%` }" /></div>
-                    <div class="mt-1 text-[11px] text-muted-foreground">{{ experiment.failed_items || 0 }} 失败</div>
+                    <div class="mt-2 flex h-2 overflow-hidden rounded-full bg-muted" :aria-label="`Case 结果：${experimentDistribution(experiment).passed} 通过，${experimentDistribution(experiment).poor} 不佳，${experimentDistribution(experiment).failed} 失败，${experimentDistribution(experiment).pending} 未完成`">
+                      <div v-for="segment in experimentOutcomeSegments(experiment)" :key="segment.key" :class="['h-full transition-all', segment.color]" :style="{ width: `${segment.pct}%`, ...(segment.pattern ? { backgroundImage: 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(255,255,255,.35) 4px, rgba(255,255,255,.35) 8px)' } : {}) }" :title="`${segment.label} ${segment.value} (${segment.pct}%)`" />
+                    </div>
+                    <div class="mt-1 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground"><span class="text-emerald-600">{{ experimentDistribution(experiment).passed }} 通过</span><span class="text-amber-600">{{ experimentDistribution(experiment).poor }} 不佳</span><span class="text-destructive">{{ experimentDistribution(experiment).failed }} 失败</span><span>{{ experimentDistribution(experiment).pending }} 未完成</span></div>
                   </td>
                   <td class="whitespace-nowrap px-4 py-4 text-xs text-muted-foreground">{{ formatDate(experiment.created_at) }}</td>
                   <td class="px-4 py-4">

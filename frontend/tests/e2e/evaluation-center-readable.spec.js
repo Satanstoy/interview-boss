@@ -175,6 +175,7 @@ const activeExperimentPayload = {
       total_items: 12,
       completed_items: 5,
       failed_items: 1,
+      distribution: { total: 12, passed: 3, poor: 1, failed: 1, pending: 7 },
       created_at: '2026-08-20T10:00:00Z',
     },
   ],
@@ -372,6 +373,8 @@ test.describe('评测中心可读性', () => {
     await expect(page.getByText('interview-harness@1.1')).toBeVisible()
     await expect(page.getByText('interview-benchmark@1.1')).toBeVisible()
     await expect(page.getByText('5 / 12 Cases')).toBeVisible()
+    await expect(page.getByText('3 通过')).toBeVisible()
+    await expect(page.getByText('1 不佳')).toBeVisible()
   })
 
   test('测评实验可以切换到创建测评 Tab', async ({ page }) => {

@@ -836,6 +836,7 @@ async def list_experiments(
                 ).fetchall():
                     child = dict(child)
                     child["quality_status"] = _quality_status(conn, child["run_id"], child["status"])
+                    child["distribution"] = _run_progress_distribution(conn, child["run_id"])
                     child_quality.append(child["quality_status"])
                     item["runs"].append(child)
                 children = item["runs"]

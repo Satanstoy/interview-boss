@@ -747,6 +747,7 @@ def test_list_experiments_returns_summaries_with_runs(test_db, monkeypatch):
     assert "project_harness_key" in item["runs"][0]
     assert "project_harness_version" in item["runs"][0]
     assert item["runs"][0]["benchmark_suite_release_key"] == item["runs"][0]["evaluation_release_key"]
+    assert item["runs"][0]["distribution"]["total"] == item["runs"][0]["total_items"]
 
 
 def test_list_experiments_status_filter(test_db, monkeypatch):
