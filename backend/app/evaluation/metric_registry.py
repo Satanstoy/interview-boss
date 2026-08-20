@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 
+# This is part of the progress-colour contract. Keep it stable so historical
+# runs remain comparable even when their old manifest omitted thresholds.
+DEFAULT_POOR_SCORE_THRESHOLD = 0.6
+
+
 def _metric(
     key: str,
     label: str,
@@ -235,12 +240,12 @@ def quality_threshold_from_manifest(manifest: dict[str, Any] | None) -> float | 
     if not isinstance(thresholds, dict):
         thresholds = manifest.get("quality_thresholds")
     if not isinstance(thresholds, dict):
-        return None
+        return DEFAULT_POOR_SCORE_THRESHOLD
     value = thresholds.get("poor_score_below")
     try:
-        return float(value) if value is not None else None
+        return float(value) if value is not None else DEFAULT_POOR_SCORE_THRESHOLD
     except (TypeError, ValueError):
-        return None
+        return DEFAULT_POOR_SCORE_THRESHOLD
 
 
 def _source_value(summary: dict[str, Any], metric: dict[str, Any]) -> Any:

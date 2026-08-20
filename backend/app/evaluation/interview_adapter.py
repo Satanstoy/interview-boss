@@ -296,7 +296,14 @@ class InterviewE2EAdapter:
             )
             return passed, "later question followed a tool event" if passed else "no later question after tool event"
         if "raw_tool_leak" in normalized:
-            leak_markers = ("deterministic-interview-search", "search_questions", "raw tool", "tool payload")
+            leak_markers = (
+                "deterministic-interview-search",
+                "question-bank-draw",
+                "search_questions",
+                "draw_questions",
+                "raw tool",
+                "tool payload",
+            )
             passed = not any(marker.lower() in assistant_text.lower() for marker in leak_markers)
             return passed, "no raw tool marker in assistant output" if passed else "raw tool marker leaked"
         if "correction" in normalized:
@@ -316,4 +323,7 @@ class InterviewE2EAdapter:
                 token in assistant_text for token in ("面试总结", "就到这里", "有什么想问", "结束")
             ) or any(turn.get("metadata", {}).get("has_summary") for turn in turns)
             return passed, "observed closing evidence" if passed else "no closing evidence"
-        return bool(turns), "completed at least one interview turn" if turns else "no interview turn"
+        return (
+            False,
+            f"unsupported interview assertion: {assertion_id}",
+        )

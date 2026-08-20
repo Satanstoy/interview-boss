@@ -3,6 +3,7 @@ from app.evaluation.metric_registry import (
     build_progress_distribution,
     build_metric_cards,
     get_target_metric_definition,
+    quality_threshold_from_manifest,
 )
 
 
@@ -94,3 +95,8 @@ def test_build_progress_distribution_separates_execution_and_quality_outcomes():
         "failed": 1,
         "pending": 1,
     }
+
+
+def test_quality_threshold_uses_stable_default_for_legacy_manifests():
+    assert quality_threshold_from_manifest({"protocol": {"version": "1.0"}}) == 0.6
+    assert quality_threshold_from_manifest({}) == 0.6

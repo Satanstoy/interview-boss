@@ -16,7 +16,7 @@ def test_builtin_catalog_publishes_each_target_and_matching_eval_release(test_db
 
     expected = {
         ("interview-agent@1.0", "target", "interview", "1.0", "published"),
-        ("interview-eval@1.0", "evaluation", "interview", "1.0", "published"),
+        ("interview-eval@1.1", "evaluation", "interview", "1.1", "published"),
         ("experience-extraction@1.0", "target", "experience_extraction", "1.0", "published"),
         ("experience-extraction-eval@1.0", "evaluation", "experience_extraction", "1.0", "published"),
         ("jd-extraction@1.0", "target", "jd_extraction", "1.0", "published"),
@@ -230,6 +230,7 @@ def test_resume_evaluation_release_materializes_and_aggregates_non_interview_met
         evaluation_release_id=evaluation["id"],
         replication_count=1,
         seed=9,
+        case_keys=["grounded_backend"],
     )
     test_db.commit()
 

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationReleases } from '@/services/evaluationApi.js'
+import { createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
 import { evaluationTargetLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvaluationStepCard from './EvaluationStepCard.vue'
@@ -19,11 +19,12 @@ const route = useRoute()
 const releases = ref([])
 const capabilities = ref([])
 const benchmarks = ref([])
+const harnesses = ref([])
 const loading = ref(true)
 const submitting = ref(false)
 const experimentSubmitting = ref(false)
 const error = ref('')
-const form = ref({ target: '', evaluation: '', replication: 5, seed: 1, environment: 'local-baseline', comparison: '' })
+const form = ref({ target: '', evaluation: '', harness: '', replication: 5, seed: 1, environment: 'local-baseline', comparison: '' })
 const selectedTargetType = ref('interview')
 const selectedExperimentTargets = ref([])
 
@@ -39,6 +40,10 @@ const selectedCapability = computed(() => capabilities.value.find(item => (
   && String(item.evaluation_release?.id || '') === String(form.value.evaluation)
 )))
 const runnableCapabilities = computed(() => capabilities.value.filter(item => item.can_run))
+const availableHarnesses = computed(() => harnesses.value.filter(harness => (
+  harness.status === 'published' && harness.target_type === selectedTargetType.value
+)))
+const selectedHarness = computed(() => availableHarnesses.value.find(harness => String(harness.id) === String(form.value.harness)))
 
 function manifestOf(release) {
   if (release?.manifest && typeof release.manifest === 'object') return release.manifest
@@ -50,7 +55,7 @@ const evaluationConfig = computed(() => {
   return {
     benchmark: manifest.benchmark?.suite_key || '—',
     judge: manifest.judge?.model || selectedEvaluation.value?.judge_model || '—',
-    harness: manifest.simulator_harness?.version || '1.0',
+    harness: selectedHarness.value ? `${selectedHarness.value.harness_key}@${selectedHarness.value.version}` : (selectedEvaluation.value?.project_harness_release_key || '未记录'),
     simulator: manifest.candidate_simulator?.model || '—',
     tool: Boolean(manifest.tool_evaluation?.enabled),
     intent: Boolean(manifest.intent_evaluation?.enabled),
@@ -93,6 +98,7 @@ async function submitSmoke() {
     const result = await createEvaluationRun({
       target_release_id: Number(form.value.target),
       evaluation_release_id: Number(form.value.evaluation),
+      project_harness_release_id: form.value.harness ? Number(form.value.harness) : undefined,
       replication_count: 1,
       seed: Number(form.value.seed),
       environment_fingerprint: form.value.environment,
@@ -116,6 +122,18 @@ function chooseDefaults() {
   }
   const evaluation = evaluations.value.find(release => release.release_key === 'interview-eval@1.0') || evaluations.value[0]
   if (evaluation) form.value.evaluation = String(evaluation.id)
+  syncHarnessSelection()
+}
+
+function syncHarnessSelection() {
+  const currentId = selectedCapability.value?.project_harness?.id
+  if (currentId && availableHarnesses.value.some(harness => String(harness.id) === String(currentId))) {
+    form.value.harness = String(currentId)
+    return
+  }
+  if (!availableHarnesses.value.some(harness => String(harness.id) === String(form.value.harness))) {
+    form.value.harness = availableHarnesses.value[0] ? String(availableHarnesses.value[0].id) : ''
+  }
 }
 
 function selectTargetType(type) {
@@ -124,6 +142,7 @@ function selectTargetType(type) {
   if (target) form.value.target = String(target.id)
   const evaluation = evaluations.value.find(release => release.target_type === type) || evaluations.value[0]
   form.value.evaluation = evaluation ? String(evaluation.id) : ''
+  syncHarnessSelection()
 }
 
 function selectTarget() {
@@ -131,20 +150,23 @@ function selectTarget() {
   selectedTargetType.value = target?.target_type || ''
   const evaluation = evaluations.value.find(release => String(release.id) === String(form.value.evaluation)) || evaluations.value[0]
   form.value.evaluation = evaluation ? String(evaluation.id) : ''
+  syncHarnessSelection()
 }
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [releaseData, capabilityData, benchmarkData] = await Promise.all([
+    const [releaseData, capabilityData, benchmarkData, harnessData] = await Promise.all([
       fetchEvaluationReleases(),
       fetchEvaluationCapabilities(),
       fetchEvaluationBenchmarks(),
+      fetchProjectHarnessReleases(),
     ])
     releases.value = releaseData.releases || []
     capabilities.value = capabilityData.targets || []
     benchmarks.value = benchmarkData.suites || []
+    harnesses.value = harnessData.harness_releases || []
     selectedExperimentTargets.value = runnableCapabilities.value.map(item => item.target_type)
     chooseDefaults()
   } catch (err) {
@@ -206,6 +228,7 @@ async function submit() {
     const result = await createEvaluationRun({
       target_release_id: Number(form.value.target),
       evaluation_release_id: Number(form.value.evaluation),
+      project_harness_release_id: form.value.harness ? Number(form.value.harness) : undefined,
       replication_count: Number(form.value.replication),
       seed: Number(form.value.seed),
       environment_fingerprint: form.value.environment,
@@ -252,12 +275,24 @@ onMounted(load)
                 <SelectTrigger class="mt-1.5">
                   <SelectValue placeholder="请选择完整评测版本" />
                 </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="release in evaluations" :key="release.id" :value="String(release.id)">
+                  {{ release.release_key }}
+                </SelectItem>
+              </SelectContent>
+              </Select>
+              <label class="mt-3 block text-sm font-medium">被测 Harness 版本</label>
+              <Select v-model="form.harness">
+                <SelectTrigger class="mt-1.5">
+                  <SelectValue placeholder="请选择 Harness 版本" />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem v-for="release in evaluations" :key="release.id" :value="String(release.id)">
-                    {{ release.release_key }}
+                  <SelectItem v-for="harness in availableHarnesses" :key="harness.id" :value="String(harness.id)">
+                    {{ harness.harness_key }}@{{ harness.version }}
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <p class="mt-1.5 text-xs text-muted-foreground">A/B 时固定同一评测集，只切换这里的 Harness 版本。</p>
               <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评测题集</span><div class="mt-1 font-medium">{{ evaluationConfig.benchmark }} · {{ evaluationConfig.caseCount }} 个 Case</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评分模型</span><div class="mt-1 break-all font-mono font-medium">{{ evaluationConfig.judge }}</div></div>
@@ -273,7 +308,7 @@ onMounted(load)
               </div>
               <label class="mt-3 block text-sm font-medium">运行环境标识<Input v-model="form.environment" class="mt-1.5" placeholder="local-baseline" /></label>
               <label class="mt-3 block text-sm font-medium">版本对比组（可选）<Input v-model="form.comparison" class="mt-1.5" placeholder="release-ab-2026-08" /></label>
-              <p class="mt-1.5 text-xs text-muted-foreground">人工 A/B 必须使用同一完整评测版本、同一 Case 和同一输入快照，只改变被测版本。</p>
+              <p class="mt-1.5 text-xs text-muted-foreground">人工 A/B 必须使用同一完整评测版本、同一 Case、同一输入快照和同一随机种子，只改变 Harness 版本。</p>
             </EvaluationStepCard>
 
             <div class="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">预计执行量：<span class="font-medium text-foreground">{{ executionEstimate.text }}</span><span v-if="executionEstimate.total" class="ml-1">· 完整评测耗时较长且消耗 Token，建议先用 Smoke 验证单 Case</span></div>

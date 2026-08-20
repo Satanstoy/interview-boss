@@ -59,6 +59,8 @@ const EvidenceSchema = z.object({
     target_type: z.string(),
     target_release_key: z.string().nullable().optional(),
     evaluation_release_key: z.string().nullable().optional(),
+    project_harness_key: z.string().nullable().optional(),
+    project_harness_version: z.string().nullable().optional(),
   }).passthrough(),
   item: z.object({
     id: z.number().int(),

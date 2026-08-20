@@ -7,6 +7,8 @@ import json
 import sqlite3
 from typing import Any
 
+from app.core.harness_registry import PROJECT_HARNESS_VERSION, sync_project_harnesses
+
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -348,12 +350,30 @@ def _release_snapshot(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _harness_snapshot(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    return {
+        "id": data.get("id"),
+        "harness_key": data.get("harness_key"),
+        "target_type": data.get("target_type") or "",
+        "version": data.get("version"),
+        "display_name": data.get("display_name") or "",
+        "manifest": _decode_manifest(data.get("manifest_json")),
+        "manifest_digest": data.get("manifest_digest") or "",
+        "source_ref": data.get("source_ref") or "",
+        "git_sha": data.get("git_sha") or "",
+        "image_digest": data.get("image_digest") or "",
+        "config_digest": data.get("config_digest") or "",
+    }
+
+
 def _create_dual_axis_eval_run(
     conn: sqlite3.Connection,
     *,
     created_by: int | None,
     target_release_id: int,
     evaluation_release_id: int,
+    project_harness_release_id: int | None,
     replication_count: int,
     seed: int,
     environment_fingerprint: str,
@@ -383,6 +403,31 @@ def _create_dual_axis_eval_run(
         target["status"] != "published" or evaluation["status"] != "published"
     ):
         raise ValueError("官方评测只能绑定已发布 Target Release 和 Evaluation Release")
+
+    # The Harness is a project release, not a field owned by the Evaluation
+    # Manifest.  Syncing here also keeps programmatic/custom run creation
+    # aligned with the HTTP path that opens a database connection.
+    sync_project_harnesses(conn)
+    if project_harness_release_id is not None:
+        harness = conn.execute(
+            "SELECT * FROM harness_releases WHERE id = ?",
+            (project_harness_release_id,),
+        ).fetchone()
+        if harness is None:
+            raise ValueError("项目 Harness Release 不存在")
+        if harness["target_type"] != target["target_type"]:
+            raise ValueError("项目 Harness 与 Target 的 target_type 不一致")
+        if require_published and harness["status"] != "published":
+            raise ValueError("官方评测只能绑定已发布项目 Harness Release")
+    else:
+        harness = conn.execute(
+            "SELECT * FROM harness_releases WHERE target_type = ? AND version = ? "
+            "AND status = 'published' "
+            "ORDER BY id DESC LIMIT 1",
+            (target["target_type"], PROJECT_HARNESS_VERSION),
+        ).fetchone()
+    if harness is None:
+        raise ValueError(f"项目 Harness 尚未注册: {target['target_type']}")
 
     suite = conn.execute(
         "SELECT * FROM eval_benchmark_suites WHERE release_id = ?",
@@ -415,9 +460,10 @@ def _create_dual_axis_eval_run(
         raise ValueError("case_keys 包含不存在或未启用的 Benchmark Case")
 
     snapshot = {
-        "schema_version": 1,
+        "schema_version": 2,
         "target_release": _release_snapshot(target),
         "evaluation_release": _release_snapshot(evaluation),
+        "harness_release": _harness_snapshot(harness),
         "resolved": {
             "replication_count": replication_count,
             "seed": seed,
@@ -441,6 +487,7 @@ def _create_dual_axis_eval_run(
     fingerprint_payload = {
         "target_release_id": target_release_id,
         "evaluation_release_id": evaluation_release_id,
+        "harness_release_id": harness["id"],
         "case_ids": [row["id"] for row in cases],
         "replication_count": replication_count,
         "seed": seed,
@@ -457,9 +504,10 @@ def _create_dual_axis_eval_run(
                 batch_fingerprint, target_release_id, evaluation_release_id,
                 benchmark_suite_release_id, eval_protocol_release_id,
                 judge_release_id, simulator_harness_release_id,
-                candidate_simulator_release_id, environment_fingerprint, seed,
+                candidate_simulator_release_id, harness_release_id,
+                environment_fingerprint, seed,
                 replication_count, total_items, snapshot_json, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_fingerprint,
@@ -470,6 +518,7 @@ def _create_dual_axis_eval_run(
                 evaluation_release_id,
                 evaluation_release_id,
                 evaluation_release_id,
+                harness["id"],
                 environment_fingerprint,
                 seed,
                 replication_count,
@@ -485,9 +534,9 @@ def _create_dual_axis_eval_run(
                 batch_id, target_release_id, evaluation_release_id,
                 benchmark_suite_release_id, eval_protocol_release_id,
                 judge_release_id, simulator_harness_release_id,
-                candidate_simulator_release_id, comparison_group,
+                candidate_simulator_release_id, harness_release_id, comparison_group,
                 idempotency_key, total_items, snapshot_json, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
@@ -498,6 +547,7 @@ def _create_dual_axis_eval_run(
                 evaluation_release_id,
                 evaluation_release_id,
                 evaluation_release_id,
+                harness["id"],
                 comparison_group,
                 idempotency_key,
                 len(cases) * replication_count,
@@ -533,6 +583,7 @@ def create_eval_run(
     created_by: int | None,
     target_release_id: int,
     evaluation_release_id: int | None = None,
+    project_harness_release_id: int | None = None,
     benchmark_suite_release_id: int | None = None,
     eval_protocol_release_id: int | None = None,
     judge_release_id: int | None = None,
@@ -553,6 +604,7 @@ def create_eval_run(
             created_by=created_by,
             target_release_id=target_release_id,
             evaluation_release_id=evaluation_release_id,
+            project_harness_release_id=project_harness_release_id,
             replication_count=replication_count,
             seed=seed,
             environment_fingerprint=environment_fingerprint,

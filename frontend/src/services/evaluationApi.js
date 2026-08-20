@@ -12,6 +12,7 @@ export const fetchEvaluationReleases = (params = {}) => {
   const suffix = query.toString() ? `?${query}` : ''
   return get(`${ROOT}/releases${suffix}`, { noCache: true })
 }
+export const fetchProjectHarnessReleases = () => get(`${ROOT}/harness-releases`, { noCache: true })
 
 export const fetchEvaluationBenchmarks = () => get(`${ROOT}/benchmarks`, { noCache: true })
 

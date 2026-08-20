@@ -8,7 +8,7 @@ def _service():
     return importlib.import_module("app.services.evaluation_service")
 
 
-def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_1_0(test_db):
+def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_per_target(test_db):
     catalog = importlib.import_module("app.evaluation.benchmark_catalog")
 
     result = catalog.sync_builtin_benchmarks(test_db)
@@ -21,7 +21,7 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_1_0(tes
     actual = {(row[0], row[1], row[2], row[3], row[4]) for row in rows}
     assert {
         ("interview-agent@1.0", "target", "interview", "1.0", "published"),
-        ("interview-eval@1.0", "evaluation", "interview", "1.0", "published"),
+        ("interview-eval@1.1", "evaluation", "interview", "1.1", "published"),
         ("experience-extraction@1.0", "target", "experience_extraction", "1.0", "published"),
         ("experience-extraction-eval@1.0", "evaluation", "experience_extraction", "1.0", "published"),
         ("jd-extraction@1.0", "target", "jd_extraction", "1.0", "published"),
@@ -33,14 +33,14 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_1_0(tes
     } <= actual
     manifest = _service()._decode_manifest(
         test_db.execute(
-            "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
+            "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
         ).fetchone()[0]
     )
     assert {"benchmark", "protocol", "judge", "simulator_harness", "candidate_simulator"} <= set(manifest)
+    assert manifest["benchmark"]["version"] == "1.1"
     assert all(
         manifest[component]["version"] == "1.0"
         for component in (
-            "benchmark",
             "protocol",
             "judge",
             "simulator_harness",
@@ -54,9 +54,7 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_1_0(tes
     tool_case = next(
         case for case in manifest["benchmark"]["cases"] if case["case_key"] == "tool_timing"
     )
-    assert tool_case["contract"]["tool_expectations"]["required_tools"] == [
-        "search_questions"
-    ]
+    assert tool_case["contract"]["tool_expectations"]["required_tools"] == ["draw_questions"]
     assert tool_case["contract"]["intent_expectations"]
 
 
@@ -234,6 +232,23 @@ def test_interview_adapter_persists_tool_and_intent_metrics_in_observation():
     }
 
 
+def test_interview_adapter_does_not_treat_unsupported_assertion_as_passed(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    adapter_module = importlib.import_module("app.evaluation.interview_adapter")
+    adapter = adapter_module.InterviewE2EAdapter()
+
+    passed, evidence = adapter._check_assertion(
+        "jd_relevance",
+        [{"turn": 1, "assistant": "你好"}],
+        [],
+        "你好",
+        [],
+    )
+
+    assert passed is False
+    assert "unsupported" in evidence
+
+
 def test_interview_adapter_passes_target_model_into_production_pipeline(monkeypatch):
     adapter_module = importlib.import_module("app.evaluation.interview_adapter")
     adapter = adapter_module.InterviewE2EAdapter()
@@ -310,11 +325,36 @@ def test_executor_reads_judge_harness_and_simulator_from_run_snapshot(test_db, m
         input_snapshot={"candidate_view": {"opening": "你好"}},
         contract={"rubric": {"quality": {"weight": 1}}},
     )
+    test_db.execute(
+        """
+        INSERT INTO harness_releases (
+            harness_key, target_type, version, display_name, status,
+            manifest_json, manifest_digest, source_ref, git_sha,
+            image_digest, config_digest, published_at
+        ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (
+            "interview-harness",
+            "interview",
+            "harness-snapshot-v1",
+            "Snapshot Harness",
+            '{"version":"harness-snapshot-v1"}',
+            "sha256:harness-snapshot-v1",
+            "test",
+            "current-code-state",
+            "local-baseline",
+            "snapshot-config",
+        ),
+    )
+    harness = test_db.execute(
+        "SELECT id FROM harness_releases WHERE version = 'harness-snapshot-v1'"
+    ).fetchone()
     run = service.create_eval_run(
         test_db,
         created_by=None,
         target_release_id=target["id"],
         evaluation_release_id=evaluation["id"],
+        project_harness_release_id=harness["id"],
         replication_count=1,
         seed=23,
     )

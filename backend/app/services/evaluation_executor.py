@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any, Callable
 
 from app.db.connection import get_db_connection
+from app.core.harness_registry import PROJECT_HARNESS_GIT_SHA
 from app.evaluation.adapters import get_target_adapter
 from app.evaluation.judge import judge_observation
 from app.evaluation.metric_registry import build_progress_distribution, quality_threshold_from_manifest
@@ -48,6 +49,10 @@ def _snapshot_error(snapshot: dict[str, Any]) -> str | None:
     evaluation_manifest = evaluation.get("manifest")
     if not isinstance(evaluation_manifest, dict):
         return "缺少 evaluation manifest 快照"
+    if int(snapshot.get("schema_version") or 1) >= 2:
+        harness = snapshot.get("harness_release")
+        if not isinstance(harness, dict) or not harness.get("harness_key"):
+            return "缺少项目 Harness 快照"
     required_groups = {"benchmark", "protocol", "judge", "simulator_harness"}
     target_type = str(target.get("target_type") or evaluation.get("target_type") or "")
     target_groups = {
@@ -75,6 +80,17 @@ def _runtime_identity_error(target_snapshot: dict[str, Any]) -> str | None:
     actual = os.environ.get("EVAL_RUNTIME_GIT_SHA", "current-code-state")
     if expected and expected not in {"current-code-state", "local-baseline"} and expected != actual:
         return f"Target Release git_sha={expected} 与 Eval Worker={actual} 不一致"
+    return None
+
+
+def _harness_runtime_identity_error(harness_snapshot: dict[str, Any]) -> str | None:
+    expected = str(harness_snapshot.get("git_sha") or "")
+    if (
+        expected
+        and expected not in {"current-code-state", "local-baseline"}
+        and expected != PROJECT_HARNESS_GIT_SHA
+    ):
+        return f"项目 Harness git_sha={expected} 与当前运行时={PROJECT_HARNESS_GIT_SHA} 不一致"
     return None
 
 
@@ -216,6 +232,9 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
                jr.judge_model AS judge_model,
                jr.manifest_json AS judge_manifest_json,
                sh.manifest_json AS harness_manifest_json,
+               hr.harness_key AS harness_release_key,
+               hr.version AS harness_version,
+               hr.manifest_json AS project_harness_manifest_json,
                cs.manifest_json AS candidate_simulator_manifest_json,
                er.manifest_json AS evaluation_manifest_json
         FROM eval_runs r
@@ -224,6 +243,7 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
         JOIN eval_releases jr ON jr.id = r.judge_release_id
         JOIN eval_releases sh ON sh.id = r.simulator_harness_release_id
         JOIN eval_releases cs ON cs.id = r.candidate_simulator_release_id
+        LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
         LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
         WHERE r.id = ?
         """,
@@ -240,12 +260,15 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
             snapshot = json.loads(result["snapshot_json"])
         except (TypeError, json.JSONDecodeError):
             snapshot = {}
-        result["_snapshot_error"] = _snapshot_error(snapshot) or _runtime_identity_error(
-            snapshot.get("target_release") or {}
+        result["_snapshot_error"] = (
+            _snapshot_error(snapshot)
+            or _runtime_identity_error(snapshot.get("target_release") or {})
+            or _harness_runtime_identity_error(snapshot.get("harness_release") or {})
         )
         target_snapshot = snapshot.get("target_release") or {}
         evaluation_snapshot = snapshot.get("evaluation_release") or {}
         evaluation_manifest = evaluation_snapshot.get("manifest") or {}
+        harness_snapshot = snapshot.get("harness_release") or {}
         if target_snapshot:
             result["target_release_key"] = target_snapshot.get(
                 "release_key", result["target_release_key"]
@@ -269,6 +292,14 @@ def _load_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
                 candidate_manifest
             )
         result["evaluation_manifest_json"] = _json_dumps(evaluation_manifest)
+        if harness_snapshot:
+            result["harness_release_key"] = (
+                f"{harness_snapshot.get('harness_key')}@{harness_snapshot.get('version')}"
+            )
+            result["harness_version"] = harness_snapshot.get("version")
+            result["project_harness_manifest_json"] = _json_dumps(
+                harness_snapshot.get("manifest") or {}
+            )
     return result
 
 
@@ -468,6 +499,9 @@ async def execute_eval_run(
         "judge_model": run.get("judge_model") or "",
         "judge_manifest": json.loads(run.get("judge_manifest_json") or "{}"),
         "harness_manifest": json.loads(run.get("harness_manifest_json") or "{}"),
+        "project_harness_manifest": json.loads(
+            run.get("project_harness_manifest_json") or "{}"
+        ),
         "candidate_simulator_manifest": json.loads(
             run.get("candidate_simulator_manifest_json") or "{}"
         ),

@@ -1,4 +1,4 @@
-"""Load Git-versioned Benchmark definitions and seed the 1.0 release axes."""
+"""Load Git-versioned Benchmark definitions and seed the built-in release axes."""
 
 from __future__ import annotations
 
@@ -7,16 +7,20 @@ import os
 from pathlib import Path
 from typing import Any
 
+from app.core.harness_registry import (
+    harness_manifest,
+    sync_project_harnesses,
+)
 from app.services.evaluation_service import create_benchmark_case, create_benchmark_suite, create_release
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUITES_ROOT = REPO_ROOT / "evals" / "suites"
-EVALUATION_RELEASE_KEY = "interview-eval@1.0"
+EVALUATION_RELEASE_KEY = "interview-eval@1.1"
 INTERNAL_SUITE_KEY = "interview-e2e-suite"
 
 BUILTIN_SUITES = (
     {
-        "evaluation_key": "interview-eval@1.0",
+        "evaluation_key": "interview-eval@1.1",
         "target_key": "interview-agent@1.0",
         "target_type": "interview",
         "target_component": "interview-agent",
@@ -60,14 +64,15 @@ BUILTIN_SUITES = (
 
 def _suite_root(release_key: str) -> Path:
     if release_key == "interview-e2e-suite@1.0":
-        release_key = EVALUATION_RELEASE_KEY
+        return SUITES_ROOT / "interview-e2e" / "1.0"
     spec = next((item for item in BUILTIN_SUITES if item["evaluation_key"] == release_key), None)
     if spec is None:
         raise ValueError(f"未知评测版本: {release_key}")
     suite_name = release_key.split("-eval@", 1)[0]
-    if release_key == EVALUATION_RELEASE_KEY:
+    if spec["target_type"] == "interview":
         suite_name = "interview-e2e"
-    return SUITES_ROOT / suite_name / "1.0"
+    version = release_key.rsplit("@", 1)[-1]
+    return SUITES_ROOT / suite_name / version
 
 
 def load_suite_definition(release_key: str) -> dict[str, Any]:
@@ -138,14 +143,19 @@ def _judge_model(suite: dict[str, Any]) -> str:
 
 
 def _evaluation_manifest(
-    suite: dict[str, Any], spec: dict[str, str], judge_model: str, candidate_model: str
+    suite: dict[str, Any],
+    spec: dict[str, str],
+    judge_model: str,
+    candidate_model: str,
+    project_harness: dict[str, Any],
 ) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "release_key": spec["evaluation_key"],
         "target_type": spec["target_type"],
+        "project_harness": project_harness,
         "benchmark": {
-            "version": "1.0",
+            "version": str(suite.get("version") or "1.0"),
             "suite_key": suite.get("suite_key") or spec["evaluation_key"].replace("@1.0", "-suite"),
             "description": suite["description"],
             "cases": suite["cases"],
@@ -229,7 +239,8 @@ def _evaluation_manifest(
 
 
 def sync_builtin_benchmarks(conn) -> dict[str, int]:
-    """Idempotently index the complete built-in Evaluation Releases 1.0."""
+    """Idempotently index the complete built-in Evaluation Releases."""
+    sync_project_harnesses(conn)
     candidate_model = _candidate_simulator_model()
     target_model = os.environ.get("LLM_MODEL_NAME") or "gpt-4o"
     release_rows = {}
@@ -238,13 +249,17 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
     for spec in BUILTIN_SUITES:
         suite = load_suite_definition(spec["evaluation_key"])
         judge_model = _judge_model(suite)
+        project_harness = harness_manifest(spec["target_type"])
         target_manifest = {
             **_baseline_manifest(spec["target_component"]),
             "target_type": spec["target_type"],
             "workflow": spec["workflow"],
             "model": target_model,
+            "project_harness": project_harness,
         }
-        evaluation_manifest = _evaluation_manifest(suite, spec, judge_model, candidate_model)
+        evaluation_manifest = _evaluation_manifest(
+            suite, spec, judge_model, candidate_model, project_harness
+        )
         releases = [
             {
                 "release_key": spec["target_key"],
@@ -259,7 +274,7 @@ def sync_builtin_benchmarks(conn) -> dict[str, int]:
             {
                 "release_key": spec["evaluation_key"],
                 "release_type": "evaluation",
-                "version": "1.0",
+                "version": spec["evaluation_key"].rsplit("@", 1)[-1],
                 "target_type": spec["target_type"],
                 "judge_model": judge_model,
                 "manifest": evaluation_manifest,

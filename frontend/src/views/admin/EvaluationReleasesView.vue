@@ -31,7 +31,7 @@ function fixedItems(release) {
     const items = [
       `评测集 ${manifest.benchmark?.suite_key || '已固化'}`,
       `评分模型 ${manifest.judge?.model || release.judge_model || '已固化'}`,
-      `Harness ${manifest.simulator_harness?.version || '1.0'}`,
+      `项目 Harness ${release.project_harness_release_key || '未记录'}`,
     ]
     if (manifest.candidate_simulator) items.push(`模拟人 ${manifest.candidate_simulator.model || '已固化'}`)
     if (manifest.tool_evaluation?.enabled) items.push('工具调用效果')

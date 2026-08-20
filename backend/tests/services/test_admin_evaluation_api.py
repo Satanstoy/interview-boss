@@ -65,6 +65,7 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/overview" in paths
     assert "/api/admin/evals/capabilities" in paths
     assert "/api/admin/evals/releases" in paths
+    assert "/api/admin/evals/harness-releases" in paths
     assert "/api/admin/evals/benchmarks" in paths
     assert "/api/admin/evals/runs" in paths
     assert "/api/admin/evals/experiments" in paths
@@ -78,6 +79,24 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/runs/{run_id}/retry-failed" in paths
     assert "/api/admin/evals/runs/{run_id}/events" in paths
     assert "/api/admin/evals/reviews" in paths
+
+
+def test_human_ab_context_includes_frozen_project_harness_identity(test_db):
+    module = _router()
+    row = test_db.execute(
+        "SELECT 7 AS evaluation_release_id, ? AS snapshot_json",
+        (
+            '{"resolved": {"replication_count": 1, "seed": 7, '
+            '"environment_fingerprint": "env", "case_ids": ["case-1"]}, '
+            '"cases": [], "harness_release": {"id": 11, '
+            '"manifest_digest": "sha256:harness"}}',
+        ),
+    ).fetchone()
+
+    context = module._ab_snapshot_context(row)
+
+    assert context[-1] == ()
+    assert module._ab_harness_identity(row) == (11, "sha256:harness")
 
 
 def test_capabilities_report_published_target_and_evaluation_pair(test_db, monkeypatch):
@@ -276,12 +295,37 @@ def test_get_run_item_dual_axis_returns_frozen_snapshot_not_live_case(test_db, m
         contract={"hard_assertions": [{"id": "unchanged"}]},
     )
     test_db.execute("UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP")
+    test_db.execute(
+        """
+        INSERT INTO harness_releases (
+            harness_key, target_type, version, display_name, status,
+            manifest_json, manifest_digest, source_ref, git_sha,
+            image_digest, config_digest, published_at
+        ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (
+            "fixture-harness",
+            "fixture",
+            "1.0",
+            "Fixture Harness",
+            '{"version":"1.0"}',
+            "sha256:fixture-harness",
+            "test",
+            "current-code-state",
+            "local-baseline",
+            "fixture-config",
+        ),
+    )
+    fixture_harness = test_db.execute(
+        "SELECT id FROM harness_releases WHERE harness_key = 'fixture-harness'"
+    ).fetchone()
     test_db.commit()
     run = service.create_eval_run(
         test_db,
         created_by=1,
         target_release_id=target["id"],
         evaluation_release_id=evaluation["id"],
+        project_harness_release_id=fixture_harness["id"],
         replication_count=1,
         seed=11,
     )
@@ -913,6 +957,14 @@ def test_human_review_persists_ab_choice_and_dimensions(test_db, monkeypatch):
     context = _context(test_db)
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
     service = importlib.import_module("app.services.evaluation_service")
+    harness_b = service.create_release(
+        test_db,
+        release_key="api-harness@2.0",
+        release_type="simulator_harness",
+        version="2.0",
+        target_type="fixture",
+        manifest={"key": "api-harness-v2"},
+    )
     run_a = service.create_eval_run(
         test_db,
         created_by=1,
@@ -920,7 +972,7 @@ def test_human_review_persists_ab_choice_and_dimensions(test_db, monkeypatch):
         benchmark_suite_release_id=context[1]["id"],
         eval_protocol_release_id=context[2]["id"],
         judge_release_id=context[3]["id"],
-        simulator_harness_release_id=context[4]["id"],
+        simulator_harness_release_id=harness_b["id"],
         candidate_simulator_release_id=context[5]["id"],
         replication_count=1,
         seed=20,

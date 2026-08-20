@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from app.core.auth import get_admin_user
+from app.core.harness_registry import PROJECT_HARNESS_VERSION
 from app.db.connection import get_db_connection, run_db
 from app.evaluation.adapters import AdapterNotConfigured, get_target_adapter
 from app.evaluation.benchmark_catalog import BUILTIN_SUITES
@@ -42,6 +43,7 @@ class CreateEvalRunRequest(BaseModel):
     eval_protocol_release_id: int | None = None
     judge_release_id: int | None = None
     simulator_harness_release_id: int | None = None
+    project_harness_release_id: int | None = None
     candidate_simulator_release_id: int | None = None
     replication_count: int = Field(default=5, ge=1, le=100)
     seed: int = 1
@@ -69,7 +71,7 @@ class CreateHumanReviewRequest(BaseModel):
     comment: str = Field(default="", max_length=4000)
 
 
-def _capability_release(row) -> dict[str, Any] | None:
+def _capability_release(row, harness=None) -> dict[str, Any] | None:
     if row is None:
         return None
     return {
@@ -80,6 +82,11 @@ def _capability_release(row) -> dict[str, Any] | None:
         "status": row["status"],
         "judge_model": row["judge_model"],
         "manifest_digest": row["manifest_digest"],
+        "project_harness_release_id": harness["id"] if harness else None,
+        "project_harness_release_key": (
+            f"{harness['harness_key']}@{harness['version']}" if harness else None
+        ),
+        "project_harness_version": harness["version"] if harness else None,
     }
 
 
@@ -109,11 +116,14 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
                r.total_items, r.completed_items, r.failed_items,
                r.created_at, r.started_at, r.finished_at,
                tr.release_key AS target_release_key,
-               ev.release_key AS evaluation_release_key
+               ev.release_key AS evaluation_release_key,
+               hr.harness_key AS project_harness_key,
+               hr.version AS project_harness_version
         FROM eval_experiment_runs er
         JOIN eval_runs r ON r.id = er.run_id
         JOIN eval_releases tr ON tr.id = r.target_release_id
         LEFT JOIN eval_releases ev ON ev.id = r.evaluation_release_id
+        LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
         WHERE er.experiment_id = ?
         ORDER BY er.display_order, er.id
         """,
@@ -484,6 +494,10 @@ def _run_query(conn, run_id: int):
                jr.release_key AS judge_release_key,
                jr.judge_model,
                sh.release_key AS simulator_harness_release_key,
+               hr.harness_key AS project_harness_key,
+               hr.version AS project_harness_version,
+               hr.display_name AS project_harness_display_name,
+               hr.manifest_digest AS project_harness_manifest_digest,
                cs.release_key AS candidate_simulator_release_key
         FROM eval_runs r
         JOIN eval_batches b ON b.id = r.batch_id
@@ -493,6 +507,7 @@ def _run_query(conn, run_id: int):
         JOIN eval_releases jr ON jr.id = r.judge_release_id
         JOIN eval_releases sh ON sh.id = r.simulator_harness_release_id
         JOIN eval_releases cs ON cs.id = r.candidate_simulator_release_id
+        LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
         LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
         WHERE r.id = ?
         """,
@@ -519,6 +534,18 @@ def _ab_snapshot_context(row) -> tuple[Any, ...] | None:
         tuple(resolved.get("case_ids") or []),
         cases,
     )
+
+
+def _ab_harness_identity(row) -> tuple[Any, ...]:
+    """Return the Harness identity that A/B is intentionally comparing."""
+    snapshot = _decode_json(row["snapshot_json"], {})
+    harness = snapshot.get("harness_release") or {}
+    if harness:
+        return harness.get("id"), harness.get("manifest_digest")
+    # Legacy runs only have the old simulator Harness foreign key. Keep the
+    # fallback for old human-review data without pretending it is a project
+    # registry snapshot.
+    return row["simulator_harness_release_id"], None
 
 
 @router.get("/overview")
@@ -690,6 +717,12 @@ async def capabilities(admin: dict = Depends(get_admin_user)):
                     """,
                     (spec["target_type"],),
                 ).fetchone()
+                harness = conn.execute(
+                    "SELECT id, harness_key, version, status FROM harness_releases "
+                    "WHERE target_type = ? AND version = ? AND status = 'published' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (spec["target_type"], PROJECT_HARNESS_VERSION),
+                ).fetchone()
                 case_count = 0
                 if evaluation is not None:
                     case_count = conn.execute(
@@ -726,8 +759,9 @@ async def capabilities(admin: dict = Depends(get_admin_user)):
                         "workflow": spec["workflow"],
                         "adapter": adapter_name,
                         "adapter_available": adapter_available,
-                        "target_release": _capability_release(target),
-                        "evaluation_release": _capability_release(evaluation),
+                        "target_release": _capability_release(target, harness),
+                        "evaluation_release": _capability_release(evaluation, harness),
+                        "project_harness": dict(harness) if harness else None,
                         "case_count": int(case_count),
                         "can_run": bool(
                             adapter_available and target and evaluation and case_count
@@ -1110,6 +1144,39 @@ async def list_releases(
             rows = conn.execute(
                 f"SELECT * FROM eval_releases {where} ORDER BY id DESC", params
             ).fetchall()
+            harnesses = {
+                row["target_type"]: row
+                for row in conn.execute(
+                "SELECT id, target_type, harness_key, version, status "
+                "FROM harness_releases WHERE version = ? AND status = 'published'",
+                (PROJECT_HARNESS_VERSION,),
+                ).fetchall()
+            }
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["manifest"] = _decode_json(item.pop("manifest_json", "{}"), {})
+                harness = harnesses.get(item.get("target_type"))
+                item["project_harness_release_id"] = harness["id"] if harness else None
+                item["project_harness_release_key"] = (
+                    f"{harness['harness_key']}@{harness['version']}" if harness else None
+                )
+                item["project_harness_version"] = harness["version"] if harness else None
+                result.append(item)
+            return result
+
+    return {"releases": await run_db(_query)}
+
+
+@router.get("/harness-releases")
+async def list_harness_releases(admin: dict = Depends(get_admin_user)):
+    """List the project Harness registry, independent of Eval manifests."""
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM harness_releases ORDER BY target_type, id DESC"
+            ).fetchall()
             result = []
             for row in rows:
                 item = dict(row)
@@ -1117,7 +1184,7 @@ async def list_releases(
                 result.append(item)
             return result
 
-    return {"releases": await run_db(_query)}
+    return {"harness_releases": await run_db(_query)}
 
 
 @router.get("/benchmarks")
@@ -1173,6 +1240,7 @@ async def create_run(body: CreateEvalRunRequest, admin: dict = Depends(get_admin
                 created_by=admin["id"],
                 target_release_id=body.target_release_id,
                 evaluation_release_id=body.evaluation_release_id,
+                project_harness_release_id=body.project_harness_release_id,
                 benchmark_suite_release_id=body.benchmark_suite_release_id,
                 eval_protocol_release_id=body.eval_protocol_release_id,
                 judge_release_id=body.judge_release_id,
@@ -1254,10 +1322,13 @@ async def list_runs(
                 f"r.summary_json, "
                 f"tr.release_key AS target_release_key, tr.target_type, "
                 f"COALESCE(er.release_key, br.release_key) AS evaluation_release_key, "
-                f"br.release_key AS benchmark_suite_release_key "
+                f"br.release_key AS benchmark_suite_release_key, "
+                f"hr.harness_key AS project_harness_key, "
+                f"hr.version AS project_harness_version "
                 f"FROM eval_runs r JOIN eval_releases tr ON tr.id = r.target_release_id "
                 f"JOIN eval_releases br ON br.id = r.benchmark_suite_release_id "
                 f"LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id "
+                f"LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id "
                 f"{where} "
                 "ORDER BY r.id DESC LIMIT ?",
                 params,
@@ -1334,25 +1405,29 @@ async def create_review(
             stored_groups = {row["comparison_group"] for row in runs if row["comparison_group"]}
             if stored_groups and stored_groups != {body.comparison_group}:
                 raise HTTPException(status_code=400, detail="A/B Run 不属于指定 comparison group")
+            if runs[0]["target_release_id"] != runs[1]["target_release_id"]:
+                raise HTTPException(status_code=400, detail="Harness A/B 必须使用同一个 Target")
             dual_contexts = [_ab_snapshot_context(row) for row in runs]
             if any(context is not None for context in dual_contexts):
                 if any(context is None for context in dual_contexts):
                     raise HTTPException(status_code=400, detail="A/B Run 必须使用同一种版本绑定模式")
                 if len(set(dual_contexts)) != 1:
                     raise HTTPException(status_code=400, detail="A/B Run 的完整评测上下文不一致")
-                if runs[0]["target_release_id"] == runs[1]["target_release_id"]:
-                    raise HTTPException(status_code=400, detail="A/B Run 必须比较两个不同的被测版本")
             context_fields = ("evaluation_release_id",) if any(
                 row["evaluation_release_id"] is not None for row in runs
             ) else (
                 "benchmark_suite_release_id",
                 "eval_protocol_release_id",
                 "judge_release_id",
-                "simulator_harness_release_id",
                 "candidate_simulator_release_id",
             )
             if len({tuple(row[field] for field in context_fields) for row in runs}) != 1:
                 raise HTTPException(status_code=400, detail="A/B Run 的评测上下文不一致")
+            harness_contexts = [_ab_harness_identity(row) for row in runs]
+            if any(identity[0] is None for identity in harness_contexts):
+                raise HTTPException(status_code=400, detail="A/B Run 缺少项目 Harness 版本")
+            if len(set(harness_contexts)) != 2:
+                raise HTTPException(status_code=400, detail="A/B Run 必须比较两个不同的 Harness 版本")
             try:
                 case_key, replication_text = body.item_key.rsplit("#", 1)
                 replication_index = int(replication_text)

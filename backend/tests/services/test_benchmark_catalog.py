@@ -60,7 +60,7 @@ def test_sync_builtin_suite_uses_configured_model_for_candidate_simulator(test_d
     catalog.sync_builtin_benchmarks(test_db)
 
     manifest = test_db.execute(
-        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
     ).fetchone()[0]
     assert '"model":"mimo-v2.5-pro"' in manifest
 
@@ -91,7 +91,7 @@ def test_sync_builtin_suite_archives_legacy_component_releases(test_db, monkeypa
     ).fetchone()[0]
     assert status == "archived"
     evaluation_manifest = test_db.execute(
-        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.0'"
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
     ).fetchone()[0]
     assert '"model":"mimo-v2.5-pro"' in evaluation_manifest
 

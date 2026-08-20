@@ -18,6 +18,8 @@ class RunReference(BaseModel):
     target_type: str
     target_release_key: str | None = None
     evaluation_release_key: str | None = None
+    project_harness_key: str | None = None
+    project_harness_version: str | None = None
 
 
 class ItemReference(BaseModel):
@@ -202,6 +204,8 @@ def build_case_evidence_view(
             target_type=target_type,
             target_release_key=run.get("target_release_key"),
             evaluation_release_key=run.get("evaluation_release_key"),
+            project_harness_key=run.get("project_harness_key"),
+            project_harness_version=run.get("project_harness_version"),
         ),
         item=item_ref,
         case=CaseReference(
