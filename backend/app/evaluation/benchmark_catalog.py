@@ -158,6 +158,10 @@ def _evaluation_manifest(
             "deterministic_weight": 0.6,
             "judge_weight": 0.4,
             "max_attempts": 1,
+            "quality_thresholds": {
+                "poor_score_below": 0.6,
+                "source": "evaluation_protocol",
+            },
         },
         "judge": {
             "version": "1.0",

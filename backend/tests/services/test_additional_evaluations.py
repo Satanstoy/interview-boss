@@ -247,6 +247,7 @@ def test_resume_evaluation_release_materializes_and_aggregates_non_interview_met
                     "metrics": {
                         "source_fact_coverage": 1.0,
                         "target_alignment": 0.75,
+                        "improvement_point_count": 2,
                         "forbidden_claim_count": 0,
                     }
                 },
@@ -268,6 +269,7 @@ def test_resume_evaluation_release_materializes_and_aggregates_non_interview_met
     assert result["status"] == "completed"
     assert result["metric_summary"]["resume"]["source_fact_coverage"] == 1.0
     assert result["metric_summary"]["resume"]["target_alignment"] == 0.75
+    assert result["metric_summary"]["resume"]["improvement_point_count"] == 2
 
 
 def test_hybrid_score_keeps_deterministic_metrics_as_a_primary_signal():

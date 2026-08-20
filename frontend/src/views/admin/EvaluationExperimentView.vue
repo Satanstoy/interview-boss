@@ -39,6 +39,7 @@ function progressSegmentsForRun(run) {
     { key: 'passed', label: '通过', value: d.passed, pct: d.pct.passed, color: 'bg-emerald-500' },
     { key: 'poor', label: '不佳', value: d.poor, pct: d.pct.poor, color: 'bg-amber-500' },
     { key: 'failed', label: '失败', value: d.failed, pct: d.pct.failed, color: 'bg-destructive' },
+    { key: 'pending', label: '未完成', value: d.pending, pct: d.pct.pending, color: 'bg-muted-foreground/30', pattern: true },
   ]
 }
 
@@ -113,7 +114,7 @@ onUnmounted(() => {
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader :title="`评测实验 #${route.params.experimentId}`" description="一个 Experiment 管理多类 Eval 子 Run；这里汇总整体执行进度，并可进入任意子 Run 查看 Case 证据。" active-key="experiments">
+      <EvaluationPageHeader :title="`测评实验 #${route.params.experimentId}`" description="这里汇总整体执行进度，并可进入任意目标查看 Case 证据。" active-key="experiments">
         <template #actions>
           <Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button>
           <Button variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button>
@@ -124,11 +125,11 @@ onUnmounted(() => {
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <p v-else-if="error && !experiment" class="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">{{ error }}</p>
       <template v-else-if="experiment">
-        <AppCard class="mt-6" title="Experiment 总览" description="执行进度按已完成或失败的 Case 计算；质量是否通过由各子 Run 的 Hard Gate 和 Judge 结果决定。">
+        <AppCard class="mt-6" title="测评实验概览" description="这里看整体执行进度；不同评测目标的结果分别在下方查看。">
           <div class="flex flex-wrap items-center gap-3">
-            <span class="text-xs text-muted-foreground">执行</span><Badge :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge><span class="text-xs text-muted-foreground">质量</span><Badge :class="statusClass(experiment.quality_status)">{{ qualityStatusLabel(experiment.quality_status) }}</Badge>
+            <span class="text-xs text-muted-foreground">执行</span><Badge :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge><span class="text-xs text-muted-foreground">结果</span><span class="text-sm text-muted-foreground">各目标质量分别查看</span>
             <span v-if="!terminal" class="inline-flex items-center gap-1 text-xs text-amber-600"><Radio class="size-3.5 animate-pulse" />实时跟踪中</span>
-            <span class="text-sm text-muted-foreground">{{ experiment.total_runs }} 个子 Run</span>
+            <span class="text-sm text-muted-foreground">{{ experiment.total_runs }} 个目标评测</span>
             <span class="text-sm text-muted-foreground">{{ experiment.completed_runs || 0 }} 完成 · {{ experiment.failed_runs || 0 }} 失败 · {{ experiment.cancelled_runs || 0 }} 取消</span>
             <span class="ml-auto text-2xl font-semibold">{{ progress }}%</span>
           </div>
@@ -142,26 +143,26 @@ onUnmounted(() => {
           <p v-if="error" class="mt-4 rounded-md bg-amber-500/10 p-3 text-sm text-amber-700">{{ error }}</p>
         </AppCard>
 
-        <AppCard class="mt-6" title="子 Run" description="每个 Agent 都有独立 Run；进入详情可查看逐 Case 输入、输出、Hard Gate、Judge、Attempt 和 Artifact。" no-padding>
-          <div v-if="!experiment.runs?.length" class="p-8 text-center text-sm text-muted-foreground">暂无子 Run。</div>
+        <AppCard class="mt-6" title="各目标评测结果" description="每个评测目标独立展示通过、表现不佳、失败和未完成的 Case。" no-padding>
+          <div v-if="!experiment.runs?.length" class="p-8 text-center text-sm text-muted-foreground">暂无评测结果。</div>
           <div v-else class="divide-y divide-border/60">
             <div v-for="run in experiment.runs" :key="run.run_id" class="flex flex-wrap items-center gap-4 p-4">
               <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ evaluationTargetLabel(run.target_type) }}</span><span class="text-[11px] text-muted-foreground">执行</span><Badge :class="statusClass(run.status)">{{ statusLabel(run.status) }}</Badge><span class="text-[11px] text-muted-foreground">质量</span><Badge :class="statusClass(run.quality_status)">{{ qualityStatusLabel(run.quality_status) }}</Badge></div>
-                <div class="mt-1 text-xs text-muted-foreground">Run #{{ run.run_id }} · 被测 {{ run.target_release_key }} · 评测 {{ run.evaluation_release_key || '—' }}</div>
+                <div class="flex flex-wrap items-center gap-2"><span class="font-medium">{{ evaluationTargetLabel(run.target_type) }}</span><span class="text-[11px] text-muted-foreground">执行</span><Badge :class="statusClass(run.status)">{{ statusLabel(run.status) }}</Badge><span class="text-[11px] text-muted-foreground">结果</span><Badge :class="statusClass(run.quality_status)">{{ qualityStatusLabel(run.quality_status) }}</Badge></div>
+                <div class="mt-1 text-xs text-muted-foreground">评测 #{{ run.run_id }} · 被测 {{ run.target_release_key }} · 评测配置 {{ run.evaluation_release_key || '—' }}</div>
                 <div class="mt-1 text-xs text-muted-foreground">执行状态：{{ statusLabel(run.status) }} · 创建于 {{ formatDate(run.created_at) }}</div>
               </div>
               <div class="w-48">
                 <template v-if="progressSegmentsForRun(run) && (progressSegmentsForRun(run).reduce((a,b)=>a+b.value,0) > 0)">
                   <EvalProgressBar :segments="progressSegmentsForRun(run)" size="sm" />
-                  <div class="mt-1 flex justify-between text-xs text-muted-foreground"><span class="inline-flex gap-1"><span class="text-emerald-600">{{ runDistribution(run).passed }}通</span><span class="text-amber-600">{{ runDistribution(run).poor }}不佳</span><span class="text-destructive">{{ runDistribution(run).failed }}败</span></span><span>{{ run.completed_items || 0 }}/{{ run.total_items || 0 }}</span></div>
+                  <div class="mt-1 flex justify-between text-xs text-muted-foreground"><span class="inline-flex gap-1"><span class="text-emerald-600">{{ runDistribution(run).passed }} 通过</span><span class="text-amber-600">{{ runDistribution(run).poor }} 不佳</span><span class="text-destructive">{{ runDistribution(run).failed }} 失败</span><span v-if="runDistribution(run).pending" class="text-muted-foreground">{{ runDistribution(run).pending }} 未完成</span></span><span>{{ run.completed_items || 0 }}/{{ run.total_items || 0 }}</span></div>
                 </template>
                 <template v-else>
                   <div class="mb-1 flex justify-between text-xs text-muted-foreground"><span>{{ run.completed_items || 0 }} / {{ run.total_items || 0 }} Cases</span><span>{{ runProgress(run) }}%</span></div><EvalProgressBar :value="runProgress(run)" size="sm" />
                 </template>
               </div>
               <div class="w-48"><EvalScoreBar :deterministic="run.score?.deterministic_mean" :judge="run.score?.judge_mean" :final="run.score?.final_mean" /></div>
-              <Button size="sm" variant="outline" @click="openRun(run)">查看 Run 详情</Button>
+              <Button size="sm" variant="outline" @click="openRun(run)">查看评测详情</Button>
             </div>
           </div>
         </AppCard>

@@ -17,6 +17,14 @@ from app.core.auth import get_admin_user
 from app.db.connection import get_db_connection, run_db
 from app.evaluation.adapters import AdapterNotConfigured, get_target_adapter
 from app.evaluation.benchmark_catalog import BUILTIN_SUITES
+from app.evaluation.evidence_contract import CaseEvidenceView, build_case_evidence_view
+from app.evaluation.metric_registry import (
+    TARGET_METRIC_DICTIONARY,
+    build_metric_cards,
+    build_progress_distribution,
+    classify_progress_outcome,
+    quality_threshold_from_manifest,
+)
 from app.evaluation.queue import enqueue_eval_run_job
 from app.services.evaluation_service import (
     append_event,
@@ -136,9 +144,12 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
         "failed_items": failed_items,
     }
     child_payloads = []
+    quality_metadata = _run_quality_metadata(conn, [row["run_id"] for row in children])
     for row in children:
         child = dict(row)
-        child["quality_status"] = _quality_status(conn, row["run_id"], row["status"])
+        metadata = quality_metadata.get(row["run_id"], {})
+        child["quality_status"] = metadata.get("quality_status", "pending")
+        child["distribution"] = metadata.get("distribution", _empty_distribution())
         child_payloads.append(child)
     child_quality = [child["quality_status"] for child in child_payloads]
     quality_status = (
@@ -222,6 +233,223 @@ def _decode_json(value: str | None, default: Any):
         return default
 
 
+def _empty_distribution() -> dict[str, int]:
+    return {"total": 0, "passed": 0, "poor": 0, "failed": 0, "pending": 0}
+
+
+def _run_evaluation_manifest(conn, run_id: int) -> dict[str, Any]:
+    """Read the frozen evaluation manifest before falling back to the live release."""
+    row = conn.execute(
+        """
+        SELECT r.snapshot_json, er.manifest_json
+        FROM eval_runs r
+        LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
+        WHERE r.id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return {}
+    snapshot = _decode_json(row["snapshot_json"], {})
+    evaluation = snapshot.get("evaluation_release") if isinstance(snapshot, dict) else None
+    frozen_manifest = evaluation.get("manifest") if isinstance(evaluation, dict) else None
+    if isinstance(frozen_manifest, dict):
+        return frozen_manifest
+    return _decode_json(row["manifest_json"], {})
+
+
+def _run_progress_distribution(conn, run_id: int) -> dict[str, int]:
+    run = conn.execute(
+        """
+        SELECT r.total_items
+        FROM eval_runs r
+        WHERE r.id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    if run is None:
+        return _empty_distribution()
+    items = []
+    for row in conn.execute(
+        """
+        SELECT status, contract_status, hard_gate_status, judge_status, score, result_json
+        FROM eval_items WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchall():
+        item = dict(row)
+        result = _decode_json(item.pop("result_json", "{}"), {})
+        item["result"] = result
+        items.append(item)
+    manifest = _run_evaluation_manifest(conn, run_id)
+    return build_progress_distribution(
+        items,
+        total=run["total_items"],
+        poor_score_below=quality_threshold_from_manifest(manifest),
+    )
+
+
+def _run_metric_cards(conn, run_id: int, target_type: str) -> list[dict[str, Any]]:
+    definition = TARGET_METRIC_DICTIONARY.get(target_type)
+    if definition is None:
+        return []
+    row = conn.execute(
+        "SELECT summary_json FROM eval_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    summary = _decode_json(row["summary_json"] if row else "{}", {})
+    return build_metric_cards(target_type, summary.get("metric_summary"), thresholds={})
+
+
+def _run_attention_cases(conn, run_id: int, target_type: str) -> list[dict[str, Any]]:
+    manifest = _run_evaluation_manifest(conn, run_id)
+    threshold = quality_threshold_from_manifest(manifest)
+    items = []
+    for row in conn.execute(
+        """
+        SELECT i.id, i.case_id, c.case_key, c.scenario_key,
+               i.replication_index, i.seed, i.status,
+               i.contract_status, i.hard_gate_status, i.judge_status,
+               i.score, i.result_json
+        FROM eval_items i
+        JOIN eval_benchmark_cases c ON c.id = i.case_id
+        WHERE i.run_id = ? ORDER BY i.id
+        """,
+        (run_id,),
+    ).fetchall():
+        item = dict(row)
+        result = _decode_json(item.pop("result_json", "{}"), {})
+        item["result"] = result
+        items.append(item)
+    return _attention_cases_from_items(items, run_id, target_type, threshold)
+
+
+def _attention_cases_from_items(
+    items: list[dict[str, Any]],
+    run_id: int,
+    target_type: str,
+    threshold: float | None,
+) -> list[dict[str, Any]]:
+    attention = []
+    for item in items:
+        outcome = classify_progress_outcome(item, threshold)
+        if outcome == "passed":
+            continue
+        result = item.get("result")
+        observation = result.get("observation") if isinstance(result, dict) else {}
+        reason = None
+        for assertion in (observation or {}).get("hard_assertions") or []:
+            if isinstance(assertion, dict) and not assertion.get("passed") and assertion.get("evidence"):
+                reason = str(assertion["evidence"])
+                break
+        if not reason:
+            reason = {
+                "poor": "综合表现低于目标线",
+                "failed": "执行或硬性要求未通过",
+                "pending": "评测尚未完成",
+            }[outcome]
+        attention.append(
+            {
+                "run_id": run_id,
+                "item_id": item["id"],
+                "target_type": target_type,
+                "case_key": item.get("case_key") or "",
+                "scenario_key": item.get("scenario_key"),
+                "replication_index": item.get("replication_index"),
+                "score": item.get("score"),
+                "outcome": outcome,
+                "primary_failure_reason": reason,
+            }
+        )
+    order = {"failed": 0, "poor": 1, "pending": 2}
+    return sorted(attention, key=lambda item: (order[item["outcome"]], item["item_id"]))[:20]
+
+
+def _quality_status_from_items(
+    items: list[dict[str, Any]],
+    execution_status: str,
+    distribution: dict[str, int],
+) -> str:
+    if not items or any(item.get("status") in {"pending", "running"} for item in items):
+        return "pending"
+    if execution_status == "cancelled":
+        return "not_evaluated"
+    if execution_status != "completed":
+        return "failed"
+    if distribution["poor"]:
+        return "failed"
+    return "passed" if all(
+        item.get("status") == "completed"
+        and item.get("contract_status") == "valid"
+        and item.get("hard_gate_status") == "passed"
+        and item.get("judge_status") == "succeeded"
+        for item in items
+    ) else "failed"
+
+
+def _run_quality_metadata(conn, run_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Build list/overview quality fields with one run query and one item query."""
+    if not run_ids:
+        return {}
+    placeholders = ",".join("?" for _ in run_ids)
+    runs = conn.execute(
+        f"""
+        SELECT r.id, r.status, r.total_items, r.snapshot_json, r.summary_json,
+               er.manifest_json, tr.target_type
+        FROM eval_runs r
+        LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
+        LEFT JOIN eval_releases tr ON tr.id = r.target_release_id
+        WHERE r.id IN ({placeholders})
+        """,
+        run_ids,
+    ).fetchall()
+    items_by_run: dict[int, list[dict[str, Any]]] = {run_id: [] for run_id in run_ids}
+    item_rows = conn.execute(
+        f"""
+        SELECT i.run_id, i.id, i.case_id, c.case_key, c.scenario_key,
+               i.replication_index, i.seed, i.status,
+               i.contract_status, i.hard_gate_status, i.judge_status,
+               i.score, i.result_json
+        FROM eval_items i
+        JOIN eval_benchmark_cases c ON c.id = i.case_id
+        WHERE i.run_id IN ({placeholders})
+        ORDER BY i.run_id, i.id
+        """,
+        run_ids,
+    ).fetchall()
+    for row in item_rows:
+        item = dict(row)
+        item["result"] = _decode_json(item.pop("result_json", "{}"), {})
+        items_by_run.setdefault(item["run_id"], []).append(item)
+
+    metadata: dict[int, dict[str, Any]] = {}
+    for row in runs:
+        run_id = int(row["id"])
+        items = items_by_run.get(run_id, [])
+        snapshot = _decode_json(row["snapshot_json"], {})
+        evaluation = snapshot.get("evaluation_release") if isinstance(snapshot, dict) else None
+        frozen_manifest = evaluation.get("manifest") if isinstance(evaluation, dict) else None
+        manifest = frozen_manifest if isinstance(frozen_manifest, dict) else _decode_json(row["manifest_json"], {})
+        distribution = build_progress_distribution(
+            items,
+            total=row["total_items"],
+            poor_score_below=quality_threshold_from_manifest(manifest),
+        )
+        target_type = str(row["target_type"] or "")
+        summary = _decode_json(row["summary_json"], {})
+        metadata[run_id] = {
+            "quality_status": _quality_status_from_items(items, row["status"], distribution),
+            "distribution": distribution,
+            "metric_cards": build_metric_cards(target_type, summary.get("metric_summary"), thresholds={}) if target_type in TARGET_METRIC_DICTIONARY else [],
+            "attention_cases": _attention_cases_from_items(
+                items,
+                run_id,
+                target_type,
+                quality_threshold_from_manifest(manifest),
+            ),
+        }
+    return metadata
+
+
 def _serialize_run(row) -> dict[str, Any]:
     result = dict(row)
     result["summary"] = _decode_json(result.pop("summary_json", "{}"), {})
@@ -236,19 +464,11 @@ def _quality_status(conn, run_id: int, execution_status: str) -> str:
         "SELECT status, contract_status, hard_gate_status, judge_status FROM eval_items WHERE run_id = ?",
         (run_id,),
     ).fetchall()
-    if not rows or any(row["status"] in {"pending", "running"} for row in rows):
-        return "pending"
-    if execution_status == "cancelled":
-        return "not_evaluated"
-    if execution_status != "completed":
-        return "failed"
-    return "passed" if all(
-        row["status"] == "completed"
-        and row["contract_status"] == "valid"
-        and row["hard_gate_status"] == "passed"
-        and row["judge_status"] == "succeeded"
-        for row in rows
-    ) else "failed"
+    return _quality_status_from_items(
+        [dict(row) for row in rows],
+        execution_status,
+        _run_progress_distribution(conn, run_id),
+    )
 
 
 def _run_query(conn, run_id: int):
@@ -257,6 +477,7 @@ def _run_query(conn, run_id: int):
         SELECT r.*, b.batch_fingerprint, b.replication_count,
                b.environment_fingerprint, b.seed,
                tr.release_key AS target_release_key,
+               tr.target_type AS target_type,
                er.release_key AS evaluation_release_key,
                bs.release_key AS benchmark_suite_release_key,
                ep.release_key AS eval_protocol_release_key,
@@ -365,6 +586,7 @@ async def overview(admin: dict = Depends(get_admin_user)):
                 ORDER BY r.id
                 """
             ).fetchall()
+            quality_metadata = _run_quality_metadata(conn, [run["id"] for run in all_runs])
             by_target: dict[str, dict[str, Any]] = {}
             for run in all_runs:
                 tt = run["target_type"] or "未分类"
@@ -377,18 +599,29 @@ async def overview(admin: dict = Depends(get_admin_user)):
                         "passed_count": 0,
                         "failed_count": 0,
                         "pending_count": 0,
+                        "distribution": {
+                            "total": 0,
+                            "passed": 0,
+                            "poor": 0,
+                            "failed": 0,
+                            "pending": 0,
+                        },
                         "total_score_sum": 0.0,
                         "scored_run_count": 0,
                     },
                 )
                 agg["run_count"] += 1
-                quality = _quality_status(conn, run["id"], run["status"])
+                metadata = quality_metadata.get(run["id"], {})
+                quality = metadata.get("quality_status", "pending")
                 if quality == "passed":
                     agg["passed_count"] += 1
                 elif quality == "failed":
                     agg["failed_count"] += 1
                 else:
                     agg["pending_count"] += 1
+                distribution = metadata.get("distribution", _empty_distribution())
+                for key in ("total", "passed", "poor", "failed", "pending"):
+                    agg["distribution"][key] += distribution[key]
                 summary = _decode_json(run["summary_json"], {})
                 final_mean = (summary.get("metric_summary") or {}).get("score") or {}
                 final_mean = final_mean.get("final_mean")
@@ -1029,10 +1262,12 @@ async def list_runs(
                 "ORDER BY r.id DESC LIMIT ?",
                 params,
             ).fetchall()
+            quality_metadata = _run_quality_metadata(conn, [row["id"] for row in rows])
             result = []
             for row in rows:
                 item = dict(row)
-                item["quality_status"] = _quality_status(conn, row["id"], row["status"])
+                metadata = quality_metadata.get(row["id"], {})
+                item["quality_status"] = metadata.get("quality_status", "pending")
                 summary = _decode_json(item.pop("summary_json", "{}"), {})
                 metric_score = (summary.get("metric_summary") or {}).get("score") or {}
                 item["score"] = {
@@ -1040,6 +1275,9 @@ async def list_runs(
                     "deterministic_mean": metric_score.get("deterministic_mean"),
                     "judge_mean": metric_score.get("judge_mean"),
                 } or None
+                item["distribution"] = metadata.get("distribution", _empty_distribution())
+                item["metric_cards"] = metadata.get("metric_cards", [])
+                item["attention_cases"] = metadata.get("attention_cases", [])
                 result.append(item)
             return result
 
@@ -1167,6 +1405,8 @@ async def get_run(run_id: int, admin: dict = Depends(get_admin_user)):
             if row is None:
                 return None
             result = _serialize_run(row)
+            evaluation_manifest = _run_evaluation_manifest(conn, run_id)
+            poor_score_below = quality_threshold_from_manifest(evaluation_manifest)
             items = conn.execute(
                 """
                 SELECT i.*, c.case_key, c.scenario_key
@@ -1180,8 +1420,13 @@ async def get_run(run_id: int, admin: dict = Depends(get_admin_user)):
                 serialized = dict(item)
                 serialized["result"] = _decode_json(serialized.pop("result_json", "{}"), {})
                 serialized["cancel_requested"] = bool(serialized.get("cancel_requested", 0))
+                serialized["outcome"] = classify_progress_outcome(serialized, poor_score_below)
                 result["items"].append(serialized)
             result["quality_status"] = _quality_status(conn, run_id, result["status"])
+            result["distribution"] = _run_progress_distribution(conn, run_id)
+            result["metric_cards"] = _run_metric_cards(
+                conn, run_id, str(result.get("target_type") or "")
+            )
             return result
 
     result = await run_db(_query)
@@ -1289,6 +1534,37 @@ async def get_run_item(
     if result is None:
         raise HTTPException(status_code=404, detail="Eval Case 不存在")
     return result
+
+
+@router.get(
+    "/runs/{run_id}/items/{item_id}/evidence",
+    response_model=CaseEvidenceView,
+)
+async def get_run_item_evidence(
+    run_id: int,
+    item_id: int,
+    admin: dict = Depends(get_admin_user),
+):
+    """Return the versioned, business-facing Case Evidence View."""
+    raw = await get_run_item(run_id, item_id, admin)
+
+    def _query():
+        with get_db_connection() as conn:
+            row = _run_query(conn, run_id)
+            if row is None:
+                return None
+            result = _serialize_run(row)
+            result["quality_status"] = _quality_status(conn, run_id, result["status"])
+            return result
+
+    run = await run_db(_query)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Eval Run 不存在")
+    return build_case_evidence_view(
+        raw,
+        run=run,
+        target_type=str(run.get("target_type") or "unknown"),
+    )
 
 
 @router.post("/runs/{run_id}/cancel")

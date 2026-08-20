@@ -67,7 +67,7 @@ const executionEstimate = computed(() => {
   const total = Math.max(0, caseCount * replication)
   const judgeCalls = Math.max(0, caseCount) * Math.max(0, Math.min(replication, 3))
   let estimate = total ? `${total} 次 E2E 执行` : '—'
-  if (judgeCalls) estimate += `（约 ${judgeCalls} 次 Judge 调用）`
+  if (judgeCalls) estimate += `（约 ${judgeCalls} 次质量评审）`
   return { total, judgeCalls, text: estimate }
 })
 
@@ -84,7 +84,7 @@ async function submitSmoke() {
   }
   const caseKey = smokeCaseKey()
   if (!caseKey) {
-    error.value = '没有找到 Benchmark Case，无法执行 Smoke。'
+    error.value = '没有找到评测集 Case，无法执行单 Case 评测。'
     return
   }
   submitting.value = true
@@ -225,10 +225,10 @@ onMounted(load)
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader title="发起一次评测" description="选择一个被测版本和一个完整评测版本，系统会冻结所有参数，启动可恢复的多轮 E2E。" active-key="experiments" />
+      <EvaluationPageHeader title="发起一次评测" description="选择被测版本和评测配置，系统会固定本次评测所用的版本与参数。" active-key="experiments" />
       <div v-if="loading" class="flex min-h-64 items-center justify-center"><AsyncLoading /></div>
       <div v-else class="mt-6 grid gap-6 xl:grid-cols-[minmax(280px,520px)_minmax(0,1fr)]">
-        <AppCard title="评测配置" description="一个完整评测版本就是一套一致的题集、规则、模型和 Harness；同一批次内不会混用。">
+        <AppCard title="评测配置" description="一次评测会固定评测集、评分规则、执行器和模拟人，同一批次内不会混用。">
           <form class="space-y-3" @submit.prevent="submit">
             <EvaluationTargetPicker :model-value="selectedTargetType" :capabilities="capabilities" @update:model-value="selectTargetType" />
             <EvaluationStepCard :number="1" title="选择被测版本" description="决定这次要测哪个 Agent、Workflow 或 Pipeline。">
@@ -246,7 +246,7 @@ onMounted(load)
               <p class="mt-1.5 text-xs text-muted-foreground">每个 Agent / Workflow 独立建立自己的评测 Run，便于后续做 A/B。</p>
             </EvaluationStepCard>
 
-            <EvaluationStepCard :number="2" title="选择完整评测版本" description="这一个版本整体固定 Benchmark、Judge、模拟器、Harness，以及工具调用和意图识别指标。">
+            <EvaluationStepCard :number="2" title="选择评测配置" description="这里固定评测集、评分模型、执行器，以及本次要看的业务指标。">
               <label class="block text-sm font-medium" for="eval-release">完整评测版本</label>
               <Select v-model="form.evaluation">
                 <SelectTrigger class="mt-1.5">
@@ -260,8 +260,8 @@ onMounted(load)
               </Select>
               <div class="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评测题集</span><div class="mt-1 font-medium">{{ evaluationConfig.benchmark }} · {{ evaluationConfig.caseCount }} 个 Case</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">固定 Judge</span><div class="mt-1 break-all font-mono font-medium">{{ evaluationConfig.judge }}</div></div>
-                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">执行器 / 候选人</span><div class="mt-1 font-medium">{{ evaluationConfig.harness }} · {{ evaluationConfig.simulator === '—' ? '无需模拟器' : evaluationConfig.simulator }}</div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">评分模型</span><div class="mt-1 break-all font-mono font-medium">{{ evaluationConfig.judge }}</div></div>
+                <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">Harness / 模拟人</span><div class="mt-1 font-medium">{{ evaluationConfig.harness }} · {{ evaluationConfig.simulator === '—' ? '无需模拟人' : evaluationConfig.simulator }}</div></div>
                 <div class="rounded-lg bg-muted/40 p-3"><span class="text-muted-foreground">明确指标</span><div class="mt-1 flex flex-wrap gap-1.5"><span v-if="evaluationConfig.tool" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />工具调用效果</span><span v-if="evaluationConfig.intent" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />意图识别效果</span><span v-if="evaluationConfig.structured" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />字段与题目召回</span><span v-if="evaluationConfig.resume" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />事实与岗位匹配</span><span v-if="evaluationConfig.tagging" class="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 class="size-3.5" />分类与标签准确率</span></div></div>
               </div>
             </EvaluationStepCard>
@@ -282,7 +282,7 @@ onMounted(load)
           </form>
         </AppCard>
 
-        <AppCard class="xl:col-span-2" title="批量评测实验" description="一次选择多个已接入 Agent，系统会为每个对象创建一个独立子 Run，并在 Experiment 页面汇总进度。">
+        <AppCard class="xl:col-span-2" title="批量评测" description="一次选择多个评测目标，系统会分别执行并汇总进度。">
           <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <div>
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -305,9 +305,9 @@ onMounted(load)
           </div>
         </AppCard>
 
-        <AppCard class="mt-6" title="查看历史结果" description="查看所有评测 Run 和批量实验的进度、分数和逐 Case 证据。">
+        <AppCard class="mt-6" title="查看历史结果" description="查看所有评测的进度、分数和逐 Case 证据。">
           <div class="flex items-center justify-between">
-            <p class="text-sm text-muted-foreground">在「评测结果」页面可以筛选、排序所有 Run 和 Experiment。</p>
+            <p class="text-sm text-muted-foreground">在「评测结果」页面可以筛选、排序所有评测。</p>
             <Button variant="outline" @click="router.push('/admin/evals/results')">查看评测结果</Button>
           </div>
         </AppCard>

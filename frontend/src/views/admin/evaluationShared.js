@@ -20,7 +20,7 @@ export const QUALITY_STATUS_LABELS = {
 export const RELEASE_TYPE_LABELS = {
   target: '被测版本',
   evaluation: '完整评测版本',
-  benchmark_suite: '评测题集',
+  benchmark_suite: '评测集',
   eval_protocol: '评测规则',
   judge: '评分模型',
   simulator_harness: '模拟面试执行器',
@@ -71,7 +71,7 @@ export const EVALUATION_TARGETS = [
 ]
 
 export const EVALUATION_FLOW_STEPS = [
-  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与发布', description: '决定测谁与测什么', route: '/admin/evals/releases' },
+  { key: 'releases', keys: ['EvalReleases', 'admin-evals-releases'], label: '版本与评测集', description: '测谁、用什么 Harness 和哪套 Case', route: '/admin/evals/releases' },
   { key: 'experiments', keys: ['EvalExperiments', 'EvalExperiment', 'admin-evals-experiments', 'admin-evals-experiment', 'admin-evals-run'], label: '测评实验', description: '启动完整 E2E', route: '/admin/evals/experiments' },
   { key: 'results', keys: ['EvalResults', 'admin-evals-results'], label: '评测结果', description: '看进度和结果', route: '/admin/evals/results' },
   { key: 'reviews', keys: ['EvalReviews', 'admin-evals-reviews'], label: '人工 A/B', description: '人工核验差异', route: '/admin/evals/reviews' },
@@ -151,10 +151,12 @@ export function runProgress(run) {
 export function casePrioritySort(items) {
   if (!items) return []
   const priority = (item) => {
+    if (item.outcome === 'failed') return 0
+    if (item.outcome === 'poor') return 1
     if (item.status === 'failed') return 0
     if (item.status === 'completed' && item.hard_gate_status === 'failed') return 1
     if (item.status === 'completed' && item.judge_status === 'pending') return 2
-    if (item.status === 'running' || item.status === 'queued') return 3
+    if (item.outcome === 'pending' || item.status === 'running' || item.status === 'queued') return 3
     return 4
   }
   return [...items].sort((a, b) => priority(a) - priority(b))
@@ -176,7 +178,11 @@ export function scoreBarColorClass(score) {
 
 /** 按失败率降序排列 by_target 数组 */
 export function buildByTargetSort(byTarget) {
-  return [...byTarget].sort((a, b) => (b.failed_count / Math.max(b.run_count, 1)) - (a.failed_count / Math.max(a.run_count, 1)))
+  const failureRate = (item) => {
+    if (item?.distribution?.total) return item.distribution.failed / item.distribution.total
+    return item.failed_count / Math.max(item.run_count, 1)
+  }
+  return [...byTarget].sort((a, b) => failureRate(b) - failureRate(a))
 }
 
 /** 计算通过率百分比 */
@@ -277,17 +283,17 @@ export function turnMetadata(turn) {
   }
 }
 
-export const PROGRESS_THRESHOLDS = { poor: 0.6 }
-
 export function classifyItemQuality(item) {
   if (!item) return 'pending'
   const hardFailed = item.hard_gate_status === 'failed' || item.status === 'failed' || item.quality_status === 'failed'
   if (hardFailed) return 'failed'
   const score = item.score ?? item.result?.score?.score ?? item.result?.score?.final
   const judgeStatus = item.judge_status ?? item.result?.score?.judge_status
-  if (judgeStatus === 'succeeded' && score != null && Number(score) < PROGRESS_THRESHOLDS.poor) return 'poor'
-  // treat low judge score as poor even without explicit judge_status if score present and hard passed
-  if (item.hard_gate_status === 'passed' && score != null && Number(score) < PROGRESS_THRESHOLDS.poor) return 'poor'
+  const poorThreshold = item.quality_threshold ?? item.result?.quality_threshold ?? null
+  if (poorThreshold != null && judgeStatus === 'succeeded' && score != null && Number(score) < Number(poorThreshold)) return 'poor'
+  // Legacy payloads without a protocol threshold remain visible as passed/failed;
+  // current APIs provide distribution from the Evaluation Release.
+  if (item.hard_gate_status === 'passed' && score != null && poorThreshold != null && Number(score) < Number(poorThreshold)) return 'poor'
   if (item.hard_gate_status === 'passed' || item.contract_status === 'passed' || item.status === 'completed') return 'passed'
   if (item.status === 'running' || item.status === 'queued' || item.status === 'created') return 'pending'
   // pending judge or not evaluated -> if completed but no score yet, treat as pending for progress gap
@@ -296,6 +302,17 @@ export function classifyItemQuality(item) {
 }
 
 export function runDistribution(source) {
+  if (source?.distribution) {
+    const total = Number(source.distribution.total || 0)
+    const counts = {
+      passed: Number(source.distribution.passed || 0),
+      poor: Number(source.distribution.poor || 0),
+      failed: Number(source.distribution.failed || 0),
+      pending: Number(source.distribution.pending || 0),
+    }
+    const pct = key => total ? Math.round(counts[key] / total * 100) : 0
+    return { total, ...counts, pct: { passed: pct('passed'), poor: pct('poor'), failed: pct('failed'), pending: pct('pending') } }
+  }
   const items = Array.isArray(source) ? source : (source?.items || [])
   const total = Array.isArray(source) ? items.length : (source?.total_items ?? items.length)
   if (!total) return { total: 0, passed: 0, poor: 0, failed: 0, pending: 0, pct: { passed: 0, poor: 0, failed: 0, pending: 0 } }
@@ -330,4 +347,15 @@ export function runDistribution(source) {
     pctFailed += 100 - sum
   }
   return { total, ...counts, pct: { passed: pctPassed, poor: pctPoor, failed: pctFailed, pending: pctPending } }
+}
+
+export const OUTCOME_LABELS = {
+  failed: '失败',
+  poor: '表现不佳',
+  passed: '通过',
+  pending: '未完成',
+}
+
+export function outcomeLabel(outcome) {
+  return OUTCOME_LABELS[outcome] || '未完成'
 }

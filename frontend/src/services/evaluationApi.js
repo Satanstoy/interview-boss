@@ -1,8 +1,9 @@
 import { get, getSSE, post } from './http.js'
+import { normalizeEvaluationOverview, normalizeRunSummary, parseCaseEvidenceView } from './evaluationSchemas.js'
 
 const ROOT = '/api/admin/evals'
 
-export const fetchEvaluationOverview = (options = {}) => get(`${ROOT}/overview`, { noCache: true, ...options })
+export const fetchEvaluationOverview = (options = {}) => get(`${ROOT}/overview`, { noCache: true, ...options }).then(normalizeEvaluationOverview)
 export const fetchEvaluationCapabilities = () => get(`${ROOT}/capabilities`, { noCache: true })
 export const fetchEvaluationReleases = (params = {}) => {
   const query = new URLSearchParams()
@@ -16,10 +17,16 @@ export const fetchEvaluationBenchmarks = () => get(`${ROOT}/benchmarks`, { noCac
 
 export const fetchEvaluationRuns = (status = '') => {
   const suffix = status ? `?status=${encodeURIComponent(status)}` : ''
-  return get(`${ROOT}/runs${suffix}`, { noCache: true })
+  return get(`${ROOT}/runs${suffix}`, { noCache: true }).then(data => ({
+    ...data,
+    runs: (data.runs || []).map(normalizeRunSummary),
+  }))
 }
-export const fetchEvaluationRun = (runId) => get(`${ROOT}/runs/${runId}`, { noCache: true })
+export const fetchEvaluationRun = (runId) => get(`${ROOT}/runs/${runId}`, { noCache: true }).then(normalizeRunSummary)
 export const fetchEvaluationItem = (runId, itemId) => get(`${ROOT}/runs/${runId}/items/${itemId}`, { noCache: true })
+export const fetchEvaluationEvidence = (runId, itemId) => (
+  get(`${ROOT}/runs/${runId}/items/${itemId}/evidence`, { noCache: true }).then(parseCaseEvidenceView)
+)
 export const createEvaluationRun = (payload) => post(`${ROOT}/runs`, payload)
 export const cancelEvaluationRun = (runId) => post(`${ROOT}/runs/${runId}/cancel`, {})
 export const retryFailedEvaluationRun = (runId) => post(`${ROOT}/runs/${runId}/retry-failed`, {})

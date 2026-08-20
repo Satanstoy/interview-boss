@@ -73,6 +73,7 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/experiments/{experiment_id}/events" in paths
     assert "/api/admin/evals/runs/{run_id}" in paths
     assert "/api/admin/evals/runs/{run_id}/items/{item_id}" in paths
+    assert "/api/admin/evals/runs/{run_id}/items/{item_id}/evidence" in paths
     assert "/api/admin/evals/runs/{run_id}/cancel" in paths
     assert "/api/admin/evals/runs/{run_id}/retry-failed" in paths
     assert "/api/admin/evals/runs/{run_id}/events" in paths
@@ -226,6 +227,13 @@ def test_get_run_item_returns_frozen_case_attempt_and_artifacts(test_db, monkeyp
     assert result["case"]["input_snapshot"]["candidate_view"]["answer"] == "hello"
     assert result["attempts"][0]["raw_observation"]["observation"]["status"] == "succeeded"
     assert result["artifacts"][0]["artifact_type"] == "transcript"
+
+    evidence = asyncio.run(
+        module.get_run_item_evidence(run["id"], item["id"], {"id": 1, "is_admin": 1})
+    )
+    assert evidence.schema_version == "1.0"
+    assert evidence.item.case_key == "case-1"
+    assert evidence.case.candidate_input["answer"] == "hello"
 
 def test_get_run_item_dual_axis_returns_frozen_snapshot_not_live_case(test_db, monkeypatch):
     """Item evidence for a dual-axis Run must come from the immutable
@@ -490,6 +498,7 @@ def test_get_experiment_aggregates_child_run_progress(test_db, monkeypatch):
     catalog.sync_builtin_benchmarks(test_db)
     test_db.commit()
     monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+    monkeypatch.setattr(module, "get_target_adapter", lambda target_type: object())
 
     async def sync_run_db(func):
         return func()
@@ -537,6 +546,8 @@ def test_get_experiment_aggregates_child_run_progress(test_db, monkeypatch):
     assert result["failed_items"] == result["runs"][1]["total_items"]
     assert result["runs"][0]["quality_status"] == "passed"
     assert result["runs"][1]["quality_status"] == "failed"
+    assert result["runs"][0]["distribution"]["total"] == result["runs"][0]["total_items"]
+    assert result["runs"][1]["distribution"]["failed"] == result["runs"][1]["total_items"]
     event_types = [
         row[0]
         for row in test_db.execute(
@@ -1010,6 +1021,15 @@ def test_list_runs_includes_aggregate_score_and_target_type(test_db, monkeypatch
     assert item["score"]["final_mean"] == 0.82, item.get("score")
     assert item["score"]["deterministic_mean"] == 0.75
     assert item["score"]["judge_mean"] == 0.9
+    assert item["distribution"] == {
+        "total": 1,
+        "passed": 0,
+        "poor": 0,
+        "failed": 0,
+        "pending": 1,
+    }
+    assert item["attention_cases"][0]["case_key"] == "case-1"
+    assert item["attention_cases"][0]["outcome"] == "pending"
 
 
 
@@ -1047,4 +1067,10 @@ def test_overview_includes_by_target_quality_aggregation(test_db, monkeypatch):
     assert fixture, by_target
     row = fixture[0]
     assert row["run_count"] == 2, row
-
+    assert row["distribution"] == {
+        "total": 2,
+        "passed": 0,
+        "poor": 0,
+        "failed": 0,
+        "pending": 2,
+    }, row

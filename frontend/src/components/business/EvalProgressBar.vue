@@ -107,7 +107,7 @@ const visibleSegments = computed(() => {
         v-for="seg in visibleSegments"
         :key="seg.key"
         :class="['h-full transition-all duration-300 ease-in-out', seg.color || 'bg-primary']"
-        :style="{ width: seg.pct + '%' }"
+        :style="{ width: seg.pct + '%', ...(seg.pattern ? { backgroundImage: 'repeating-linear-gradient(135deg, transparent, transparent 4px, rgba(255,255,255,.35) 4px, rgba(255,255,255,.35) 8px)' } : {}) }"
         :title="`${seg.label || seg.key} ${seg.value} (${seg.pct}%)`"
       />
     </div>

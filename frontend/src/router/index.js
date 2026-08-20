@@ -100,9 +100,7 @@ const routes = [
       },
       {
         path: 'admin/evals/overview',
-        name: 'admin-evals-overview',
-        meta: { adminOnly: true },
-        component: () => import('@/views/admin/EvaluationOverviewView.vue'),
+        redirect: to => ({ path: '/admin/evals/results', query: to.query }),
       },
       {
         path: 'admin/evals/results',

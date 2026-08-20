@@ -22,7 +22,7 @@ function navigate(crumb) {
     <AppPageHeader
       :title="title"
       :description="description"
-      :breadcrumbs="[{ label: '评测中心', to: '/admin/evals/overview' }, { label: title }]"
+      :breadcrumbs="[{ label: '评测中心', to: '/admin/evals/results' }, { label: title }]"
       @navigate="navigate"
     >
       <template v-if="$slots.actions" #actions>

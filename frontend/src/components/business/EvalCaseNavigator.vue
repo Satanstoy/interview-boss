@@ -15,7 +15,8 @@ const search = ref('')
 
 const filteredItems = computed(() => {
   let list = props.sortMode === 'priority' ? casePrioritySort(props.items) : [...props.items]
-  if (filter.value === 'failed') list = list.filter(i => i.status === 'failed' || (i.status === 'completed' && i.hard_gate_status === 'failed'))
+  if (filter.value === 'failed') list = list.filter(i => i.outcome === 'failed' || i.status === 'failed' || (i.status === 'completed' && i.hard_gate_status === 'failed'))
+  if (filter.value === 'poor') list = list.filter(i => i.outcome === 'poor')
   if (filter.value === 'running') list = list.filter(i => i.status === 'running' || i.status === 'queued')
   if (search.value.trim()) {
     const q = search.value.trim().toLowerCase()
@@ -25,7 +26,8 @@ const filteredItems = computed(() => {
 })
 
 function gateMeta(item) {
-  if (item.status === 'failed' || item.hard_gate_status === 'failed') return { label: checkStatusLabel('failed'), cls: 'bg-destructive/10 text-destructive' }
+  if (item.outcome === 'failed' || item.status === 'failed' || item.hard_gate_status === 'failed') return { label: '失败', cls: 'bg-destructive/10 text-destructive' }
+  if (item.outcome === 'poor') return { label: '表现不佳', cls: 'bg-amber-500/10 text-amber-700' }
   if (item.hard_gate_status === 'passed') return { label: checkStatusLabel('passed'), cls: 'bg-emerald-500/10 text-emerald-600' }
   return { label: checkStatusLabel(item.hard_gate_status || 'pending'), cls: 'bg-muted text-muted-foreground' }
 }
@@ -39,10 +41,10 @@ function scoreDisplay(item) {
 }
 
 function itemDotClass(item) {
-  if (item.status === 'failed') return 'bg-destructive'
-  if (item.status === 'completed' && item.hard_gate_status === 'failed') return 'bg-amber-500'
-  if (item.status === 'completed') return 'bg-emerald-500'
-  if (item.status === 'running') return 'bg-primary animate-pulse'
+  if (item.outcome === 'failed' || item.status === 'failed') return 'bg-destructive'
+  if (item.outcome === 'poor' || (item.status === 'completed' && item.hard_gate_status === 'failed')) return 'bg-amber-500'
+  if (item.outcome === 'passed' || item.status === 'completed') return 'bg-emerald-500'
+  if (item.outcome === 'pending' || item.status === 'running') return 'bg-muted-foreground/50 animate-pulse'
   return 'bg-muted-foreground/50'
 }
 </script>
@@ -62,7 +64,7 @@ function itemDotClass(item) {
     </div>
     <!-- 筛选 -->
     <div class="flex gap-1 border-b border-border/60 px-3 py-2" role="group" aria-label="Case 筛选">
-      <button v-for="f in [{ key: 'all', label: '全部' }, { key: 'failed', label: '失败' }, { key: 'running', label: '进行中' }]" :key="f.key" type="button" :aria-pressed="filter === f.key" :class="['rounded-md px-2 py-1 text-[11px] transition-colors', filter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="filter = f.key">{{ f.label }}</button>
+      <button v-for="f in [{ key: 'all', label: '全部' }, { key: 'failed', label: '失败' }, { key: 'poor', label: '不佳' }, { key: 'running', label: '进行中' }]" :key="f.key" type="button" :aria-pressed="filter === f.key" :class="['rounded-md px-2 py-1 text-[11px] transition-colors', filter === f.key ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground']" @click="filter = f.key">{{ f.label }}</button>
     </div>
     <div class="flex-1 overflow-y-auto custom-scrollbar" role="listbox" aria-label="Case 列表">
       <button

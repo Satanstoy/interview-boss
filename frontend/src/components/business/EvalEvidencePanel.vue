@@ -19,6 +19,7 @@ defineProps({
 
 function turns(item) { return item?.result?.observation?.payload?.turns || [] }
 function metrics(item) { return item?.result?.observation?.payload || {} }
+function targetMetrics(item) { return item?.result?.observation?.payload?.metrics || {} }
 function hardAssertions(item) { return item?.result?.observation?.hard_assertions || [] }
 function assertionClass(passed) { return passed ? 'text-emerald-600 bg-emerald-500/10' : 'text-destructive bg-destructive/10' }
 function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%' }
@@ -29,6 +30,10 @@ function inputSummaryKeys(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return []
   const keys = Object.keys(snapshot)
   return keys.slice(0, 6)
+}
+
+function inputFieldLabel(key) {
+  return { candidate_view: '候选人输入', harness_context: 'Harness 参数' }[key] || key
 }
 function contractSummary(contract) {
   if (!contract || typeof contract !== 'object') return null
@@ -50,9 +55,9 @@ function scoreSourceLabel(source) {
   const map = {
     hybrid: '混合',
     deterministic_only: '仅规则',
-    judge_only: '仅 Judge',
-    deterministic_pending_judge: '待 Judge',
-    judge_pending: '待 Judge',
+    judge_only: '仅质量评审',
+    deterministic_pending_judge: '待质量评审',
+    judge_pending: '待质量评审',
     none: '无分数',
   }
   return map[source] || source || '—'
@@ -62,6 +67,42 @@ function questionSourceLabel(src) {
   if (!src) return '—'
   const m = { search: '搜索', draw: '抽取', retrieval: '检索', agent_internal: '内部', question_bank: '题库', search_questions: 'search_questions' }
   return m[src] || src
+}
+
+function targetPayload(evidence) {
+  return evidence?.observation?.target_payload || null
+}
+
+function targetOutputLabel(targetType) {
+  return {
+    interview: '面试过程结果',
+    experience_extraction: '面经提取结果',
+    jd_extraction: '岗位信息提取结果',
+    resume_analysis: '简历分析结果',
+    question_tagging: '面试题分类结果',
+  }[targetType] || '业务结果'
+}
+
+function outputFieldLabel(targetType, key) {
+  const labels = {
+    interview: { conversation_id: '对话编号', turns: '对话记录', errors: '执行错误' },
+    experience_extraction: { doc_type: '内容类型', data: '提取内容', quality: '结果质量' },
+    jd_extraction: { doc_type: '内容类型', data: '岗位信息', quality: '结果质量' },
+    resume_analysis: { points: '优化建议', optimized_text: '优化后简历' },
+    question_tagging: { tagged_rows: '分类结果', quality: '结果质量' },
+  }
+  return labels[targetType]?.[key] || key
+}
+
+function displayValue(value) {
+  if (value == null || value === '') return '—'
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
+}
+
+function shortValue(value, limit = 40) {
+  const text = displayValue(value)
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
 }
 </script>
 
@@ -77,9 +118,9 @@ function questionSourceLabel(src) {
             <span class="text-xs text-muted-foreground">第 {{ item.replication_index }} 次 · seed {{ item.seed }}</span>
           </div>
           <div class="mt-1 flex flex-wrap gap-2 text-xs">
-            <span class="rounded-full bg-muted px-2 py-0.5">契约 {{ checkLabel(item.contract_status) }}</span>
-            <span class="rounded-full bg-muted px-2 py-0.5">硬门禁 {{ checkLabel(item.hard_gate_status) }}</span>
-            <span class="rounded-full bg-muted px-2 py-0.5">Judge {{ checkLabel(item.judge_status) }}</span>
+            <span class="rounded-full bg-muted px-2 py-0.5">输出要求 {{ checkLabel(item.contract_status) }}</span>
+            <span class="rounded-full bg-muted px-2 py-0.5">硬性要求 {{ checkLabel(item.hard_gate_status) }}</span>
+            <span class="rounded-full bg-muted px-2 py-0.5">质量评审 {{ checkLabel(item.judge_status) }}</span>
             <span v-if="evidence?.case?.input_digest" class="hidden sm:inline rounded-full bg-muted px-2 py-0.5 font-mono text-[10px]">digest {{ String(evidence.case.input_digest).slice(0, 8) }}</span>
           </div>
         </div>
@@ -129,14 +170,14 @@ function questionSourceLabel(src) {
               <div class="mt-2 flex flex-wrap gap-1.5">
                 <span class="text-[10px] text-muted-foreground">候选人可见输入 ·</span>
                 <span v-for="key in inputSummaryKeys(evidence.case?.input_snapshot)" :key="key" class="rounded-md bg-muted px-2 py-0.5 text-[10px]">
-                  <span class="text-muted-foreground">{{ key }}:</span> {{ String(evidence.case.input_snapshot[key]).slice(0, 28) }}{{ String(evidence.case.input_snapshot[key]).length > 28 ? '…' : '' }}
+                  <span class="text-muted-foreground">{{ inputFieldLabel(key) }}:</span> {{ shortValue(evidence.case.input_snapshot[key], 28) }}
                 </span>
               </div>
             </div>
 
             <!-- 契约摘要 -->
             <div v-if="contractSummaryDetailed(evidence.case.contract)" class="mt-3">
-              <div class="mb-1 text-xs font-medium">契约摘要</div>
+              <div class="mb-1 text-xs font-medium">输出要求摘要</div>
               <div class="flex flex-wrap gap-1.5 text-xs">
                 <span class="rounded-md bg-muted px-2 py-1">硬断言 {{ contractSummaryDetailed(evidence.case.contract).hardCount }} 项</span>
                 <span v-for="k in contractSummaryDetailed(evidence.case.contract).rubricKeys.slice(0, 6)" :key="k" class="rounded-md bg-muted px-2 py-1">{{ k }}</span>
@@ -150,13 +191,25 @@ function questionSourceLabel(src) {
             <div v-if="scoreBreakdownFromItem(item).final != null || scoreBreakdownFromItem(item).deterministic != null || scoreBreakdownFromItem(item).judge != null" class="mt-3">
               <div class="mb-1 flex items-center justify-between text-xs">
                 <span class="font-medium">分数分解</span>
-                <span class="text-muted-foreground">规则 {{ fmtScore(scoreBreakdownFromItem(item).deterministic) }} · Judge {{ fmtScore(scoreBreakdownFromItem(item).judge) }} · 最终 {{ fmtScore(scoreBreakdownFromItem(item).final) }}</span>
+                <span class="text-muted-foreground">规则检查 {{ fmtScore(scoreBreakdownFromItem(item).deterministic) }} · 质量评审 {{ fmtScore(scoreBreakdownFromItem(item).judge) }} · 最终 {{ fmtScore(scoreBreakdownFromItem(item).final) }}</span>
               </div>
               <EvalScoreBar :deterministic="scoreBreakdownFromItem(item).deterministic" :judge="scoreBreakdownFromItem(item).judge" :final="scoreBreakdownFromItem(item).final" height="h-2.5" />
               <div class="mt-1.5 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
                 <span v-if="scoreBreakdownFromItem(item).scoreSource" class="rounded bg-muted px-1.5 py-0.5">{{ scoreSourceLabel(scoreBreakdownFromItem(item).scoreSource) }}</span>
-                <span v-if="scoreBreakdownFromItem(item).deterministicWeight != null" class="rounded bg-muted px-1.5 py-0.5">权重 规则 {{ Math.round(scoreBreakdownFromItem(item).deterministicWeight * 100) }}% · Judge {{ Math.round(scoreBreakdownFromItem(item).judgeWeight * 100) }}%</span>
+                <span v-if="scoreBreakdownFromItem(item).deterministicWeight != null" class="rounded bg-muted px-1.5 py-0.5">权重 硬性要求 {{ Math.round(scoreBreakdownFromItem(item).deterministicWeight * 100) }}% · 质量评审 {{ Math.round(scoreBreakdownFromItem(item).judgeWeight * 100) }}%</span>
                 <span v-if="scoreBreakdownFromItem(item).deterministicDimensions.length" class="rounded bg-muted px-1.5 py-0.5">维度 {{ scoreBreakdownFromItem(item).deterministicDimensions.join(' · ') }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="targetPayload(evidence) && Object.keys(targetPayload(evidence).output || {}).length" aria-label="业务结果">
+          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">{{ targetOutputLabel(targetPayload(evidence).target_type) }}</h3>
+          <div class="rounded-xl border border-border/60 bg-card p-3">
+            <div class="grid gap-2 sm:grid-cols-2">
+              <div v-for="(value, key) in targetPayload(evidence).output" :key="key" class="rounded-md bg-muted/40 p-2">
+                <div class="text-xs text-muted-foreground">{{ outputFieldLabel(targetPayload(evidence).target_type, key) }}</div>
+                <pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{{ displayValue(value) }}</pre>
               </div>
             </div>
           </div>
@@ -216,14 +269,14 @@ function questionSourceLabel(src) {
           </div>
         </section>
 
-        <!-- P3: 确定性指标（重构：工具/意图/抽取 三组） -->
-        <section v-if="Object.keys(metrics(item)).length" aria-label="确定性指标">
-          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">确定性指标</h3>
+        <!-- P3: Harness 执行指标（工具/意图/抽取 三组） -->
+        <section v-if="Object.keys(metrics(item)).length" aria-label="评测执行指标">
+          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">评测执行指标</h3>
           <div class="space-y-3">
             <!-- 工具调用详情 -->
             <div v-if="metrics(item).tool_metrics" class="rounded-xl border border-border/60 bg-card p-3">
               <div class="flex items-center justify-between">
-                <div class="text-xs font-medium">工具调用详情</div>
+                <div class="text-xs font-medium">工具使用效果</div>
                 <div class="text-xs text-muted-foreground">{{ metrics(item).tool_metrics.call_count || 0 }} 次调用 · {{ metrics(item).tool_metrics.failed_call_count || 0 }} 次失败</div>
               </div>
               <div class="mt-2 flex flex-wrap gap-1.5 text-xs">
@@ -251,7 +304,7 @@ function questionSourceLabel(src) {
             <!-- 意图识别详情 -->
             <div v-if="metrics(item).intent_metrics" class="rounded-xl border border-border/60 bg-card p-3">
               <div class="flex items-center justify-between">
-                <div class="text-xs font-medium">意图识别详情</div>
+                <div class="text-xs font-medium">用户意图理解效果</div>
                 <div class="text-xs text-muted-foreground">覆盖 {{ pct(metrics(item).intent_metrics.intent_coverage) }} · 准确 {{ pct(metrics(item).intent_metrics.accuracy) }} · 策略覆盖 {{ pct(metrics(item).intent_metrics.strategy_coverage) }}</div>
               </div>
               <div class="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
@@ -286,41 +339,41 @@ function questionSourceLabel(src) {
             </div>
 
             <!-- 结构化抽取详情 -->
-            <div v-if="metrics(item).metrics" class="rounded-xl border border-border/60 bg-card p-3">
+            <div v-if="targetMetrics(item).field_coverage != null || targetMetrics(item).question_recall != null || targetMetrics(item).source_fact_coverage != null || targetMetrics(item).target_alignment != null || targetMetrics(item).taxonomy_validity != null || targetMetrics(item).field_results?.length || targetMetrics(item).label_results?.length" class="rounded-xl border border-border/60 bg-card p-3">
               <div class="text-xs font-medium">结构化抽取详情</div>
               <div class="mt-2 grid gap-2 sm:grid-cols-2 text-xs">
-                <div v-if="metrics(item).metrics.field_coverage != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">字段覆盖</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.field_coverage) }} <span class="text-muted-foreground">· 匹配 {{ pct(metrics(item).metrics.field_match_rate) }}</span></div></div>
-                <div v-if="metrics(item).metrics.question_recall != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">题目召回 / 精确</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.question_recall) }} / {{ pct(metrics(item).metrics.question_precision) }}</div></div>
-                <div v-if="metrics(item).metrics.source_fact_coverage != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">简历事实覆盖</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.source_fact_coverage) }}</div></div>
-                <div v-if="metrics(item).metrics.target_alignment != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">岗位匹配</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.target_alignment) }}</div></div>
-                <div v-if="metrics(item).metrics.taxonomy_validity != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">分类有效性</div><div class="mt-1 font-mono font-medium">{{ pct(metrics(item).metrics.taxonomy_validity) }} <span class="text-muted-foreground">· 准确 {{ pct(metrics(item).metrics.classification_accuracy) }}</span></div></div>
+                <div v-if="targetMetrics(item).field_coverage != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">字段覆盖</div><div class="mt-1 font-mono font-medium">{{ pct(targetMetrics(item).field_coverage) }} <span class="text-muted-foreground">· 匹配 {{ pct(targetMetrics(item).field_match_rate) }}</span></div></div>
+                <div v-if="targetMetrics(item).question_recall != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">题目召回 / 精确</div><div class="mt-1 font-mono font-medium">{{ pct(targetMetrics(item).question_recall) }} / {{ pct(targetMetrics(item).question_precision) }}</div></div>
+                <div v-if="targetMetrics(item).source_fact_coverage != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">简历事实覆盖</div><div class="mt-1 font-mono font-medium">{{ pct(targetMetrics(item).source_fact_coverage) }}</div></div>
+                <div v-if="targetMetrics(item).target_alignment != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">岗位匹配</div><div class="mt-1 font-mono font-medium">{{ pct(targetMetrics(item).target_alignment) }}</div></div>
+                <div v-if="targetMetrics(item).taxonomy_validity != null" class="rounded-md bg-muted/40 p-2"><div class="text-muted-foreground">分类有效性</div><div class="mt-1 font-mono font-medium">{{ pct(targetMetrics(item).taxonomy_validity) }} <span class="text-muted-foreground">· 准确 {{ pct(targetMetrics(item).classification_accuracy) }}</span></div></div>
               </div>
-              <div v-if="metrics(item).metrics.field_results?.length" class="mt-3 overflow-x-auto -mx-1 px-1">
+              <div v-if="targetMetrics(item).field_results?.length" class="mt-3 overflow-x-auto -mx-1 px-1">
                 <table class="min-w-[560px] w-full text-xs">
                   <thead class="text-[11px] text-muted-foreground"><tr class="border-b border-border/60"><th class="px-2 py-1 text-left">字段</th><th class="px-2 py-1 text-left">期望</th><th class="px-2 py-1 text-left">实际</th><th class="px-2 py-1 text-left">结果</th></tr></thead>
                   <tbody>
-                    <tr v-for="(fr, i) in metrics(item).metrics.field_results" :key="i" class="border-b border-border/30 last:border-0">
+                    <tr v-for="(fr, i) in targetMetrics(item).field_results" :key="i" class="border-b border-border/30 last:border-0">
                       <td class="px-2 py-1.5 font-mono text-[11px]">{{ fr.path }}</td>
-                      <td class="px-2 py-1.5 truncate max-w-[120px]">{{ String(fr.expected ?? '—').slice(0, 40) }}</td>
-                      <td class="px-2 py-1.5 truncate max-w-[120px]">{{ String(fr.actual ?? '—').slice(0, 40) }}</td>
+                      <td class="px-2 py-1.5 truncate max-w-[120px]">{{ shortValue(fr.expected, 40) }}</td>
+                      <td class="px-2 py-1.5 truncate max-w-[120px]">{{ shortValue(fr.actual, 40) }}</td>
                       <td class="px-2 py-1.5"><span :class="['rounded-full px-2 py-0.5 text-[10px]', fr.passed ? 'bg-emerald-500/10 text-emerald-700' : 'bg-destructive/10 text-destructive']">{{ fr.passed ? '通过' : '失败' }}</span></td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <div v-if="metrics(item).metrics.label_results?.length" class="mt-3">
-                <div class="text-[11px] font-medium text-muted-foreground">分类标签结果 · {{ metrics(item).metrics.label_results.length }}</div>
+              <div v-if="targetMetrics(item).label_results?.length" class="mt-3">
+                <div class="text-[11px] font-medium text-muted-foreground">分类标签结果 · {{ targetMetrics(item).label_results.length }}</div>
                 <div class="mt-1 space-y-1">
-                  <div v-for="(lr, i) in metrics(item).metrics.label_results.slice(0, 10)" :key="i" class="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1 text-xs"><span class="truncate">{{ lr.question }}</span><span :class="['ml-auto rounded-full px-1.5 py-0.5 text-[10px]', lr.passed ? 'bg-emerald-500/10 text-emerald-700' : 'bg-destructive/10 text-destructive']">{{ lr.passed ? '通过' : '失败' }}</span></div>
+                  <div v-for="(lr, i) in targetMetrics(item).label_results.slice(0, 10)" :key="i" class="flex items-center gap-2 rounded-md bg-muted/40 px-2 py-1 text-xs"><span class="truncate">{{ lr.question }}</span><span :class="['ml-auto rounded-full px-1.5 py-0.5 text-[10px]', lr.passed ? 'bg-emerald-500/10 text-emerald-700' : 'bg-destructive/10 text-destructive']">{{ lr.passed ? '通过' : '失败' }}</span></div>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- 硬门禁断言 -->
-        <section v-if="hardAssertions(item).length" aria-label="硬门禁">
-          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">硬门禁 · {{ hardAssertions(item).length }} 项</h3>
+        <!-- 硬性要求断言 -->
+        <section v-if="hardAssertions(item).length" aria-label="硬性要求">
+          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">硬性要求 · {{ hardAssertions(item).length }} 项</h3>
           <div class="space-y-2">
             <div v-for="a in hardAssertions(item)" :key="a.id" :class="['rounded-lg border p-2.5 text-xs', a.passed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/30 bg-destructive/5']">
               <span :class="['rounded-full px-2 py-0.5 text-[10px]', assertionClass(a.passed)]">{{ a.passed ? '通过' : '失败' }}</span>
@@ -330,18 +383,18 @@ function questionSourceLabel(src) {
           </div>
         </section>
 
-        <!-- P4: Judge 评分（维度表 + issues/highlights） -->
-        <section v-if="item.result?.score" aria-label="Judge 评分">
-          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">Judge 评分</h3>
+        <!-- P4: 固定质量评审（维度表 + issues/highlights） -->
+        <section v-if="item.result?.score" aria-label="固定质量评审">
+          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">固定质量评审</h3>
           <div class="rounded-xl border border-border/60 bg-card p-3">
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span v-if="judgeDetailsFromItem(item).judgeModel" class="rounded-md bg-muted px-2 py-1 font-mono text-[11px]">{{ judgeDetailsFromItem(item).judgeModel }}</span>
-              <span v-if="judgeDetailsFromItem(item).judgeScore != null" class="rounded-md bg-primary/10 px-2 py-1">Judge 分 <span class="font-mono font-medium">{{ Number(judgeDetailsFromItem(item).judgeScore).toFixed(3) }}</span></span>
+              <span v-if="judgeDetailsFromItem(item).judgeScore != null" class="rounded-md bg-primary/10 px-2 py-1">评审分 <span class="font-mono font-medium">{{ Number(judgeDetailsFromItem(item).judgeScore).toFixed(3) }}</span></span>
               <span v-if="judgeDetailsFromItem(item).weightedAvg != null" class="rounded-md bg-muted px-2 py-1">加权均分 {{ judgeDetailsFromItem(item).weightedAvg }}</span>
               <span v-if="judgeDetailsFromItem(item).reportedScore != null" class="rounded-md bg-muted px-2 py-1">原始分 {{ Number(judgeDetailsFromItem(item).reportedScore).toFixed(3) }}</span>
               <span v-if="judgeDetailsFromItem(item).judgeStatus" class="rounded-full bg-muted px-2 py-0.5 text-[10px]">{{ checkLabel(judgeDetailsFromItem(item).judgeStatus) }}</span>
             </div>
-            <div v-if="judgeDetailsFromItem(item).error" class="mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">Judge 失败：{{ judgeDetailsFromItem(item).error }}</div>
+            <div v-if="judgeDetailsFromItem(item).error" class="mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">质量评审失败：{{ judgeDetailsFromItem(item).error }}</div>
 
             <!-- 维度分数表 -->
             <div v-if="judgeDetailsFromItem(item).dimensions.length" class="mt-3 overflow-auto">
@@ -374,13 +427,13 @@ function questionSourceLabel(src) {
           </div>
         </section>
 
-        <!-- P6: 契约详情（结构化） -->
-        <section v-if="evidence?.case?.contract" aria-label="契约详情">
-          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">契约详情</h3>
+        <!-- P6: 输出要求详情（结构化） -->
+        <section v-if="evidence?.case?.contract" aria-label="输出要求详情">
+          <h3 class="mb-2 text-xs font-semibold text-muted-foreground">输出要求详情</h3>
           <div class="rounded-xl border border-border/60 bg-card p-3 text-xs">
             <div class="grid gap-3 sm:grid-cols-2">
               <div>
-                <div class="text-[11px] font-medium text-muted-foreground">硬门禁项 · {{ (evidence.case.contract.hard_assertions || []).length }}</div>
+                <div class="text-[11px] font-medium text-muted-foreground">硬性要求 · {{ (evidence.case.contract.hard_assertions || []).length }} 项</div>
                 <div class="mt-1 flex flex-wrap gap-1.5">
                   <span v-for="ha in (evidence.case.contract.hard_assertions || []).slice(0, 10)" :key="ha.id || ha" class="rounded-md bg-muted px-2 py-1 font-mono text-[11px]">{{ ha.id || ha }}</span>
                   <span v-if="(evidence.case.contract.hard_assertions || []).length > 10" class="text-muted-foreground">+{{ (evidence.case.contract.hard_assertions.length - 10) }} 项</span>
@@ -431,14 +484,14 @@ function questionSourceLabel(src) {
 
         <!-- 高级详情（保留兼容，结构化展示 + 一键复制） -->
         <details class="rounded-lg border border-border/60 px-3 py-2" open>
-          <summary class="cursor-pointer text-xs font-medium text-muted-foreground">高级详情（输入快照 / 契约 / Attempt / Artifact）</summary>
+          <summary class="cursor-pointer text-xs font-medium text-muted-foreground">高级详情（输入快照 / 输出要求 / 执行尝试 / 文件证据）</summary>
           <div class="mt-3 space-y-3">
             <!-- 候选人可见输入 -->
             <div v-if="evidence">
               <div class="mb-1 text-xs font-medium">候选人可见输入</div>
               <div class="flex flex-wrap gap-1.5 mb-2">
                 <span v-for="key in inputSummaryKeys(evidence.case?.input_snapshot)" :key="key" class="rounded-md bg-muted px-2 py-1 text-xs">
-                  <span class="text-muted-foreground">{{ key }}:</span> {{ String(evidence.case.input_snapshot[key]).slice(0, 40) }}{{ String(evidence.case.input_snapshot[key]).length > 40 ? '...' : '' }}
+                  <span class="text-muted-foreground">{{ inputFieldLabel(key) }}:</span> {{ shortValue(evidence.case.input_snapshot[key], 40) }}
                 </span>
               </div>
               <details class="text-xs">
@@ -449,9 +502,9 @@ function questionSourceLabel(src) {
                 </div>
               </details>
             </div>
-            <!-- 确定性契约 -->
+            <!-- 输出要求技术详情 -->
             <div v-if="evidence">
-              <div class="mb-1 text-xs font-medium">确定性契约</div>
+              <div class="mb-1 text-xs font-medium">输出要求（技术详情）</div>
               <div v-if="contractSummary(evidence.case?.contract)" class="flex flex-wrap gap-1.5 mb-2">
                 <span class="rounded-md bg-muted px-2 py-1 text-xs">硬断言 {{ contractSummary(evidence.case.contract).hardCount }} 项</span>
                 <span v-for="key in contractSummary(evidence.case.contract).rubricKeys.slice(0, 4)" :key="key" class="rounded-md bg-muted px-2 py-1 text-xs">{{ key }}</span>
@@ -466,7 +519,7 @@ function questionSourceLabel(src) {
             </div>
             <!-- Attempt 记录 -->
             <div v-if="evidence?.attempts?.length">
-              <div class="mb-1 text-xs font-medium">Attempt 记录</div>
+              <div class="mb-1 text-xs font-medium">执行尝试记录</div>
               <div v-for="attempt in evidence.attempts" :key="attempt.id" class="rounded-md bg-muted/40 p-2 text-xs mb-2">
                 <div class="font-medium">Attempt #{{ attempt.attempt_index }} · {{ attempt.status }}</div>
                 <details class="mt-1">
@@ -480,7 +533,7 @@ function questionSourceLabel(src) {
             </div>
             <!-- Artifact 索引 -->
             <div v-if="evidence?.artifacts?.length">
-              <div class="mb-1 text-xs font-medium">Artifact 索引</div>
+              <div class="mb-1 text-xs font-medium">文件证据索引</div>
               <div v-for="artifact in evidence.artifacts" :key="artifact.id" class="text-xs text-muted-foreground">{{ artifact.artifact_type }} · {{ artifact.storage_path }}</div>
             </div>
           </div>

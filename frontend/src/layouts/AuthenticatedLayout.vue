@@ -95,7 +95,7 @@ const routeToTabMap = {
   'coding': 'Coding',
   'settings': 'Settings',
   'resume': 'Resume',
-  'admin-evals-overview': 'EvalOverview',
+  'admin-evals-overview': 'EvalResults',
   'admin-evals-results': 'EvalResults',
   'admin-evals-experiments': 'EvalExperiments',
   'admin-evals-run': 'EvalExperiments',
@@ -118,7 +118,6 @@ const tabToRouteMap = {
   Coding: '/coding',
   Settings: '/settings',
   Resume: '/resume',
-  EvalOverview: '/admin/evals/overview',
   EvalResults: '/admin/evals/results',
   EvalExperiments: '/admin/evals/experiments',
   EvalBenchmarks: '/admin/evals/benchmarks',
@@ -239,9 +238,7 @@ const sidebarGroups = computed(() => [
   ...(displayUser.value?.is_admin ? [{
     label: '评测中心',
     tabs: [
-      { key: 'EvalOverview', label: '测评可视化', route: '/admin/evals/overview' },
-      { key: 'EvalReleases', label: '版本与发布', route: '/admin/evals/releases' },
-
+      { key: 'EvalReleases', label: '版本与评测集', route: '/admin/evals/releases' },
       { key: 'EvalExperiments', label: '测评实验', route: '/admin/evals/experiments' },
       { key: 'EvalResults', label: '评测结果', route: '/admin/evals/results' },
       { key: 'EvalReviews', label: '人工 A/B', route: '/admin/evals/reviews' },

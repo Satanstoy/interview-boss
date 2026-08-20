@@ -19,9 +19,9 @@ function isActive(step) {
 <template>
   <section class="rounded-xl border border-border/70 bg-muted/20 px-4 py-3" aria-label="评测流程">
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-5">
-      <div class="shrink-0">
-        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">评测流程</div>
-        <p class="mt-1 text-xs text-muted-foreground">版本与发布 → 测评实验 → 评测结果 → 人工 A/B</p>
+    <div class="shrink-0">
+      <div class="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">评测流程</div>
+        <p class="mt-1 text-xs text-muted-foreground">版本与评测集 → 测评实验 → 评测结果 → 人工 A/B</p>
       </div>
       <div class="hidden h-px flex-1 bg-border/70 lg:block" />
       <div class="flex min-w-0 flex-wrap items-center gap-2" role="list" aria-label="评测中心流程位置">

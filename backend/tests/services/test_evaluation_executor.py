@@ -100,6 +100,13 @@ def test_executor_completes_items_and_persists_attempt_evidence(test_db):
     )
 
     assert result["status"] == "completed"
+    assert result["distribution"] == {
+        "total": 1,
+        "passed": 1,
+        "poor": 0,
+        "failed": 0,
+        "pending": 0,
+    }
     assert test_db.execute(
         "SELECT status FROM eval_runs WHERE id = ?", (run["id"],)
     ).fetchone()[0] == "completed"

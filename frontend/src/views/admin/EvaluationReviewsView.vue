@@ -7,7 +7,8 @@ import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createHumanReview, fetchEvaluationRun, fetchEvaluationRuns, fetchHumanReviews } from '@/services/evaluationApi.js'
+import { createHumanReview, fetchEvaluationEvidence, fetchEvaluationRun, fetchEvaluationRuns, fetchHumanReviews } from '@/services/evaluationApi.js'
+import { normalizeCaseEvidenceForLegacyPanel } from '@/services/evaluationSchemas.js'
 import { formatDate, reviewChoiceLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
@@ -16,6 +17,8 @@ const route = useRoute()
 const reviews = ref([])
 const runA = ref(null)
 const runB = ref(null)
+const evidenceA = ref(null)
+const evidenceB = ref(null)
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -30,9 +33,26 @@ const itemKeys = computed(() => {
 })
 const itemA = computed(() => runA.value?.items?.find(item => `${item.case_key}#${item.replication_index}` === form.value.item))
 const itemB = computed(() => runB.value?.items?.find(item => `${item.case_key}#${item.replication_index}` === form.value.item))
+const displayItemA = computed(() => evidenceA.value?.item || itemA.value)
+const displayItemB = computed(() => evidenceB.value?.item || itemB.value)
 const turns = item => item?.result?.observation?.payload?.turns || []
 const hardAssertions = item => item?.result?.observation?.hard_assertions || []
 const metrics = item => item?.result?.observation?.payload || {}
+const outputFields = item => {
+  const payload = item?.result?.observation?.payload || {}
+  return Object.entries(payload).filter(([key]) => !['metrics', 'turns', 'tool_calls', 'intent_records', 'tool_metrics', 'intent_metrics'].includes(key))
+}
+const outputFieldLabel = key => ({
+  conversation_id: '对话编号',
+  doc_type: '内容类型',
+  data: '提取内容',
+  points: '优化建议',
+  optimized_text: '优化后简历',
+  tagged_rows: '分类结果',
+  quality: '结果质量',
+  errors: '执行错误',
+}[key] || key)
+const outputValue = value => typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '—')
 const reviewStep = computed(() => {
   if (!form.value.group) return 1
   if (!runA.value || !runB.value) return 2
@@ -88,16 +108,36 @@ async function load() {
 
 async function loadRun(which, id) {
   if (!id) {
-    if (which === 'a') runA.value = null
-    else runB.value = null
+    if (which === 'a') { runA.value = null; evidenceA.value = null }
+    else { runB.value = null; evidenceB.value = null }
     return
   }
   try {
     const data = await fetchEvaluationRun(id)
     if (which === 'a') runA.value = data
     else runB.value = data
+    await loadEvidence(which)
   } catch (err) {
     error.value = err.message || 'Run 详情加载失败'
+  }
+}
+
+async function loadEvidence(which) {
+  const run = which === 'a' ? runA.value : runB.value
+  const item = which === 'a' ? itemA.value : itemB.value
+  if (!run || !item || !form.value.item) {
+    if (which === 'a') evidenceA.value = null
+    else evidenceB.value = null
+    return
+  }
+  try {
+    const view = normalizeCaseEvidenceForLegacyPanel(
+      await fetchEvaluationEvidence(run.id, item.id),
+    )
+    if (which === 'a') evidenceA.value = view
+    else evidenceB.value = view
+  } catch (err) {
+    error.value = err.message || 'Case 证据加载失败'
   }
 }
 
@@ -132,6 +172,13 @@ watch(() => form.value.group, () => {
   form.value.choice = ''
   runA.value = null
   runB.value = null
+  evidenceA.value = null
+  evidenceB.value = null
+})
+
+watch(() => form.value.item, () => {
+  loadEvidence('a')
+  loadEvidence('b')
 })
 
 onMounted(() => {
@@ -181,13 +228,14 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
     </SelectItem>
   </SelectContent>
 </Select>
+            <label class="text-sm font-medium">版本 A<select v-model="form.runA" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" @change="loadRun('a', form.runA)"><option value="">请选择</option><option v-for="run in groupRuns" :key="run.id" :value="run.id">评测 #{{ run.id }} · {{ run.target_release_key }}</option></select></label>
             <label class="text-sm font-medium">版本 B<select v-model="form.runB" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" @change="loadRun('b', form.runB)"><option value="">请选择</option><option v-for="run in groupRuns" :key="run.id" :value="run.id">评测 #{{ run.id }} · {{ run.target_release_key }}</option></select></label>
             <label class="text-sm font-medium">Case<select v-model="form.item" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">请选择</option><option v-for="key in itemKeys" :key="key" :value="key">{{ reviewedKeys.has(key) ? '✓ ' : '' }}{{ key }}</option></select></label>
           </div>
 
           <!-- Forced side-by-side comparison -->
           <div class="grid gap-4 lg:grid-cols-2">
-            <article v-for="entry in [{ item: itemA, label: '回答 A', run: runA }, { item: itemB, label: '回答 B', run: runB }]" :key="entry.label" class="flex min-h-[400px] flex-col rounded-xl border border-border/70 bg-muted/20">
+            <article v-for="entry in [{ item: displayItemA, label: '回答 A', run: runA }, { item: displayItemB, label: '回答 B', run: runB }]" :key="entry.label" class="flex min-h-[400px] flex-col rounded-xl border border-border/70 bg-muted/20">
               <div class="flex items-start gap-3 border-b border-border/60 p-4"><div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-border/70"><ArrowLeftRight class="size-4" /></div><div><h3 class="font-medium">{{ entry.label }}</h3><p class="mt-0.5 text-xs text-muted-foreground">{{ entry.run?.target_release_key || '选择版本后显示' }}</p></div></div>
               <div class="flex-1">
                 <div class="p-4 space-y-3 text-sm">
@@ -197,6 +245,15 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
                     <div v-if="metrics(entry.item).metrics?.field_coverage != null" class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">结构化抽取</div><div class="mt-1 text-muted-foreground">字段覆盖 {{ Math.round(metrics(entry.item).metrics.field_coverage * 100) }}% · 题目召回 {{ Math.round((metrics(entry.item).metrics.question_recall || 0) * 100) }}%</div></div>
                     <div v-if="metrics(entry.item).metrics?.source_fact_coverage != null" class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">简历事实与岗位</div><div class="mt-1 text-muted-foreground">事实覆盖 {{ Math.round(metrics(entry.item).metrics.source_fact_coverage * 100) }}% · 岗位匹配 {{ Math.round((metrics(entry.item).metrics.target_alignment || 0) * 100) }}%</div></div>
                     <div v-if="metrics(entry.item).metrics?.taxonomy_validity != null" class="rounded-lg bg-background p-3 ring-1 ring-border/60"><div class="font-medium">题目分类</div><div class="mt-1 text-muted-foreground">分类合法 {{ Math.round(metrics(entry.item).metrics.taxonomy_validity * 100) }}% · 标签准确 {{ Math.round((metrics(entry.item).metrics.classification_accuracy || 0) * 100) }}%</div></div>
+                  </div>
+                  <div v-if="outputFields(entry.item).length" class="rounded-lg border border-border/60 bg-background p-3">
+                    <div class="mb-2 font-medium">业务结果</div>
+                    <div class="space-y-2">
+                      <div v-for="([key, value]) in outputFields(entry.item)" :key="key" class="rounded-md bg-muted/40 p-2">
+                        <div class="text-[11px] text-muted-foreground">{{ outputFieldLabel(key) }}</div>
+                        <pre class="mt-1 max-h-28 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{{ outputValue(value) }}</pre>
+                      </div>
+                    </div>
                   </div>
                   <div v-if="hardAssertions(entry.item).length" class="rounded-lg border border-border/60 p-3">
                     <div class="mb-2 font-medium">硬门禁</div>

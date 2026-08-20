@@ -7,7 +7,8 @@ import EvalEvidencePanel from '@/components/business/EvalEvidencePanel.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cancelEvaluationRun, fetchEvaluationItem, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
+import { cancelEvaluationRun, fetchEvaluationEvidence, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
+import { normalizeCaseEvidenceForLegacyPanel } from '@/services/evaluationSchemas.js'
 import { casePrioritySort, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
@@ -34,6 +35,7 @@ const progressSegments = computed(() => [
   { key: 'passed', label: '通过', value: distribution.value.passed, pct: distribution.value.pct.passed, color: 'bg-emerald-500' },
   { key: 'poor', label: '不佳', value: distribution.value.poor, pct: distribution.value.pct.poor, color: 'bg-amber-500' },
   { key: 'failed', label: '失败', value: distribution.value.failed, pct: distribution.value.pct.failed, color: 'bg-destructive' },
+  { key: 'pending', label: '未完成', value: distribution.value.pending, pct: distribution.value.pct.pending, color: 'bg-muted-foreground/30', pattern: true },
 ])
 function progressStats() {
   const d = distribution.value
@@ -47,8 +49,8 @@ function progressStats() {
 const phases = [
   { key: 'queue', label: '排队' },
   { key: 'e2e', label: 'E2E 执行' },
-  { key: 'checks', label: 'Contract / Hard Gate' },
-  { key: 'judge', label: 'Judge 评分' },
+  { key: 'checks', label: '输出要求 / 硬性检查' },
+  { key: 'judge', label: '固定质量评审' },
   { key: 'summary', label: '结果汇总' },
 ]
 
@@ -143,7 +145,9 @@ async function loadEvidence(item) {
   evidenceError.value = ''
   evidenceLoading.value = true
   try {
-    evidence.value = await fetchEvaluationItem(route.params.runId, item.id)
+    evidence.value = normalizeCaseEvidenceForLegacyPanel(
+      await fetchEvaluationEvidence(route.params.runId, item.id),
+    )
   } catch (err) {
     evidenceError.value = err.message || 'Case 证据加载失败'
   } finally {
@@ -202,7 +206,7 @@ onUnmounted(() => {
   <div class="h-full overflow-y-auto custom-scrollbar custom-scrollbar-always">
     <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
-        <EvaluationPageHeader :title="`评测运行 #${route.params.runId}`" description="跟踪完整 E2E 的进度；最终分数由规则指标与固定 Judge 按评测协议合成。" active-key="experiments">
+        <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`" description="查看每个 Case 的执行进度、业务结果和质量指标。" active-key="experiments">
           <template #actions>
             <Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button>
             <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
@@ -223,7 +227,7 @@ onUnmounted(() => {
             <span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-emerald-500" />{{ distribution.passed }} 通过</span>
             <span v-if="distribution.poor" class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-amber-500" />{{ distribution.poor }} 不佳</span>
             <span class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-destructive" />{{ distribution.failed }} 失败</span>
-            <span v-if="distribution.pending" class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-muted-foreground/30" />{{ distribution.pending }} 未跑</span>
+            <span v-if="distribution.pending" class="inline-flex items-center gap-1"><span class="size-2 rounded-full bg-muted-foreground/30" />{{ distribution.pending }} 未完成</span>
             <span v-if="progressStats().running" class="text-amber-600">{{ progressStats().running }} 进行中</span>
           </div>
           <span class="ml-auto text-lg font-semibold">{{ distribution.total ? Math.round(((distribution.passed + distribution.poor + distribution.failed)/distribution.total)*100) : 0 }}%</span>
@@ -244,8 +248,8 @@ onUnmounted(() => {
     <div v-if="run && !loading" class="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 lg:px-8">
       <div v-if="run.summary?.metric_summary" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div v-if="run.summary.metric_summary.score" class="rounded-lg bg-primary/5 p-3 text-xs">
-          <div class="font-medium">混合主分（Run 汇总）</div>
-          <div class="mt-1 text-muted-foreground">最终 {{ run.summary.metric_summary.score.final_mean == null ? '—' : Number(run.summary.metric_summary.score.final_mean).toFixed(3) }} · 规则 {{ run.summary.metric_summary.score.deterministic_mean == null ? '—' : Number(run.summary.metric_summary.score.deterministic_mean).toFixed(3) }} · Judge {{ run.summary.metric_summary.score.judge_mean == null ? '—' : Number(run.summary.metric_summary.score.judge_mean).toFixed(3) }}</div>
+          <div class="font-medium">整体分数</div>
+          <div class="mt-1 text-muted-foreground">最终 {{ run.summary.metric_summary.score.final_mean == null ? '—' : Number(run.summary.metric_summary.score.final_mean).toFixed(3) }} · 规则检查 {{ run.summary.metric_summary.score.deterministic_mean == null ? '—' : Number(run.summary.metric_summary.score.deterministic_mean).toFixed(3) }} · 质量评审 {{ run.summary.metric_summary.score.judge_mean == null ? '—' : Number(run.summary.metric_summary.score.judge_mean).toFixed(3) }}</div>
         </div>
         <div v-if="run.summary.metric_summary.tool" class="rounded-lg bg-muted/40 p-3 text-xs">
           <div class="font-medium">工具调用效果</div>
@@ -271,7 +275,7 @@ onUnmounted(() => {
         <div class="mt-3 grid gap-3 text-xs sm:grid-cols-3">
           <div>被测版本：<span class="font-mono text-foreground">{{ run.target_release_key }}</span></div>
           <div>完整评测版本：<span class="font-mono text-foreground">{{ run.evaluation_release_key || '历史组件模式' }}</span></div>
-          <div>固定 Judge：<span class="font-mono text-foreground">{{ run.judge_model || run.judge_release_key || '—' }}</span></div>
+          <div>评分模型：<span class="font-mono text-foreground">{{ run.judge_model || run.judge_release_key || '—' }}</span></div>
           <div>执行器：<span class="font-mono text-foreground">{{ run.simulator_harness_release_key || '—' }}</span></div>
           <div>候选人模拟器：<span class="font-mono text-foreground">{{ run.candidate_simulator_release_key || '—' }}</span></div>
           <div>对比组：<span class="font-mono text-foreground">{{ run.comparison_group || '—' }}</span></div>

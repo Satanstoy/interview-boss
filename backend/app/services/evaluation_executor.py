@@ -12,6 +12,7 @@ from typing import Any, Callable
 from app.db.connection import get_db_connection
 from app.evaluation.adapters import get_target_adapter
 from app.evaluation.judge import judge_observation
+from app.evaluation.metric_registry import build_progress_distribution, quality_threshold_from_manifest
 from app.evaluation.scoring import combine_hybrid_score, score_observation
 from app.services.evaluation_service import append_event
 
@@ -20,6 +21,16 @@ logger = logging.getLogger("interview-boss.evaluation")
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _decode_manifest(value: str | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -65,6 +76,34 @@ def _runtime_identity_error(target_snapshot: dict[str, Any]) -> str | None:
     if expected and expected not in {"current-code-state", "local-baseline"} and expected != actual:
         return f"Target Release git_sha={expected} 与 Eval Worker={actual} 不一致"
     return None
+
+
+def _progress_distribution(
+    conn: sqlite3.Connection,
+    run_id: int,
+    total_items: int,
+    evaluation_manifest: dict[str, Any] | None,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT status, contract_status, hard_gate_status, judge_status, score, result_json
+        FROM eval_items WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["result"] = json.loads(item.pop("result_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            item["result"] = {}
+        items.append(item)
+    return build_progress_distribution(
+        items,
+        total=total_items,
+        poor_score_below=quality_threshold_from_manifest(evaluation_manifest),
+    )
 
 
 def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
@@ -145,6 +184,7 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
         summary["content"] = {
             "items_evaluated": len(content_samples),
             "field_coverage": round(sum(float(item.get("field_coverage") or 0) for item in content_samples) / len(content_samples), 4),
+            "field_match_rate": round(sum(float(item.get("field_match_rate") or 0) for item in content_samples) / len(content_samples), 4),
             "question_recall": round(sum(float(item.get("question_recall") or 0) for item in content_samples) / len(content_samples), 4),
             "question_precision": round(sum(float(item.get("question_precision") or 0) for item in content_samples) / len(content_samples), 4),
         }
@@ -153,11 +193,13 @@ def _aggregate_metric_summary(conn: sqlite3.Connection, run_id: int) -> dict[str
             "items_evaluated": len(resume_samples),
             "source_fact_coverage": round(sum(float(item.get("source_fact_coverage") or 0) for item in resume_samples) / len(resume_samples), 4),
             "target_alignment": round(sum(float(item.get("target_alignment") or 0) for item in resume_samples) / len(resume_samples), 4),
+            "improvement_point_count": sum(int(item.get("improvement_point_count") or 0) for item in resume_samples),
             "forbidden_claim_count": sum(int(item.get("forbidden_claim_count") or 0) for item in resume_samples),
         }
     if tagging_samples:
         summary["tagging"] = {
             "items_evaluated": len(tagging_samples),
+            "row_count": sum(int(item.get("row_count") or 0) for item in tagging_samples),
             "taxonomy_validity": round(sum(float(item.get("taxonomy_validity") or 0) for item in tagging_samples) / len(tagging_samples), 4),
             "classification_accuracy": round(sum(float(item.get("classification_accuracy") or 0) for item in tagging_samples) / len(tagging_samples), 4),
         }
@@ -246,8 +288,9 @@ def reconcile_interrupted_eval_run(
     """
     connection = conn or get_db_connection()
     run_row = connection.execute(
-        "SELECT r.*, b.id AS batch_id FROM eval_runs r "
-        "JOIN eval_batches b ON b.id = r.batch_id WHERE r.id = ?",
+        "SELECT r.*, b.id AS batch_id, er.manifest_json AS evaluation_manifest_json "
+        "FROM eval_runs r JOIN eval_batches b ON b.id = r.batch_id "
+        "LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id WHERE r.id = ?",
         (run_id,),
     ).fetchone()
     if run_row is None:
@@ -324,6 +367,12 @@ def reconcile_interrupted_eval_run(
         "failure_class": failure_class,
         "error": error_message,
         "metric_summary": _aggregate_metric_summary(connection, run_id),
+        "distribution": _progress_distribution(
+            connection,
+            run_id,
+            int(run_row["total_items"] or 0),
+            _decode_manifest(run_row["evaluation_manifest_json"]),
+        ),
     }
     connection.execute(
         """
@@ -368,7 +417,16 @@ async def execute_eval_run(
         return {"run_id": run_id, "status": run["status"]}
     if run.get("_snapshot_error"):
         error = run["_snapshot_error"]
-        summary = {"error": error, "total_items": run["total_items"]}
+        summary = {
+            "error": error,
+            "total_items": run["total_items"],
+            "distribution": _progress_distribution(
+                connection,
+                run_id,
+                int(run["total_items"] or 0),
+                _decode_manifest(run.get("evaluation_manifest_json")),
+            ),
+        }
         connection.execute(
             "UPDATE eval_runs SET status = 'failed', summary_json = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
             (_json_dumps(summary), run_id),
@@ -654,6 +712,12 @@ async def execute_eval_run(
         "failed_items": failed,
         "cancelled_items": cancelled,
         "metric_summary": _aggregate_metric_summary(connection, run_id),
+        "distribution": _progress_distribution(
+            connection,
+            run_id,
+            int(run["total_items"] or 0),
+            _decode_manifest(run.get("evaluation_manifest_json")),
+        ),
     }
     connection.execute(
         """

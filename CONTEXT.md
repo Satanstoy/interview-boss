@@ -91,8 +91,8 @@ Release Manifest 中用于锁定实际运行容器的不可变 Docker image dige
 面向管理员的前端控制界面，用于管理评测目标版本和完整评测版本、发起和监控 Eval Run、查看回归与稳定性结果，以及进入人工 A/B 评测；它不是普通用户使用的产品功能页面。
 
 **评测中心（Evaluation Center）**:
-评测控制台在应用侧栏中的管理员分组标题；分组下先展示位于流程之上的测评可视化，再按“版本与发布、Benchmark、测评实验、评测结果、人工 A/B”五步顺序展示流程 Tab，运行详情作为这些页面中的路由下钻，不单独占用侧栏 Tab。
-_避免使用_: 再增加一层评测中心内部导航
+评测控制台在应用侧栏中的管理员分组标题；分组下以唯一的“评测结果工作台”为主要入口，将原测评可视化与评测结果合并展示，再按“版本与评测集、测评实验、人工 A/B”提供支撑性流程入口，运行详情作为结果工作台中的路由下钻，不单独占用侧栏 Tab。
+_避免使用_: 再增加一层评测中心内部导航；把测评可视化和评测结果拆成两个管理员主入口
 
 **可恢复评测进度流（Resumable Eval Progress Stream）**:
 由持久化的 `eval_run_events` 驱动的管理员 SSE 进度流；每个事件具有单调序号，支持通过 `Last-Event-ID` 断线重放。SSE 连接断开不改变 Eval Run 状态，取消必须通过独立的管理员操作完成。
@@ -121,6 +121,66 @@ Eval Run 创建时由后端解析并固化 Target Release、Evaluation Release �
 
 **Evaluation Observation**:
 Target Adapter 输出的最小标准执行结果外壳，包含生命周期状态、时间、契约违规和 Artifact 引用；目标类型特有的 transcript、tool trace、提取结果或分析报告放在版本化的 `payload` 中，不强迫所有目标共享完整字段。
+
+**Case Evidence View（Case 证据视图）**:
+面向管理员复核一个 Benchmark Case 一次执行表现的完整证据集合，关联冻结的 Case 输入、Harness/Target Observation、确定性断言、Judge 结果、Attempt 和 Artifact；它不是 Target Adapter 的原始内部结果。
+
+**证据契约版本（Evidence Contract Version）**:
+标识 Case Evidence View 中字段语义和兼容边界的版本；同一版本内字段含义保持稳定，破坏性变化必须产生新版本。
+
+**公共证据外壳（Common Evidence Envelope）**:
+Case Evidence View 中所有评测目标共享的稳定部分，描述 Run、Item、Case、执行状态、Observation、评分、Attempt 和 Artifact 引用；它不承载目标类型专属输出。
+
+**目标专属证据 Payload（Target Evidence Payload）**:
+Case Evidence View 中按目标类型版本化的结果部分，统一分为 `output`、`trace` 和 `metrics` 三类；不同目标可以拥有不同的具体内容，但不能改变公共证据外壳。
+
+**按需 Case 证据（On-demand Case Evidence）**:
+Run 列表只提供 Case 摘要，管理员选中 Case 后才读取完整 Case Evidence View；人工 A/B 与 Run 详情使用同一份按需证据。
+
+**评测状态轴（Evaluation Status Axes）**:
+Eval Item 的执行状态、Observation 契约状态、Hard Gate 状态、Judge 状态和质量状态分别表达不同事实；它们不能被一个含义混合的状态字段替代。
+
+**目标 Payload 注册表（Target Payload Registry）**:
+记录每个评测目标的 `target_payload` 结构、`payload_schema_version` 和 output/trace/metrics 字段语义的权威目录；当前覆盖面试、面经提取、JD 提取、简历分析和题目分类。
+
+**管理员专属 Harness 上下文（Admin-only Harness Context）**:
+只对评测管理员开放的 Case 执行上下文，包括行为注入、评测契约和其他非候选人可见信息；展示时必须与候选人可见输入分区并完成敏感信息脱敏。
+
+**评测 API 契约校验（Evaluation API Contract Validation）**:
+后端通过类型化响应模型约束 Case Evidence View，前端在 API 边界校验版本和字段；不兼容响应必须显式进入契约错误状态，不能静默显示空白。
+
+**Harness 表现分布（Harness Outcome Distribution）**:
+将一组 Eval Item 按执行完成度、契约有效性、Hard Gate 和质量结果归入互斥状态，用于在 Run、Experiment 和结果总览中直观展示整体表现；它不是单一完成百分比。
+
+**评测进度分布（Evaluation Progress Distribution）**:
+由后端按评测协议阈值计算的 `passed`、`poor`、`failed` 和 `pending` Item 数量及总数；不同目标的分布分别计算，前端不自行推导质量颜色。
+
+**评测结果焦点（Evaluation Result Focus）**:
+评测控制台优先呈现质量结论、失败定位和可执行的证据下钻；配置、版本、运行控制和原始技术细节按层级收纳，不能与核心结果争夺首屏注意力。
+
+**评测结果工作台（Evaluation Results Workspace）**:
+管理员查看评测质量结论、Harness 表现分布、按结果档位分区的 Case 列表和证据下钻的唯一主工作区；它合并原“测评可视化”和“评测结果”页面，不再把两者作为平级入口。结果档位至少分为失败、不佳、通过、未完成/处理中，失败和不佳优先呈现，通过内容可以降级或折叠。
+
+**评测侧栏入口（Evaluation Sidebar Entries）**:
+评测结果工作台、版本与评测集、测评实验和人工 A/B 是管理员评测控制台的侧栏入口；结果工作台负责看结论，其他入口负责配置、发起或复核，不通过结果页面内的重复导航替代侧栏。
+
+**版本与评测集（Releases and Benchmark Suites）**:
+管理员查看和绑定一次评测所需的 Target Release、Evaluation Release、Harness/Candidate Simulator 版本与 Benchmark Suite 的配置工作区；它们共同回答“测谁、用什么 Harness、用哪套评测集”，不拆成两个重复的侧栏入口。
+
+**业务语义展示（Business-facing Evaluation Language）**:
+评测结果工作台面向管理员使用贴近业务且克制的人话，而不是直接暴露后端枚举、内部字段名或 Harness 实现术语；主界面只需清晰展示业务指标名、数值、单位和状态，阈值以简短形式就近展示，详细解释、技术字段名和原始 JSON 只出现在 Tooltip 或按需展开的审计详情中。
+
+**Harness 指标解释层（Harness Metric Interpretation Layer）**:
+目标 Payload 注册表为每个 Harness 指标维护业务名称、业务定义、单位、好坏方向、阈值来源、结果状态文案和不可用原因；前端主界面按精简的业务指标模型展示，不自行把 `tool_metrics`、`hard_gate_status` 等内部字段翻译成不稳定的中文。
+
+**目标指标字典（Target Metric Dictionary）**:
+在评测结果工作台实现前，先为 `interview`、`experience_extraction`、`jd_extraction`、`resume_analysis` 和 `question_tagging` 固定核心指标清单、中文名称、单位、阈值、状态语义、展示顺序和主/次级层级；每个 target 首屏最多展示 3–5 个核心指标，其余指标按需进入详情。
+
+**Harness/Target 双层结果（Harness and Target Outcome Layers）**:
+结果工作台分别展示 Harness 执行表现（例如评测约束、硬性要求、工具/意图执行）与 Target 业务结果（例如结构化抽取完整度、简历分析质量或题目分类质量），不把两者混成一个无法解释的总分。
+
+**主要失败原因（Primary Failure Reason）**:
+Case 列表只展示影响结果的主要失败原因，保证管理员可以快速定位；Case 证据详情保留全部失败原因、断言、Attempt、Artifact 和原始审计信息。
 
 **人工对比评测（Human Pairwise Review）**:
 管理员在相同评测输入下比较两个评测目标版本，并记录维度化偏好、平局或共同失败的人工评测结果。
@@ -235,6 +295,27 @@ InterviewBoss 对已完整接收的外部面试记录进行结构化、题目关
 
 **题目关联（Question Linkage）**:
 结构化面试回合与 InterviewBoss 题库题目的关系，只有经过 InterviewBoss 校验后才成立；未通过校验的回合保留为外部问题。
+
+**题目出现（Question Occurrence）**:
+某条面经或面试记录中实际出现的一次原始题目事实；它保留 `interview_id`、明细记录和原始题面，不等同于题库中的规范题目或聚类。
+
+**题库聚类（Question Cluster）**:
+用于练习、检索和统计的规范题目单元；它拥有明确的作用域、所有者、生命周期和代表题面，并通过题目关联连接一个或多个题目出现。
+
+**个人题命中公共题规则（Personal-to-Public Canonical Rule）**:
+个人上传的题目如果命中已审核公共题，公共题是唯一 canonical 题，不创建个人副本；个人记录只保存对该公共题的关联及用户自己的练习/答案数据。
+
+**公共发布申请（Public Promotion Request）**:
+用户将自己的个人题目或题目出现提交到公共题库的独立申请；申请以快照进入公共匹配/聚类和审核流程，不通过个人题库重建隐式修改公共题库。
+
+**公共化申请不等于分享（Promotion Is Not Sharing）**:
+本领域不提供个人题的通用分享授权、分享链接或协作副本；个人题进入公共题库只能通过公共发布申请，经过审核和公共聚类后才对公共用户可见。
+
+**公共数据贡献申请（Public Contribution Request）**:
+用户将个人面经或 JD 提交给公共数据构建流程的申请；面经和 JD 共用申请、审核和审计边界，但分别进入题目聚类或岗位结构化流水线。
+
+**公共 JD 结构化贡献（Public JD Structured Contribution）**:
+公共化 JD 默认只贡献经过审核和脱敏的岗位要求、技术栈或能力标签等结构化结果，不公开原始 JD 文本。
 
 **外部分析（External Analysis）**:
 由 GPT 或其他外部客户端随面试记录提交的评分、总结和建议；它可以被保存和展示，但不是 InterviewBoss 的官方分析结论。
