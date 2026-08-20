@@ -8,7 +8,6 @@ from app.core.auth import get_current_user
 from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
-from app.routers.questions import _build_bank_where_clause
 from app.services.llm import _call_llm_with_retry  # noqa: F401 — tests and integrations patch this seam
 from app.services.llm_quota import check_and_record
 
@@ -21,13 +20,15 @@ _BATCH_SSE_HEARTBEAT_SECONDS = 15
 _BATCH_ANSWER_TIMEOUT_SECONDS = 300
 
 
-async def _queue_answer_job(job_type: str, question_id: int, question_text: str,
-                            user_id: int, **payload_extra):
+async def _queue_answer_job(
+    job_type: str, question_id: int, question_text: str, user_id: int, **payload_extra
+):
     """Create one durable answer job and try immediate ARQ delivery.
 
     A failed Redis enqueue only leaves the job pending.  The worker dispatcher
     will retry it later, so an HTTP process restart cannot lose the request.
     """
+
     def _create():
         with get_db_connection() as conn:
             active_params = [job_type, question_id]
@@ -76,6 +77,7 @@ async def _queue_answer_job(job_type: str, question_id: int, question_text: str,
 
     try:
         from app.services.job_lifecycle import mark_job_dispatched
+
         if job_type == "generate_recitation":
             from app.worker import enqueue_generate_recitation_job as enqueue
         else:
@@ -137,9 +139,7 @@ async def _allow_no_search_or_raise(
     """Require an explicit confirmation before starting a model-only answer job."""
     from app.core.config import get_user_search_config_status
 
-    status = await run_db(
-        lambda: get_user_search_config_status(user["id"], scope=search_scope)
-    )
+    status = await run_db(lambda: get_user_search_config_status(user["id"], scope=search_scope))
     if status.get("configured"):
         return False
     if allow_no_search:
@@ -159,9 +159,7 @@ async def _allow_no_search_or_raise(
 
 
 @router.put("/save-user-answer/{question_id}")
-async def save_user_answer(
-    question_id: int, body: dict, user: dict = Depends(get_current_user)
-):
+async def save_user_answer(question_id: int, body: dict, user: dict = Depends(get_current_user)):
     """保存用户的背诵稿（手动编辑）"""
     answer = body.get("answer", "")
 
@@ -170,9 +168,7 @@ async def save_user_answer(
             # all 口径：公共题 + 自己的题（背诵稿保存须对用户可见）
             from app.db.queries import build_bank_where_clause
 
-            from_clause, where_clause, params = build_bank_where_clause(
-                user["id"], "all"
-            )
+            from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
             return conn.execute(
                 f"SELECT 1 {from_clause} {where_clause} AND qb.id = ?",
                 params + [question_id],
@@ -210,7 +206,9 @@ async def generate_master_answer(
 
     def _get():
         with get_db_connection() as conn:
-            from_clause, where_clause, params = _build_bank_where_clause(user)
+            from app.db.queries import build_bank_where_clause
+
+            from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
             return conn.execute(
                 f"SELECT qb.question, qb.ai_answer {from_clause} {where_clause} AND qb.id = ?",
                 params + [question_id],
@@ -226,9 +224,7 @@ async def generate_master_answer(
     if is_admin and not force and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
         return {"status": "success", "answer": row["ai_answer"]}
 
-    skip_search = await _allow_no_search_or_raise(
-        user, allow_no_search, search_scope="public"
-    )
+    skip_search = await _allow_no_search_or_raise(user, allow_no_search, search_scope="public")
 
     return await _queue_answer_job(
         "generate_answer",
@@ -251,10 +247,11 @@ async def generate_recitation(
 
     def _get():
         with get_db_connection() as conn:
-            from_clause, where_clause, params = _build_bank_where_clause(user)
+            from app.db.queries import build_bank_where_clause
+
+            from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
             return conn.execute(
-                f"SELECT qb.question, qb.ai_answer {from_clause} "
-                f"{where_clause} AND qb.id = ?",
+                f"SELECT qb.question, qb.ai_answer {from_clause} {where_clause} AND qb.id = ?",
                 params + [question_id],
             ).fetchone()
 
@@ -262,9 +259,7 @@ async def generate_recitation(
     if not row:
         raise HTTPException(status_code=404)
     if not row["ai_answer"] or "生成失败" in row["ai_answer"]:
-        raise HTTPException(
-            status_code=404, detail="该题目暂无公共参考答案，请等待管理员生成"
-        )
+        raise HTTPException(status_code=404, detail="该题目暂无公共参考答案，请等待管理员生成")
 
     if not await check_and_record(user["id"]):
         raise HTTPException(status_code=429, detail="今日 AI 调用次数已达上限")
@@ -293,8 +288,9 @@ async def batch_generate_answers(
     def _load():
         with get_db_connection() as conn:
             placeholders = ",".join("?" * len(req.ids))
-            from_clause, where_clause, params = _build_bank_where_clause(user)
-            from app.db.queries import get_dynamic_frequency_sql
+            from app.db.queries import build_bank_where_clause, get_dynamic_frequency_sql
+
+            from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
 
             frequency_sql = get_dynamic_frequency_sql("all", user["id"])
             return conn.execute(
@@ -311,16 +307,12 @@ async def batch_generate_answers(
     questions = [
         (r["id"], r["question"])
         for r in rows
-        if r["question"]
-        and (
-            req.force
-            or not r["ai_answer"]
-            or "生成失败" in r["ai_answer"]
-        )
+        if r["question"] and (req.force or not r["ai_answer"] or "生成失败" in r["ai_answer"])
     ]
     skipped = len(rows) - len(questions)
 
     if not questions:
+
         async def empty_stream():
             yield f"data: {json.dumps({'type': 'done', 'generated': 0, 'failed': 0, 'skipped': skipped})}\n\n"
 
@@ -330,9 +322,7 @@ async def batch_generate_answers(
             headers={"X-Accel-Buffering": "no"},
         )
 
-    skip_search = await _allow_no_search_or_raise(
-        user, req.allow_no_search, search_scope="public"
-    )
+    skip_search = await _allow_no_search_or_raise(user, req.allow_no_search, search_scope="public")
 
     def _create_batch_jobs():
         from app.services.job_lifecycle import (
@@ -372,9 +362,7 @@ async def batch_generate_answers(
         for child_job_id in child_job_ids:
             await _dispatch_persisted_answer_job(child_job_id)
     else:
-        await asyncio.gather(
-            *(_dispatch_persisted_answer_job(job_id) for job_id in child_job_ids)
-        )
+        await asyncio.gather(*(_dispatch_persisted_answer_job(job_id) for job_id in child_job_ids))
 
     async def event_stream():
         total = len(child_job_ids)
@@ -384,12 +372,13 @@ async def batch_generate_answers(
         yield f"data: {json.dumps({'type': 'init', 'job_id': parent_job_id, 'total': total, 'skipped': skipped})}\n\n"
         try:
             while True:
+
                 def _read_children():
                     with get_db_connection() as conn:
                         rows_by_id = {
                             row["id"]: dict(row)
                             for row in conn.execute(
-                                "SELECT id, status, error FROM jobs WHERE id IN ({})".format(
+                                "SELECT id, status, last_error FROM jobs WHERE id IN ({})".format(
                                     ",".join("?" * len(child_job_ids))
                                 ),
                                 child_job_ids,
@@ -399,7 +388,7 @@ async def batch_generate_answers(
                             {
                                 "id": qid,
                                 "status": rows_by_id.get(job_id, {}).get("status", "pending"),
-                                "error": rows_by_id.get(job_id, {}).get("error"),
+                                "error": rows_by_id.get(job_id, {}).get("last_error"),
                             }
                             for (qid, _), job_id in zip(questions, child_job_ids)
                         ]

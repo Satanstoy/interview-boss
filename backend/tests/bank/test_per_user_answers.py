@@ -201,6 +201,63 @@ class TestGenerateRecitation:
 
 
 # ═══════════════════════════════════════════════════════════
+# T-012: 生成端点使用 "all" 口径查询（不遗漏个人题）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestGenerateEndpointUsesAllFilter:
+    """生成答案/背诵稿/批量生成端点应使用 build_bank_where_clause(uid, 'all') 查询。
+
+    回归测试：之前使用 _build_bank_where_clause(user) 会按 bank_mode 默认
+    "public" 过滤，导致在"全部"标签下可见的个人题（owner_id=user_id）在生成时 404。
+    """
+
+    @staticmethod
+    def _read_source():
+        import os
+
+        path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "app", "routers", "answers.py"
+        )
+        with open(path) as f:
+            return f.read()
+
+    def test_generate_master_answer_uses_all_filter(self):
+        """generate_master_answer 应通过 build_bank_where_clause(uid, 'all') 查找题目"""
+        source = self._read_source()
+        # 提取 generate_master_answer 函数体
+        start = source.index("async def generate_master_answer(")
+        end = source.index("\n@router.", start + 1)
+        body = source[start:end]
+        assert "build_bank_where_clause" in body, "应使用 build_bank_where_clause"
+        assert "_build_bank_where_clause" not in body
+
+    def test_generate_recitation_uses_all_filter(self):
+        """generate_recitation 应通过 build_bank_where_clause(uid, 'all') 查找题目"""
+        source = self._read_source()
+        start = source.index("async def generate_recitation(")
+        end = source.index("\n@router.", start + 1)
+        body = source[start:end]
+        assert "build_bank_where_clause" in body
+        assert "_build_bank_where_clause" not in body
+
+    def test_batch_generate_answers_uses_all_filter(self):
+        """batch_generate_answers 应通过 build_bank_where_clause(uid, 'all') 查找题目"""
+        source = self._read_source()
+        start = source.index("async def batch_generate_answers(")
+        body = source[start:]
+        assert "build_bank_where_clause" in body
+        assert "_build_bank_where_clause" not in body
+
+    def test_no_import_of_old_build_clause(self):
+        """answers.py 不应从 questions 导入 _build_bank_where_clause"""
+        source = self._read_source()
+        assert "_build_bank_where_clause" not in source, (
+            "answers.py 仍引用了 _build_bank_where_clause，应改用 db.queries.build_bank_where_clause"
+        )
+
+
+# ═══════════════════════════════════════════════════════════
 # T-007~T-008: GET master-bank 返回 user_answer 和 has_reference_answer
 # ═══════════════════════════════════════════════════════════
 
