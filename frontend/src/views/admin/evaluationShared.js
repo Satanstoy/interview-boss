@@ -184,3 +184,95 @@ export function passRate(item) {
   if (!item.run_count) return 0
   return Math.round((item.passed_count / item.run_count) * 100)
 }
+
+export function pctLabel(value) {
+  return value == null ? '—' : Math.round(value * 100) + '%'
+}
+
+export function inputSnapshotSummary(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return null
+  const candidateView = snapshot.candidate_view || snapshot
+  const harness = snapshot.harness_context || {}
+  const profile = candidateView?.profile || candidateView?.resume || snapshot.profile || ''
+  const behaviorInjections = harness.behavior_injections || snapshot.behavior_injections || {}
+  return {
+    profileSnippet: typeof profile === 'string' ? profile.slice(0, 120) : JSON.stringify(profile).slice(0, 120),
+    hasProfile: Boolean(profile),
+    difficulty: candidateView?.difficulty || snapshot.difficulty || '—',
+    mode: candidateView?.mode || snapshot.mode || harness.mode || '—',
+    opening: candidateView?.opening || snapshot.opening || harness.opening || '—',
+    maxTurns: harness.max_turns ?? candidateView?.max_turns ?? snapshot.max_turns ?? '—',
+    behaviorCount: Object.keys(behaviorInjections).length,
+    totalKeys: Object.keys(snapshot).length,
+  }
+}
+
+export function contractSummaryDetailed(contract) {
+  if (!contract || typeof contract !== 'object') return null
+  const hard = contract.hard_assertions || []
+  const rubric = contract.rubric || {}
+  const toolExp = contract.tool_expectations || {}
+  const intentExp = contract.intent_expectations || []
+  return {
+    hardCount: hard.length,
+    hardIds: hard.map(item => (typeof item === 'string' ? item : item.id || JSON.stringify(item))).slice(0, 8),
+    rubricKeys: Object.keys(rubric),
+    rubric,
+    requiredTools: toolExp.required_tools || [],
+    forbiddenTools: toolExp.forbidden_tools || [],
+    minCalls: toolExp.min_calls ?? null,
+    maxCalls: toolExp.max_calls ?? null,
+    intentExpectationCount: Array.isArray(intentExp) ? intentExp.length : 0,
+  }
+}
+
+export function judgeDetailsFromItem(item) {
+  const score = item?.result?.score || {}
+  const dimensions = score.dimensions || score.judge_dimensions || {}
+  const dimEntries = Object.entries(dimensions).map(([key, val]) => ({
+    key,
+    score: val?.score ?? null,
+    reasoning: val?.reasoning || val?.reason || '—',
+    weight: val?.weight ?? null,
+  }))
+  return {
+    judgeModel: score.judge_model || score.judgeModel || item?.judge_model || null,
+    judgeScore: score.judge_score ?? score.judgeScore ?? score.score ?? null,
+    reportedScore: score.judge_reported_score ?? score.reported_score ?? score.overall_score ?? null,
+    weightedAvg: score.weighted_avg ?? score.weightedAvg ?? null,
+    dimensions: dimEntries,
+    criticalIssues: score.critical_issues || score.criticalIssues || [],
+    highlights: score.highlights || [],
+    error: score.error || null,
+    judgeStatus: score.judge_status || item?.judge_status || null,
+  }
+}
+
+export function scoreBreakdownFromItem(item) {
+  const score = item?.result?.score || {}
+  return {
+    final: score.score ?? item?.score ?? null,
+    deterministic: score.deterministic_score ?? score.deterministicScore ?? null,
+    judge: score.judge_score ?? score.judgeScore ?? null,
+    deterministicWeight: score.deterministic_weight ?? score.deterministicWeight ?? null,
+    judgeWeight: score.judge_weight ?? score.judgeWeight ?? null,
+    deterministicDimensions: score.deterministic_dimensions || score.deterministicDimensions || [],
+    scoreSource: score.score_source || score.scoreSource || null,
+  }
+}
+
+export function turnMetadata(turn) {
+  const meta = turn?.metadata || {}
+  const trace = meta.tool_calls_trace || meta.tool_calls || []
+  const classify = meta.classify_result || {}
+  const turnIntent = meta.turn_intent || {}
+  return {
+    toolCalls: Array.isArray(trace) ? trace : [],
+    classify,
+    turnIntent,
+    selectedQuestion: meta.selected_question || null,
+    questionSource: meta.question_source || meta.questionSource || null,
+    hasSummary: meta.has_summary ?? meta.hasSummary ?? null,
+    events: turn?.events || [],
+  }
+}

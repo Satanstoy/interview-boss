@@ -59,6 +59,10 @@
 | `MergeQuestionDialog.vue` | 移动题目到目标聚类弹窗：搜索目标聚类、选择目标题目或独立为新聚类 |
 | `SettingsMCP.vue` | 设置 - MCP 连接配置：账户级 MCP Token 生成/轮换/吊销、连接配置复制、Agent 配置提示词。**token 只存 JS 内存（模块级变量），绝不写入 sessionStorage/localStorage**（刷新后由 `loadConfig` 从 `GET /api/profile/mcp` 重新取回），与 http.js 的 access token 内存存储原则一致 |
 | `SettingsSearchConfig.vue` | 设置 - 联网搜索配置：多 provider 选择（Tavily/Brave/Bocha/Exa）、API Key 配置、连接测试 |
+| `EvalEvidencePanel.vue` | 评测 Case 证据面板：按 `docs/specs/2026-08-19-eval-evidence-visibility-gap.md` 六阶段补全 — Case 概览卡（输入/契约摘要+分数条）、对话元数据折叠（tool_calls_trace/classify_result/turn_intent/question_source）、确定性指标重构（工具/意图/抽取三组+逐轮 expected vs actual 表）、Judge 维度表（score/reasoning/weight + critical_issues/highlights）、分数分解（EvalScoreBar 融合+权重说明）、契约详情结构化；保留“候选人可见输入/契约”高级详情 JSON 折叠以兼容既有 e2e |
+| `EvalScoreBar.vue` | 分数横条（deterministic 蓝段 + judge 绿段 + final 标记线） |
+| `EvalCaseNavigator.vue` | 评测 Case 导航（失败优先排序 + 筛选/搜索） |
+| `EvalProgressBar.vue` | 评测进度条 |
 
 ## 核心规则
 
