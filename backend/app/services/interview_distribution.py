@@ -80,7 +80,7 @@ def map_question_type(
     if not text:
         return QuestionType.UNCLASSIFIED
 
-    if re.search(r"(^|\s)e\.|算法|数据结构|手撕|leetcode|动态规划|二分", text, re.I):
+    if re.search(r"(^|\s)[eh]\.|算法|数据结构|手撕|leetcode|动态规划|二分", text, re.I):
         return QuestionType.ALGORITHM_CODING
     if _BEHAVIORAL_SIGNAL_RE.search(text) or _BEHAVIORAL_ACRONYM_RE.search(text):
         return QuestionType.BEHAVIORAL
@@ -88,7 +88,13 @@ def map_question_type(
         return QuestionType.SYSTEM_DESIGN
     if re.search(r"(^|\s)a\.|项目经验|项目介绍|难点攻关|项目复盘|负责过的项目", text, re.I):
         return QuestionType.PROJECT_FOLLOWUP
-    if re.search(r"(^|\s)[bcd]\.|基础|原理|中间件|数据库|操作系统|网络|agent|rag|prompt", text, re.I):
+    if re.search(
+        r"(^|\s)[b-h]\.|基础|原理|中间件|数据库|操作系统|网络|agent|rag|prompt|"
+        r"java|python|asyncio|协程|并发|jvm|spring|fastapi|redis|mysql|"
+        r"kubernetes|docker|mcp|工具调用",
+        text,
+        re.I,
+    ):
         return QuestionType.KNOWLEDGE_PROBE
     return QuestionType.UNCLASSIFIED
 

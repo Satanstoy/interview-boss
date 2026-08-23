@@ -52,7 +52,7 @@ BUILTIN_SUITES = (
         "adapter": "ResumeAnalysisAdapter",
     },
     {
-        "evaluation_key": "question-tagging-eval@1.0",
+        "evaluation_key": "question-tagging-eval@1.1",
         "target_key": "question-tagging@1.0",
         "target_type": "question_tagging",
         "target_component": "question-tagging-agent",

@@ -32,7 +32,7 @@ def build_interview_context(user_id: int, conversation_id: Optional[str] = None)
         cats = taxonomy["categories"]
         cat_lines = []
         for cat in cats[:8]:  # 最多 8 个大类
-            cat1 = cat.get("name", "")
+            cat1 = cat.get("cat1") or cat.get("name", "")
             children = cat.get("children", [])
             if children:
                 child_names = ", ".join(

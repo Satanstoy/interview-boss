@@ -92,8 +92,18 @@ def apply_matched(conn, matched, job_position, saved_answers):
     """将匹配到已有聚类的题追加到对应聚类"""
     for item in matched:
         cluster_id = item['cluster_id']
+        question_bank_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+        }
+        answer_version_select = (
+            ", answer_taxonomy_version"
+            if "answer_taxonomy_version" in question_bank_columns
+            else ""
+        )
         existing = conn.execute(
-            "SELECT id, owner_id, frequency, sources, original_questions, original_question_sources, ai_answer, answer_sources "
+            "SELECT id, owner_id, frequency, sources, original_questions, original_question_sources, "
+            f"ai_answer, answer_sources{answer_version_select} "
             "FROM question_bank WHERE id = ?",
             (cluster_id,)
         ).fetchone()
@@ -137,22 +147,44 @@ def apply_matched(conn, matched, job_position, saved_answers):
 
         ai_answer = existing['ai_answer']
         answer_sources = existing['answer_sources']
+        answer_taxonomy_version = (
+            existing['answer_taxonomy_version']
+            if "answer_taxonomy_version" in existing.keys()
+            else None
+        )
         if not ai_answer:
             saved = saved_answers.get(q)
             if saved:
                 ai_answer = saved['answer']
                 answer_sources = saved.get('sources')
+                answer_taxonomy_version = saved.get('taxonomy_version')
 
-        conn.execute(
+        update_sql = (
             "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, "
             "original_question_sources = ?, ai_answer = COALESCE(?, ai_answer), "
             "answer_sources = COALESCE(?, answer_sources), "
-            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (len(oqs), json.dumps(sources, ensure_ascii=False),
-             json.dumps(oqs, ensure_ascii=False),
-             json.dumps(oqs_src, ensure_ascii=False),
-             ai_answer, answer_sources, cluster_id)
+            "answer_taxonomy_version = COALESCE(?, answer_taxonomy_version), "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
         )
+        update_params = (
+            len(oqs),
+            json.dumps(sources, ensure_ascii=False),
+            json.dumps(oqs, ensure_ascii=False),
+            json.dumps(oqs_src, ensure_ascii=False),
+            ai_answer,
+            answer_sources,
+            answer_taxonomy_version,
+            cluster_id,
+        )
+        if "answer_taxonomy_version" not in question_bank_columns:
+            update_sql = (
+                "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, "
+                "original_question_sources = ?, ai_answer = COALESCE(?, ai_answer), "
+                "answer_sources = COALESCE(?, answer_sources), "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            )
+            update_params = update_params[:6] + (cluster_id,)
+        conn.execute(update_sql, update_params)
 
         sync_question_bank_projections(
             conn.cursor(), cluster_id, sources, oqs, oqs_src
@@ -213,16 +245,23 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
 
         ai_answer = None
         answer_sources = None
+        answer_taxonomy_version = None
         for oq in entry['original_questions']:
             saved = saved_answers.get(oq)
             if saved:
                 ai_answer = saved['answer']
                 answer_sources = saved.get('sources')
+                answer_taxonomy_version = saved.get('taxonomy_version')
                 break
         if ai_answer:
-            conn.execute(
-                "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
-                (ai_answer, answer_sources, new_id),
+            from app.db.answer_versions import update_question_answer
+
+            update_question_answer(
+                conn,
+                new_id,
+                ai_answer,
+                answer_sources,
+                answer_taxonomy_version,
             )
 
         # The new cluster and its durable review outbox row are committed by

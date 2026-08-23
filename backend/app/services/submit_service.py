@@ -11,6 +11,7 @@ from typing import List
 
 from app.core.config import LLM_MODEL
 from app.core.prompts import TAGGING_PROMPT, build_tagging_prompt
+from app.core.taxonomy import TAXONOMY_VERSION
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_user_job_position
 from app.db.operations import insert_personal_questions_txn
 from app.services.llm import client, _should_use_response_format, _extract_json, get_llm_client_for_user
@@ -109,9 +110,14 @@ async def background_generate_answer(
 
         def _update():
             with get_db_connection() as conn:
-                conn.execute(
-                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (answer, sources_json(search_sources), question_id),
+                from app.db.answer_versions import update_question_answer
+
+                update_question_answer(
+                    conn,
+                    question_id,
+                    answer,
+                    sources_json(search_sources),
+                    TAXONOMY_VERSION,
                 )
                 conn.commit()
 

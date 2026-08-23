@@ -174,11 +174,12 @@ async def test_agent_generate_answer_node_writes_answer_sources(test_db):
 
     assert result["success_count"] == 1
     row = test_db.execute(
-        "SELECT ai_answer, answer_sources FROM question_bank WHERE id = 20"
+        "SELECT ai_answer, answer_sources, answer_taxonomy_version FROM question_bank WHERE id = 20"
     ).fetchone()
     assert row["ai_answer"].startswith("Redis 支持 RDB 和 AOF 两种持久化")
     assert "[Redis 官方文档](https://redis.io/docs)" in row["ai_answer"]
     assert json.loads(row["answer_sources"]) == sources
+    assert row["answer_taxonomy_version"] == "1.1"
     assert mock_prep.await_args.kwargs["job_position"] == "后端开发"
     assert mock_prep.await_args.kwargs["cat1"] == "基础工程能力"
     assert mock_prep.await_args.kwargs["cat2"] == "框架与中间件"
@@ -235,6 +236,7 @@ async def test_background_generate_answer_writes_answer_sources():
     sql, params = mock_conn.execute.call_args[0]
     assert "answer_sources" in sql
     assert json.loads(params[1]) == sources
+    assert params[2] == "1.1"
     assert mock_prep.await_args.kwargs["job_position"] == "大模型应用开发"
     assert mock_prep.await_args.kwargs["cat1"] == "Agent与LLM应用"
     assert mock_prep.await_args.kwargs["cat2"] == "RAG系统设计"

@@ -6,6 +6,7 @@ import asyncio
 from app.agents.shared.state import BatchGenerateState
 from app.agents.shared.quality import evaluate_answer_quality
 from app.agents.shared.events import make_progress_event
+from app.core.taxonomy import TAXONOMY_VERSION
 
 logger = logging.getLogger("interview-boss")
 
@@ -115,9 +116,14 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
             # 保存答案
             def _save():
                 conn = get_db_connection()
-                conn.execute(
-                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (answer, sources_json(search_sources), qid),
+                from app.db.answer_versions import update_question_answer
+
+                update_question_answer(
+                    conn,
+                    qid,
+                    answer,
+                    sources_json(search_sources),
+                    TAXONOMY_VERSION,
                 )
                 conn.commit()
             await run_db(_save)

@@ -1,0 +1,15 @@
+{
+  "case_key": "java_concurrency",
+  "scenario_key": "question_tagging_java_concurrency",
+  "input_snapshot": {
+    "company": "青禾科技",
+    "round": "二面",
+    "questions": ["Java 中 HashMap 为什么线程不安全，ConcurrentHashMap 如何实现？"],
+    "taxonomy": {"B.Java/Python语言与运行时": ["B2.Java并发"]}
+  },
+  "contract": {
+    "taxonomy": {"B.Java/Python语言与运行时": ["B2.Java并发"]},
+    "expected_labels": {"Java 中 HashMap 为什么线程不安全，ConcurrentHashMap 如何实现？": {"一级大类": "B.Java/Python语言与运行时", "二级子类": "B2.Java并发", "难度标签": "L2-中等"}},
+    "rubric": {"taxonomy_accuracy": {"weight": 0.55, "anchors": {"1": "分类错误", "3": "一级正确", "5": "层级准确"}}, "tag_quality": {"weight": 0.25, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}

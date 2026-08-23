@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
 from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import build_tagging_prompt, TAGGING_PROMPT
+from app.core.taxonomy import TAXONOMY_VERSION
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
 from app.models.schemas import SplitQuestionRequest, MergeOriginalQuestionRequest
 from app.services.llm import _extract_json, get_llm_client_for_user, raw_llm_call
@@ -218,11 +219,15 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
             cursor.execute("BEGIN")
             try:
                 source = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id, status FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, "
+                    "ai_answer, answer_sources, answer_taxonomy_version, owner_id, status "
+                    "FROM question_bank WHERE id = ?",
                     (question_id,)
                 ).fetchone()
                 target = conn.execute(
-                    "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id, status FROM question_bank WHERE id = ?",
+                    "SELECT id, question, sources, original_questions, original_question_sources, "
+                    "ai_answer, answer_sources, answer_taxonomy_version, owner_id, status "
+                    "FROM question_bank WHERE id = ?",
                     (req.target_id,)
                 ).fetchone()
                 if not source:
@@ -322,8 +327,14 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 # 转移 ai_answer（目标没有答案时才转移）
                 if source['ai_answer'] and not target['ai_answer']:
                     conn.execute(
-                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
-                        (source['ai_answer'], source['answer_sources'], req.target_id)
+                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, "
+                        "answer_taxonomy_version = ? WHERE id = ?",
+                        (
+                            source['ai_answer'],
+                            source['answer_sources'],
+                            source['answer_taxonomy_version'],
+                            req.target_id,
+                        )
                     )
 
                 # 转移收藏记录（跳过用户已在目标题目上的记录）

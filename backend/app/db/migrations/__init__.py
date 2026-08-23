@@ -14,7 +14,7 @@ from app.core.config import DB_PATH
 from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
-DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92}
+DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92, 102}
 
 
 def _backup_before_destructive(db_path: str, version: int, name: str) -> str | None:
@@ -161,6 +161,7 @@ from app.db.migrations.interview_import import _migration_080_interview_import
 from app.db.migrations.evaluation import _migration_087_evaluation_control_plane
 from app.db.migrations.evaluation_dual_axis import _migration_093_evaluation_dual_axis
 from app.db.migrations.harness import _migration_101_project_harness_releases
+from app.db.migrations.taxonomy import _migration_102_taxonomy_v11
 from app.db.migrations.evaluation_experiment import _migration_095_evaluation_experiment
 from app.db.migrations.practice import (_migration_094_review_event_answer_snapshot, _migration_096_review_event_evaluation_snapshot, _migration_098_practiced_list_index)
 from app.db.migrations.schema_hygiene import (
@@ -287,6 +288,7 @@ _MIGRATIONS = [
     (97, "resume_user_unique", _migration_097_resume_user_unique),
     (98, "practiced_list_index", _migration_098_practiced_list_index),
     (101, "project_harness_releases", _migration_101_project_harness_releases),
+    (102, "taxonomy_v11", _migration_102_taxonomy_v11),
 ]
 
 

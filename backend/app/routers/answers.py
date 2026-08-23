@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user
 from app.core.cache import invalidate_master_bank_cache
+from app.core.taxonomy import TAXONOMY_VERSION
 from app.db.connection import get_db_connection, run_db
 from app.models.schemas import BatchGenerateAnswersRequest
 from app.services.llm import _call_llm_with_retry  # noqa: F401 — tests and integrations patch this seam
@@ -18,6 +19,36 @@ router = APIRouter(prefix="/api/master-bank")
 # SSE 长时间没有任何字节；单题超时后继续处理其他题，确保流最终能收尾。
 _BATCH_SSE_HEARTBEAT_SECONDS = 15
 _BATCH_ANSWER_TIMEOUT_SECONDS = 300
+
+
+def _row_value(row, key: str, default=None):
+    """Read sqlite rows and lightweight test doubles through one seam."""
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        return row[key]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
+def _answer_version_is_current(row) -> bool:
+    """Treat legacy test doubles without the new column as current.
+
+    Real migrated rows always expose the column; NULL means the answer was
+    intentionally marked stale and must be regenerated.
+    """
+    if isinstance(row, dict):
+        if "answer_taxonomy_version" not in row:
+            return True
+    else:
+        try:
+            if "answer_taxonomy_version" not in row.keys():
+                return True
+        except AttributeError:
+            return True
+    return _row_value(row, "answer_taxonomy_version") == TAXONOMY_VERSION
 
 
 async def _queue_answer_job(
@@ -210,7 +241,7 @@ async def generate_master_answer(
 
             from_clause, where_clause, params = build_bank_where_clause(user["id"], "all")
             return conn.execute(
-                f"SELECT qb.question, qb.ai_answer {from_clause} {where_clause} AND qb.id = ?",
+                f"SELECT qb.question, qb.ai_answer, qb.answer_taxonomy_version {from_clause} {where_clause} AND qb.id = ?",
                 params + [question_id],
             ).fetchone()
 
@@ -221,7 +252,13 @@ async def generate_master_answer(
     is_admin = user.get("is_admin", False)
 
     # 管理员：如果已有有效答案，直接返回（兼容旧行为）
-    if is_admin and not force and row["ai_answer"] and "生成失败" not in row["ai_answer"]:
+    if (
+        is_admin
+        and not force
+        and row["ai_answer"]
+        and "生成失败" not in row["ai_answer"]
+        and _answer_version_is_current(row)
+    ):
         return {"status": "success", "answer": row["ai_answer"]}
 
     skip_search = await _allow_no_search_or_raise(user, allow_no_search, search_scope="public")
@@ -294,7 +331,7 @@ async def batch_generate_answers(
 
             frequency_sql = get_dynamic_frequency_sql("all", user["id"])
             return conn.execute(
-                f"SELECT qb.id, qb.question, qb.ai_answer {from_clause} "
+                f"SELECT qb.id, qb.question, qb.ai_answer, qb.answer_taxonomy_version {from_clause} "
                 f"{where_clause} AND qb.id IN ({placeholders}) "
                 f"ORDER BY ({frequency_sql}) DESC, qb.id ASC",
                 params + req.ids,
@@ -307,7 +344,13 @@ async def batch_generate_answers(
     questions = [
         (r["id"], r["question"])
         for r in rows
-        if r["question"] and (req.force or not r["ai_answer"] or "生成失败" in r["ai_answer"])
+        if r["question"]
+        and (
+            req.force
+            or not r["ai_answer"]
+            or "生成失败" in r["ai_answer"]
+            or (req.refresh_stale and not _answer_version_is_current(r))
+        )
     ]
     skipped = len(rows) - len(questions)
 

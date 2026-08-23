@@ -29,7 +29,7 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_per_tar
         ("resume-analysis@1.0", "target", "resume_analysis", "1.0", "published"),
         ("resume-analysis-eval@1.0", "evaluation", "resume_analysis", "1.0", "published"),
         ("question-tagging@1.0", "target", "question_tagging", "1.0", "published"),
-        ("question-tagging-eval@1.0", "evaluation", "question_tagging", "1.0", "published"),
+        ("question-tagging-eval@1.1", "evaluation", "question_tagging", "1.1", "published"),
     } <= actual
     manifest = _service()._decode_manifest(
         test_db.execute(

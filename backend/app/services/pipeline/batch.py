@@ -198,15 +198,28 @@ async def cluster_batch(
     # ── Step 0: 保存旧 AI 答案 + 清理旧贡献 ──
     conn = get_db_connection()
     saved_answers = {}
+    question_bank_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+    }
+    answer_version_select = ", answer_taxonomy_version" if "answer_taxonomy_version" in question_bank_columns else ""
     for url in batch_urls:
         rows = conn.execute(
-            "SELECT question, original_questions, ai_answer, answer_sources "
+            "SELECT question, original_questions, ai_answer, answer_sources"
+            f"{answer_version_select} "
             "FROM question_bank "
             "WHERE sources LIKE ? AND ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
             (f"%{url}%", job_position),
         ).fetchall()
         for r in rows:
-            saved = {"answer": r["ai_answer"], "sources": r["answer_sources"]}
+            saved = {
+                "answer": r["ai_answer"],
+                "sources": r["answer_sources"],
+                "taxonomy_version": (
+                    r["answer_taxonomy_version"]
+                    if "answer_taxonomy_version" in r.keys()
+                    else None
+                ),
+            }
             saved_answers[r["question"]] = saved
             try:
                 for oq in json.loads(r["original_questions"] or "[]"):

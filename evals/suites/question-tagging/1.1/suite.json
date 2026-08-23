@@ -1,0 +1,10 @@
+{
+  "release_key": "question-tagging-eval@1.1",
+  "release_type": "evaluation",
+  "version": "1.1",
+  "target_type": "question_tagging",
+  "suite_key": "question-tagging-suite",
+  "judge_model": "gpt-4o",
+  "description": "面试题分类与标签评测 1.1：覆盖 Java/Python 八股、Agent 工具协议与后端工程能力",
+  "case_files": ["java_concurrency.json", "python_asyncio.json", "agent_mcp.json", "rag_retrieval.json", "backend_distributed.json", "algorithm_question.json"]
+}

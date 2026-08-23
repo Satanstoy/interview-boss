@@ -8,6 +8,7 @@ import json
 import logging
 
 from app.core.prompts import DEFAULT_TAXONOMY
+from app.core.taxonomy import TAXONOMY_VERSION
 
 logger = logging.getLogger("interview-boss")
 
@@ -218,34 +219,37 @@ def get_taxonomy_for_position(position: str = None, user_id: int = None) -> dict
             # 1. 优先查找用户个人分类
             if user_id:
                 row = conn.execute(
-                    "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
+                    "SELECT categories_json, version FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
                     (position, user_id),
                 ).fetchone()
                 if row and row["categories_json"]:
                     return {
                         "job_position": position,
                         "categories": json.loads(row["categories_json"]),
+                        "taxonomy_version": row["version"] or "custom",
                     }
 
             # 2. 查找系统默认分类
             row = conn.execute(
-                "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'system'",
+                "SELECT categories_json, version FROM taxonomy WHERE position_name = ? AND source = 'system'",
                 (position,),
             ).fetchone()
             if row and row["categories_json"]:
                 return {
                     "job_position": position,
                     "categories": json.loads(row["categories_json"]),
+                    "taxonomy_version": row["version"] or TAXONOMY_VERSION,
                 }
 
             # 3. fallback 到默认行
             row2 = conn.execute(
-                "SELECT position_name, categories_json FROM taxonomy WHERE is_default = 1"
+                "SELECT position_name, categories_json, version FROM taxonomy WHERE is_default = 1"
             ).fetchone()
             if row2 and row2["categories_json"]:
                 return {
                     "job_position": row2["position_name"],
                     "categories": json.loads(row2["categories_json"]),
+                    "taxonomy_version": row2["version"] or TAXONOMY_VERSION,
                 }
     except Exception:
         pass
@@ -254,7 +258,11 @@ def get_taxonomy_for_position(position: str = None, user_id: int = None) -> dict
 
 
 def save_taxonomy_for_position(
-    position_name: str, categories: list, source: str = "system", owner_id: int = None
+    position_name: str,
+    categories: list,
+    source: str = "system",
+    owner_id: int = None,
+    version: str | None = None,
 ):
     """UPSERT taxonomy 到 taxonomy 表
 
@@ -268,27 +276,28 @@ def save_taxonomy_for_position(
 
     with get_db_connection() as conn:
         categories_json = json.dumps(categories, ensure_ascii=False)
+        taxonomy_version = version or (TAXONOMY_VERSION if source == "system" else "custom")
         if owner_id is not None:
             # owner_id 不为 NULL 时，ON CONFLICT 正常工作
             conn.execute(
-                "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
-                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "INSERT INTO taxonomy (position_name, categories_json, version, source, owner_id, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(position_name, source, owner_id) DO UPDATE SET "
-                "categories_json = excluded.categories_json, updated_at = CURRENT_TIMESTAMP",
-                (position_name, categories_json, source, owner_id),
+                "categories_json = excluded.categories_json, version = excluded.version, updated_at = CURRENT_TIMESTAMP",
+                (position_name, categories_json, taxonomy_version, source, owner_id),
             )
         else:
             # owner_id 为 NULL 时，SQLite 的 ON CONFLICT 不匹配 NULL，需要先 UPDATE 再 INSERT
             cur = conn.execute(
-                "UPDATE taxonomy SET categories_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "UPDATE taxonomy SET categories_json = ?, version = ?, updated_at = CURRENT_TIMESTAMP "
                 "WHERE position_name = ? AND source = ? AND owner_id IS NULL",
-                (categories_json, position_name, source),
+                (categories_json, taxonomy_version, position_name, source),
             )
             if cur.rowcount == 0:
                 conn.execute(
-                    "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
-                    "VALUES (?, ?, ?, NULL, CURRENT_TIMESTAMP)",
-                    (position_name, categories_json, source),
+                    "INSERT INTO taxonomy (position_name, categories_json, version, source, owner_id, updated_at) "
+                    "VALUES (?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)",
+                    (position_name, categories_json, taxonomy_version, source),
                 )
         conn.commit()
 

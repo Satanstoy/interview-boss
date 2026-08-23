@@ -946,6 +946,15 @@ async def _build_master_bank_job(ctx, job_id: int):
 
         def _load():
             with get_db_connection() as conn:
+                question_bank_columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+                }
+                answer_version_select = (
+                    ", answer_taxonomy_version"
+                    if "answer_taxonomy_version" in question_bank_columns
+                    else ""
+                )
                 raw = conn.execute(
                     "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
                     "FROM questions_detail qd "
@@ -956,11 +965,21 @@ async def _build_master_bank_job(ctx, job_id: int):
                     (current_pos,)
                 ).fetchall()
                 existing = conn.execute(
-                    "SELECT question, ai_answer, answer_sources FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
+                    "SELECT question, ai_answer, answer_sources"
+                    f"{answer_version_select} FROM question_bank "
+                    "WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
                     (current_pos,)
                 ).fetchall()
                 return raw, {
-                    r['question']: {"answer": r['ai_answer'], "sources": r['answer_sources']}
+                    r['question']: {
+                        "answer": r['ai_answer'],
+                        "sources": r['answer_sources'],
+                        "taxonomy_version": (
+                            r['answer_taxonomy_version']
+                            if "answer_taxonomy_version" in r.keys()
+                            else None
+                        ),
+                    }
                     for r in existing
                 }
 
@@ -1072,6 +1091,7 @@ async def _build_master_bank_job(ctx, job_id: int):
                     saved = existing_answers_map.get(r['question'])
                     ai_answer = saved['answer'] if saved else None
                     answer_sources = saved['sources'] if saved else None
+                    answer_taxonomy_version = saved.get('taxonomy_version') if saved else None
                     if not ai_answer:
                         try:
                             import json
@@ -1081,13 +1101,19 @@ async def _build_master_bank_job(ctx, job_id: int):
                                 if saved and saved['answer']:
                                     ai_answer = saved['answer']
                                     answer_sources = saved['sources']
+                                    answer_taxonomy_version = saved.get('taxonomy_version')
                                     break
                         except Exception:
                             pass
                     if ai_answer:
-                        conn.execute(
-                            "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
-                            (ai_answer, answer_sources, r['id'])
+                        from app.db.answer_versions import update_question_answer
+
+                        update_question_answer(
+                            conn,
+                            r['id'],
+                            ai_answer,
+                            answer_sources,
+                            answer_taxonomy_version,
                         )
                         restored += 1
                 conn.commit()

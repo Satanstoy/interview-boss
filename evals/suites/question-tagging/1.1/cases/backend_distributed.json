@@ -1,0 +1,15 @@
+{
+  "case_key": "backend_distributed",
+  "scenario_key": "question_tagging_backend_distributed",
+  "input_snapshot": {
+    "company": "基础设施团队",
+    "round": "三面",
+    "questions": ["分布式事务的一致性方案有哪些，如何结合业务选择？"],
+    "taxonomy": {"F.分布式与高并发": ["F2.分布式事务与一致性"]}
+  },
+  "contract": {
+    "taxonomy": {"F.分布式与高并发": ["F2.分布式事务与一致性"]},
+    "expected_labels": {"分布式事务的一致性方案有哪些，如何结合业务选择？": {"一级大类": "F.分布式与高并发", "二级子类": "F2.分布式事务与一致性", "难度标签": "L2-中等"}},
+    "rubric": {"taxonomy_accuracy": {"weight": 0.55, "anchors": {"1": "分类错误", "3": "一级正确", "5": "层级准确"}}, "tag_quality": {"weight": 0.25, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}

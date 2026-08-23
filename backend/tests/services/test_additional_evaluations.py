@@ -24,7 +24,7 @@ def test_builtin_catalog_publishes_each_target_and_matching_eval_release(test_db
         ("resume-analysis@1.0", "target", "resume_analysis", "1.0", "published"),
         ("resume-analysis-eval@1.0", "evaluation", "resume_analysis", "1.0", "published"),
         ("question-tagging@1.0", "target", "question_tagging", "1.0", "published"),
-        ("question-tagging-eval@1.0", "evaluation", "question_tagging", "1.0", "published"),
+        ("question-tagging-eval@1.1", "evaluation", "question_tagging", "1.1", "published"),
     }
 
     assert expected <= actual

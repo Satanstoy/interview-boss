@@ -1,0 +1,15 @@
+{
+  "case_key": "agent_mcp",
+  "scenario_key": "question_tagging_agent_mcp",
+  "input_snapshot": {
+    "company": "星河科技",
+    "round": "二面",
+    "questions": ["MCP 和 Function Calling 有什么区别，Agent 如何安全调用外部工具？"],
+    "taxonomy": {"C.Agent编排与工具": ["C2.工具调用与MCP协议"]}
+  },
+  "contract": {
+    "taxonomy": {"C.Agent编排与工具": ["C2.工具调用与MCP协议"]},
+    "expected_labels": {"MCP 和 Function Calling 有什么区别，Agent 如何安全调用外部工具？": {"一级大类": "C.Agent编排与工具", "二级子类": "C2.工具调用与MCP协议", "难度标签": "L2-中等"}},
+    "rubric": {"taxonomy_accuracy": {"weight": 0.55, "anchors": {"1": "分类错误", "3": "一级正确", "5": "层级准确"}}, "tag_quality": {"weight": 0.25, "anchors": {"1": "无标签", "3": "基本相关", "5": "标签精准"}}, "difficulty": {"weight": 0.2, "anchors": {"1": "明显错误", "3": "基本合理", "5": "难度准确"}}}
+  }
+}
