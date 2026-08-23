@@ -29,9 +29,12 @@ storage_prune_file_family() {
   local directory="$1"
   local pattern="$2"
   local item_label="${3:-backup}"
+  local min_keep_override="${4:-}"
   local retention_days="${BACKUP_RETENTION_DAYS:-7}"
-  local min_keep="${BACKUP_MIN_KEEP_FILES:-3}"
+  local min_keep="${min_keep_override:-${BACKUP_MIN_KEEP_FILES:-3}}"
+  local rm_bin="${STORAGE_RM_BIN:-rm}"
   local cutoff_epoch
+  local cleanup_rc=0
   local -a entries=()
   local entry path mtime_epoch index=0
 
@@ -66,13 +69,16 @@ storage_prune_file_family() {
     if (( mtime_epoch < cutoff_epoch )); then
       if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
         storage_retention_log "would remove expired $item_label: $path"
-      else
-        rm -f -- "$path"
+      elif "$rm_bin" -f -- "$path"; then
         storage_retention_log "removed expired $item_label: $path"
+      else
+        storage_retention_log "WARNING: failed to remove expired $item_label: $path"
+        cleanup_rc=1
       fi
     fi
     index=$((index + 1))
   done
+  return "$cleanup_rc"
 }
 
 storage_cleanup_evaluations() {
@@ -82,7 +88,9 @@ storage_cleanup_evaluations() {
 
 storage_cleanup_project_archives() {
   local archive_dir="${PROJECT_ARCHIVE_DIR:-/data/projects/archive}"
+  local rm_bin="${STORAGE_RM_BIN:-rm}"
   local cutoff_epoch archive link target referenced
+  local cleanup_rc=0
 
   storage_data_mount_available || {
     storage_retention_log "WARNING: /data is not mounted; skipped full project archive cleanup"
@@ -106,25 +114,30 @@ storage_cleanup_project_archives() {
     if [[ "$(stat -c %Y "$archive" 2>/dev/null || echo 0)" -lt "$cutoff_epoch" ]]; then
       if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
         storage_retention_log "would remove expired full project archive: $archive"
-      else
-        rm -rf -- "$archive"
+      elif "$rm_bin" -rf -- "$archive"; then
         storage_retention_log "removed expired full project archive: $archive"
+      else
+        storage_retention_log "WARNING: failed to remove expired full project archive: $archive"
+        cleanup_rc=1
       fi
     fi
   done
+  return "$cleanup_rc"
 }
 
 storage_cleanup_backups() {
   local project_dir="$1"
+  local cleanup_rc=0
 
   if storage_data_mount_available; then
-    storage_prune_file_family "$project_dir/backups" 'interview-boss_*.db'
-    storage_prune_file_family "$project_dir/backups" 'redis_*.rdb'
+    storage_prune_file_family "$project_dir/backups" 'interview-boss_*.db' || cleanup_rc=1
+    storage_prune_file_family "$project_dir/backups" 'redis_*.rdb' 'Redis RDB' 0 || cleanup_rc=1
   else
     storage_retention_log "WARNING: /data is not mounted; skipped /data-backed project backups"
   fi
-  storage_cleanup_project_archives
-  storage_prune_file_family "$project_dir/backend/data/backups" '*.db'
-  storage_prune_file_family "$project_dir/backend/data" 'interview-boss.db.bak.*'
-  storage_cleanup_evaluations "$project_dir/backend/data/evaluations"
+  storage_cleanup_project_archives || cleanup_rc=1
+  storage_prune_file_family "$project_dir/backend/data/backups" '*.db' || cleanup_rc=1
+  storage_prune_file_family "$project_dir/backend/data" 'interview-boss.db.bak.*' || cleanup_rc=1
+  storage_cleanup_evaluations "$project_dir/backend/data/evaluations" || cleanup_rc=1
+  return "$cleanup_rc"
 }

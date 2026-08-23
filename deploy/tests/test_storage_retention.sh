@@ -69,8 +69,9 @@ backup_count="$(find "$tmp_dir/backups" -maxdepth 1 -type f -name 'interview-bos
 assert_file "$tmp_dir/backups/interview-boss_20260824_000000.db"
 
 redis_count="$(find "$tmp_dir/backups" -maxdepth 1 -type f -name 'redis_*.rdb' | wc -l)"
-[[ "$redis_count" -eq 3 ]] || fail "expected 3 Redis backups, got $redis_count"
+[[ "$redis_count" -eq 1 ]] || fail "expected only the recent Redis backup, got $redis_count"
 assert_file "$tmp_dir/backups/redis_20260824_000000.rdb"
+assert_absent "$tmp_dir/backups/redis_20260811_000000.rdb"
 
 migration_count="$(find "$tmp_dir/backend/data/backups" -maxdepth 1 -type f -name '*.db' | wc -l)"
 [[ "$migration_count" -eq 3 ]] || fail "expected 3 migration backups, got $migration_count"
@@ -89,5 +90,22 @@ archive_count="$(find "$tmp_dir/archive" -mindepth 1 -maxdepth 1 -type d -name '
 
 assert_file "$tmp_dir/backups/keep-unrelated.txt"
 assert_absent "$tmp_dir/backups/interview-boss_20260811_000000.db"
+
+failure_dir="$tmp_dir/failure"
+mkdir -p "$failure_dir"
+touch -d "10 days ago" "$failure_dir/redis_old.rdb"
+failing_rm="$tmp_dir/failing-rm"
+cat > "$failing_rm" <<'EOF'
+#!/usr/bin/env bash
+exit 19
+EOF
+chmod +x "$failing_rm"
+set +e
+STORAGE_RM_BIN="$failing_rm" BACKUP_MIN_KEEP_FILES=0 \
+  storage_prune_file_family "$failure_dir" 'redis_*.rdb' 'Redis RDB' 0
+failure_rc=$?
+set -e
+[[ "$failure_rc" -ne 0 ]] || fail "failed backup deletion was reported as success"
+assert_file "$failure_dir/redis_old.rdb"
 
 echo "PASS: storage retention keeps recent/minimum backups and removes only expired families"

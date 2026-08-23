@@ -36,7 +36,7 @@
 - `prune_unused_docker` 只清理带明确 project/label 的测试资源和 InterviewBoss stopped/orphan 容器，不使用全局 image prune；宿主机 `node_modules`/`.venv` 只报告，除非 `DEPLOY_PRUNE_HOST_ARTIFACTS=1` 或 `cleanup --aggressive`
 - `diagnose`：输出根分区、docker system df、frontend/node_modules、.venv、frontend/dist 大小等诊断信息
 - `cleanup --dry-run`：输出备份、测试卷/镜像和主机目录的清理计划，不执行删除或 BuildKit prune
-- 数据库备份：`./deploy/docker-deploy.sh backup` 会将 SQLite 库以 WAL 在线备份方式存到 `backups/interview-boss_<时间戳>.db`，命名规则见 `backup_sqlite_wal` / `do_backup`；`BACKUP_RETENTION_DAYS` 默认 7 天，`BACKUP_MIN_KEEP_FILES` 默认保留最近 3 份。`/data/projects/archive/interview-boss-backup-*` 的完整历史副本也按同一策略清理，但被 `/opt/interview-boss-backup-*` 软链接引用的副本会保留
+- 数据库备份：`./deploy/docker-deploy.sh backup` 会将 SQLite 库以 WAL 在线备份方式存到 `backups/interview-boss_<时间戳>.db`，命名规则见 `backup_sqlite_wal` / `do_backup`；`BACKUP_RETENTION_DAYS` 默认 7 天，`BACKUP_MIN_KEEP_FILES` 默认保留最近 3 份。`/data/projects/archive/interview-boss-backup-*` 的完整历史副本也按同一策略清理，但被 `/opt/interview-boss-backup-*` 软链接引用的副本会保留；Redis RDB 不享受最少 3 份保护，只按 7 天清理
 - Evaluation 历史产物：`backend/data/evaluations` 由同一存储维护流程按 7 天 / 至少 3 份策略定向清理，只处理该目录顶层文件，不递归删除其他项目或数据库内容
 - 数据库恢复：`./deploy/docker-deploy.sh restore [<备份路径>]`（缺省自动用 `backups/` 最新 `interview-boss_*.db`）。恢复流程：先校验备份为有效 SQLite 库 → **恢复前自动再备份当前库**（`backups/interview-boss_pre-restore_<时间戳>.db`）→ 停止 `backend` → 覆盖 `backend/data/interview-boss.db` 并清理 `-wal`/`-shm` → 启动 backend 并等待健康检查。恢复会覆盖生产库，属破坏性操作，仅用于恢复演练/真实故障恢复
 - 可调开关：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`、`MIRROR_CACHE_VERSION=v2`。不要把 `DEPLOY_SELECT_MIRRORS_ON_BUILD=1` 作为日常默认值，否则每次 update 都可能测速、改 daemon 或改变 build args。
