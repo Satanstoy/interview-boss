@@ -1,0 +1,11 @@
+[Unit]
+Description=InterviewBoss storage retention and Docker cache maintenance
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/interview-boss
+ExecStart=/usr/bin/flock -n /run/lock/interview-boss-storage-maintenance.lock /opt/interview-boss/deploy/docker-deploy.sh storage-maintenance

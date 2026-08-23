@@ -5,6 +5,75 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-all}"
 blocking_failed=0
 declare -a RESULTS=()
+TEST_COMPOSE_PROJECT=""
+TEST_IMAGE_READY=0
+TEST_IMAGE_TAG="${INTERVIEW_BOSS_TEST_TAG:-$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo local)}"
+TEST_BUILDKIT_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
+TEST_BUILDKIT_DRIVER="${BUILDKIT_BUILDER_DRIVER:-docker-container}"
+TEST_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-6144}"
+
+prepare_test_project() {
+  if [ -z "$TEST_COMPOSE_PROJECT" ]; then
+    TEST_COMPOSE_PROJECT="interview-boss-check-${BASHPID}-$(date +%s)"
+  fi
+}
+
+compose_test() {
+  prepare_test_project
+  INTERVIEW_BOSS_TEST_TAG="$TEST_IMAGE_TAG" \
+    docker compose --project-name "$TEST_COMPOSE_PROJECT" --profile test "$@"
+}
+
+ensure_test_builder() {
+  local driver
+  if docker buildx inspect "$TEST_BUILDKIT_BUILDER" >/dev/null 2>&1; then
+    driver=$(docker buildx inspect "$TEST_BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+    if [ "$driver" != "$TEST_BUILDKIT_DRIVER" ]; then
+      record "FAIL" "InterviewBoss BuildKit builder" "driver=$driver, expected $TEST_BUILDKIT_DRIVER"
+      blocking_failed=1
+      return 1
+    fi
+    return 0
+  fi
+
+  if ! docker buildx create \
+    --name "$TEST_BUILDKIT_BUILDER" \
+    --driver "$TEST_BUILDKIT_DRIVER" \
+    --driver-opt network=host >/dev/null; then
+    record "FAIL" "InterviewBoss BuildKit builder" "could not create $TEST_BUILDKIT_BUILDER"
+    blocking_failed=1
+    return 1
+  fi
+}
+
+test_root_free_mb() {
+  df -Pm / | awk 'NR == 2 {print $4}'
+}
+
+check_test_build_space() {
+  local free_mb
+  free_mb=$(test_root_free_mb)
+  if [ "$free_mb" -lt "$TEST_HARD_MIN_FREE_MB" ]; then
+    record "FAIL" "backend test image" "root free ${free_mb}MB below hard threshold ${TEST_HARD_MIN_FREE_MB}MB"
+    blocking_failed=1
+    return 1
+  fi
+  return 0
+}
+
+cleanup_test_project() {
+  local project="$TEST_COMPOSE_PROJECT"
+  [ -n "$project" ] || return 0
+
+  INTERVIEW_BOSS_TEST_TAG="$TEST_IMAGE_TAG" \
+    docker compose --project-name "$project" --profile test \
+    down --volumes --remove-orphans >/dev/null 2>&1 || \
+    printf 'WARNING: test Compose project cleanup failed: %s\n' "$project" >&2
+  TEST_COMPOSE_PROJECT=""
+}
+
+trap cleanup_test_project EXIT
+trap 'cleanup_test_project; exit 130' INT TERM
 
 record() {
   local status="$1"
@@ -60,22 +129,41 @@ check_docker_access() {
   return 0
 }
 
+ensure_test_image() {
+  if [ "$TEST_IMAGE_READY" -eq 1 ]; then
+    return 0
+  fi
+
+  check_test_build_space || return 1
+  ensure_test_builder || return 1
+
+  if compose_test build --builder "$TEST_BUILDKIT_BUILDER" test; then
+    record "PASS" "backend test image"
+    TEST_IMAGE_READY=1
+    return 0
+  else
+    local rc=$?
+    record "FAIL" "backend test image" "exit ${rc}"
+    blocking_failed=1
+    return 1
+  fi
+}
+
 run_backend() {
   require_blocking_cmd docker || return
   check_docker_access || return
 
-  run_blocking "backend test image" \
-    docker compose --profile test build test
+  ensure_test_image || return
 
   run_blocking "backend collect" \
-    docker compose --profile test run --rm test uv run pytest --collect-only -q
+    compose_test run --rm test uv run pytest --collect-only -q
 
   # PYTHONPYCACHEPREFIX: test 容器源码挂载为 :ro，把 pyc 写到 /tmp 避免 read-only 报错
   run_blocking "backend compile" \
-    docker compose --profile test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run python -m compileall -q backend/app
+    compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run python -m compileall -q backend/app
 
   run_blocking "backend structure tests" \
-    docker compose --profile test run --rm test uv run pytest \
+    compose_test run --rm test uv run pytest \
       backend/tests/bank/test_master_bank_syntax.py \
       backend/tests/infra/test_docker_config.py \
       backend/tests/services/test_router_refactor.py \
@@ -84,7 +172,7 @@ run_backend() {
   # 全量关键子集 pytest(audit WARN 不拦截): 让完整失败面进入门禁报告。
   # 已知既有失败(非本次引入)不会让门禁恒红; 收敛后可将此段改为 blocking。
   run_nonblocking "backend full tests" \
-    docker compose --profile test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
+    compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
       backend/tests/bank backend/tests/chat backend/tests/pipeline \
       backend/tests/services backend/tests/security backend/tests/infra \
       -q --tb=no
@@ -117,8 +205,10 @@ run_backend_audit() {
     return
   fi
 
+  ensure_test_image || return
+
   run_nonblocking "backend audit" \
-    docker compose --profile test run --rm test sh -lc \
+    compose_test run --rm test sh -lc \
       "cd /app && uv export --frozen --no-dev --format requirements-txt --no-hashes -o /tmp/requirements-audit.txt && uv run pip-audit -r /tmp/requirements-audit.txt --no-deps --disable-pip --progress-spinner off"
 }
 
@@ -154,11 +244,13 @@ run_static_backend() {
     return
   fi
 
+  ensure_test_image || return
+
   run_nonblocking "backend ruff" \
-    docker compose --profile test run --rm test uv run ruff check backend/app
+    compose_test run --rm test uv run ruff check backend/app
 
   run_nonblocking "backend mypy" \
-    docker compose --profile test run --rm test uv run mypy backend/app
+    compose_test run --rm test uv run mypy backend/app
 }
 
 run_static_frontend() {

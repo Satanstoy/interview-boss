@@ -185,7 +185,7 @@ services:
 
   # ── Test（pytest 测试环境，按需启用：--profile test）──
   test:
-    image: interview-boss-test:local
+    image: interview-boss-test:${INTERVIEW_BOSS_TEST_TAG:-local}
     build:
       context: .
       dockerfile: Dockerfile

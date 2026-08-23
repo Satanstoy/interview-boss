@@ -190,7 +190,7 @@ worker (--profile worker, 按需启动) → redis/backend data
 
 - Docker Compose 编排，配置见 `docker-compose.yml`；`backend`/`worker` 共用 `interview-boss-app:local`，`nginx` 使用 `interview-boss-nginx:local`
 - 宿主机 nginx 站点配置：`/etc/nginx/sites-available/{default,satanstoy,interviewboss,civil6}`（default 处理 IP 直连，反代 8081，另挂 `/material-preview/` 静态材质预览；**禁止**再给 default 加指向 Vite dev server 的 cookie 全局劫持分支，2026-08-05 已因此造成全站被切到 dev server 导致页面 9.7s 才响应），不是本项目仓库文件，改公网入口要直接编辑这些
-- 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIN_FREE_MB=2048`、`DEPLOY_TARGET_FREE_MB=5120`、`BUILDKIT_RESERVED_SPACE=2GB` 可通过环境变量覆盖
+- 构建磁盘保护由 `deploy/docker-deploy.sh` 统一执行：硬性下限 `DEPLOY_HARD_MIN_FREE_MB=6144`、目标空间 `DEPLOY_TARGET_FREE_MB=8192`、BuildKit 上限 `BUILDKIT_MAX_USED_SPACE=1536MB`；项目构建使用独立 `interview-boss` builder，缓存超过 7 天或达到上限才由定向维护回收
 - 镜像源构建保护由 `deploy/docker-deploy.sh` 统一执行：`DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=1`、`DEPLOY_MIRROR_HEALTHCHECK_TIMEOUT=2`、`DEPLOY_SELECT_MIRRORS_ON_BUILD=0`。不要在普通 `update` 中强制完整测速，除非正在排查镜像源故障。镜像缓存目录由 `MIRROR_CACHE_VERSION` 控制，默认写入 `/tmp/interview-boss-mirrors-v2`。
 - Docker daemon DNS 可通过 `DEPLOY_DOCKER_DNS=223.5.5.5,119.29.29.29` 覆盖，普通 update 不应频繁改 daemon；只在 `mirrors` 维护命令中持久化。
 - Nginx 反代 `/api/` → backend:8000（read timeout 600s，SSE 禁用 buffering/cache/gzip），其余 → `/usr/share/nginx/html` 静态文件

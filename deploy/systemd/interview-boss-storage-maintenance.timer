@@ -1,0 +1,11 @@
+[Unit]
+Description=Run InterviewBoss storage maintenance daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=interview-boss-storage-maintenance.service
+
+[Install]
+WantedBy=timers.target

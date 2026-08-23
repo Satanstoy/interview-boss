@@ -302,24 +302,25 @@ class TestDockerDeployScript:
     def test_has_pre_build_disk_guard(self):
         """构建前应检查磁盘并在不足时拒绝部署"""
         content = self._read()
-        assert "DEPLOY_MIN_FREE_MB" in content
+        assert "DEPLOY_HARD_MIN_FREE_MB" in content
         assert "ensure_disk_before_build" in content
-        assert "拒绝部署以避免磁盘爆满" in content
+        assert "低于硬阈值" in content
 
     def test_has_post_build_cache_prune(self):
         """构建后应按阈值收缩 BuildKit cache"""
         content = self._read()
         assert "DEPLOY_TARGET_FREE_MB" in content
-        assert "BUILDKIT_RESERVED_SPACE" in content
+        assert "BUILDKIT_MAX_USED_SPACE" in content
+        assert '--builder "$BUILDKIT_BUILDER"' in content
         assert "docker builder prune" in content
         assert "cleanup_after_build" in content
 
     def test_default_thresholds_match_docs(self):
-        """默认阈值应与文档一致：2048 / 5120 / 2GB"""
+        """默认阈值应与文档一致：6144 / 8192 / 1536MB"""
         content = self._read()
-        assert "DEPLOY_MIN_FREE_MB:-2048" in content
-        assert "DEPLOY_TARGET_FREE_MB:-5120" in content
-        assert "BUILDKIT_RESERVED_SPACE:-2GB" in content
+        assert "DEPLOY_HARD_MIN_FREE_MB:-6144" in content
+        assert "DEPLOY_TARGET_FREE_MB:-8192" in content
+        assert "BUILDKIT_MAX_USED_SPACE:-1536MB" in content
 
     def test_build_commands_are_guarded(self):
         """核心构建和 Worker 构建应走磁盘保护包装"""
