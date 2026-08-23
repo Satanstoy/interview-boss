@@ -977,15 +977,21 @@ do_diagnose() {
 # ── 定时存储维护 ──
 do_maintenance() {
   local mount_rc=0
+  local free_mb
   log "执行 InterviewBoss 存储维护（备份、测试资源、BuildKit 缓存）..."
   do_storage_check || mount_rc=1
   storage_cleanup_backups "$PROJECT_DIR"
-  SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    warn "维护开始时已低于硬阈值，允许回收可重建的 node_modules/.venv"
+    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker --aggressive
+  else
+    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker
+  fi
   if ! prune_build_cache light; then
     err "定时 BuildKit 过期缓存维护失败"
     return 1
   fi
-  local free_mb
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
     if ! prune_build_cache aggressive; then
