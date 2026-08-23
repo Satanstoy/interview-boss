@@ -4,13 +4,13 @@
 
 - 分类规则版本为 `1.1`。
 - 项目 Harness 继续使用 `1.0`；分类评测新增 `question-tagging-eval@1.1`。
-- 数据库变更由仓库内的 migration 106 执行，不由 Codex 直接连接生产库改数据。
+- 数据库变更由仓库内的 migration 106、107 执行，不由 Codex 直接连接生产库改数据。
 - 迁移不调用 LLM。旧答案保留，但会被标记为 `answer_taxonomy_version IS NULL`，等待管理员按需批量刷新。
 
 ## 发布流程
 
-1. 先在预发布数据库执行部署，确认 `schema_version` 已到 106。
-2. 部署服务。应用启动时的 `run_migrations()` 会自动执行 migration 106；也可以使用部署脚本的迁移命令：
+1. 先在预发布数据库执行部署，确认 `schema_version` 已到 107。
+2. 部署服务。应用启动时的 `run_migrations()` 会自动执行 migration 106、107；也可以使用部署脚本的迁移命令：
 
    ```bash
    sudo ./deploy/docker-deploy.sh migrate
@@ -20,6 +20,7 @@
 
    ```text
    backend/data/backups/pre_migration_v106_YYYYMMDD_HHMMSS.db
+   backend/data/backups/pre_migration_v107_YYYYMMDD_HHMMSS.db
    ```
 
 4. 在应用容器内执行只读校验：
@@ -28,7 +29,7 @@
    uv run python backend/scripts/verify_taxonomy_v11.py --json
    ```
 
-   重点检查 `schema_version >= 106`、系统分类版本为 `1.1`、`invalid_category_count == 0`，以及 `answer_refresh_required` 的数量是否符合预期。
+   重点检查 `schema_version >= 107`、系统分类版本为 `1.1`、`invalid_category_count == 0`、`manual_agent_correction_count == 47`，以及 `answer_refresh_required` 的数量是否符合预期。
 
 ## 答案刷新
 
@@ -45,8 +46,18 @@ POST /api/master-bank/batch-generate-answers
 
 `refresh_stale=true` 只会重新生成已有有效答案但答案分类版本不是 `1.1` 的题目；生成成功后写入 `answer_taxonomy_version = '1.1'`。题目列表和详情接口会返回 `answer_needs_refresh`，可据此分批投递。
 
+对于 Agent 岗位中没有有效公共参考答案的题目，部署完成后通过真实应用接口执行：
+
+```bash
+uv run python backend/scripts/generate_agent_reference_answers.py \
+  --base-url http://127.0.0.1:8000
+```
+
+脚本只从本地数据库筛选 active Agent 题目，随后通过管理员登录和
+`POST /api/master-bank/batch-generate-answers` 调用真实答案生成链路；已有有效答案、非 Agent 题目和已删除题目不会被覆盖或提交。
+
 ## 失败与回滚
 
-- migration 106 在一个事务中执行；执行异常时事务自动回滚，`schema_version` 不会记录 106。
-- 若迁移已经提交但业务验证不通过，应停止应用写入，保留现场日志，并使用对应的 `pre_migration_v106_*.db` 快照恢复。恢复不是 Codex 自动执行的操作，需要数据库管理员确认目标文件和停机窗口。
+- migration 106、107 分别在独立事务中执行；执行异常时对应事务自动回滚，`schema_version` 不会记录失败的版本。
+- 若迁移已经提交但业务验证不通过，应停止应用写入，保留现场日志，并使用对应的 `pre_migration_v106_*.db` 或 `pre_migration_v107_*.db` 快照恢复。恢复不是 Codex 自动执行的操作，需要数据库管理员确认目标文件和停机窗口。
 - 答案刷新失败不会覆盖已有有效答案；失败题目保留旧答案并继续显示 `answer_needs_refresh=true`。

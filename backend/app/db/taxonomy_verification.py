@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
+from app.core.interview_distribution_config import derive_job_family
 from app.core.taxonomy import DEFAULT_TAXONOMY, TAXONOMY_VERSION, taxonomy_for_position
 
 
 def _scalar(conn, query: str, params: tuple = (), default=0):
     row = conn.execute(query, params).fetchone()
     return row[0] if row and row[0] is not None else default
+
+
+def select_agent_question_ids_without_answers(conn) -> list[int]:
+    """Return active Agent questions that need a real reference answer."""
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
+    }
+    deleted_column = ", deleted_at" if "deleted_at" in columns else ""
+    rows = conn.execute(
+        "SELECT id, job_position, ai_answer" + deleted_column + " FROM question_bank"
+    ).fetchall()
+    result = []
+    for row in rows:
+        if derive_job_family(row["job_position"]) != "agent_llm":
+            continue
+        if deleted_column and row["deleted_at"] is not None:
+            continue
+        answer = str(row["ai_answer"] or "").strip()
+        if not answer or "生成失败" in answer:
+            result.append(int(row["id"]))
+    return sorted(result)
 
 
 def inspect_taxonomy_v11(conn) -> dict[str, int | str]:
@@ -38,8 +61,16 @@ def inspect_taxonomy_v11(conn) -> dict[str, int | str]:
     audit_count = int(
         _scalar(
             conn,
-            "SELECT COUNT(*) FROM taxonomy_migration_audit WHERE migration_version = ?",
+            "SELECT COUNT(*) FROM taxonomy_migration_audit "
+            "WHERE migration_version IN (?, '1.1-agent-manual')",
             (TAXONOMY_VERSION,),
+        )
+    )
+    manual_agent_correction_count = int(
+        _scalar(
+            conn,
+            "SELECT COUNT(*) FROM taxonomy_migration_audit "
+            "WHERE migration_version = '1.1-agent-manual'",
         )
     )
 
@@ -65,4 +96,5 @@ def inspect_taxonomy_v11(conn) -> dict[str, int | str]:
         "answer_refresh_required": answer_refresh_required,
         "invalid_category_count": invalid_category_count,
         "migration_audit_count": audit_count,
+        "manual_agent_correction_count": manual_agent_correction_count,
     }
