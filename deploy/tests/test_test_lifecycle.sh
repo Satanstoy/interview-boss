@@ -24,7 +24,10 @@ case "$*" in
   *"buildx create"*) exit 0 ;;
   *" build "*) exit 0 ;;
   *" run "*) exit 23 ;;
-  *" down --volumes --remove-orphans"*) exit 0 ;;
+  *" down --volumes --remove-orphans"*)
+    if [[ "${FAKE_DOWN_FAIL:-0}" == "1" ]]; then exit 19; fi
+    exit 0
+    ;;
   *) exit 0 ;;
 esac
 EOF
@@ -46,5 +49,21 @@ grep -Eq 'compose --project-name interview-boss-test-[0-9]+-[0-9]+ .* down --vol
 if grep -Eq 'interview-boss-test-.* --rmi|docker image rm interview-boss-test' "$calls"; then
   fail "test cleanup attempted to delete the reusable test image"
 fi
+
+: > "$calls"
+set +e
+PATH="$fake_bin:$PATH" \
+  FAKE_DOCKER_CALLS="$calls" \
+  FAKE_DOWN_FAIL=1 \
+  DEPLOY_TARGET_FREE_MB=1 \
+  DEPLOY_HARD_MIN_FREE_MB=1 \
+  DEPLOY_MIRROR_HEALTHCHECK_ON_BUILD=0 \
+  "$DEPLOY_SCRIPT" test --collect-only >/dev/null 2>&1
+cleanup_rc=$?
+set -e
+
+[[ "$cleanup_rc" -ne 0 ]] || fail "test command reported success after scoped Compose cleanup failed"
+grep -Eq 'compose --project-name interview-boss-test-[0-9]+-[0-9]+ .* down --volumes --remove-orphans$' "$calls" \
+  || fail "cleanup failure scenario did not attempt scoped Compose cleanup"
 
 echo "PASS: failed test preserves failure status and cleans only its temporary Compose project"

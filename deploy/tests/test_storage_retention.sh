@@ -27,7 +27,7 @@ source "$STORAGE_LIB"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-mkdir -p "$tmp_dir/backups" "$tmp_dir/backend/data/backups" "$tmp_dir/backend/data" "$tmp_dir/archive"
+mkdir -p "$tmp_dir/backups" "$tmp_dir/backend/data/backups" "$tmp_dir/backend/data/evaluations" "$tmp_dir/backend/data" "$tmp_dir/archive"
 
 for index in 1 2 3 4 5; do
   touch -d "10 days ago" "$tmp_dir/backups/interview-boss_2026081${index}_000000.db"
@@ -46,6 +46,11 @@ done
 for index in 1 2 3 4; do
   touch -d "10 days ago" "$tmp_dir/backend/data/interview-boss.db.bak.2026081${index}"
 done
+
+for index in 1 2 3 4 5; do
+  touch -d "10 days ago" "$tmp_dir/backend/data/evaluations/eval_history_2026081${index}.json"
+done
+touch -d "1 day ago" "$tmp_dir/backend/data/evaluations/eval_history_20260824.json"
 
 for index in 1 2 3 4 5; do
   mkdir -p "$tmp_dir/archive/interview-boss-backup-2026081${index}"
@@ -72,6 +77,11 @@ migration_count="$(find "$tmp_dir/backend/data/backups" -maxdepth 1 -type f -nam
 
 bak_count="$(find "$tmp_dir/backend/data" -maxdepth 1 -type f -name 'interview-boss.db.bak.*' | wc -l)"
 [[ "$bak_count" -eq 3 ]] || fail "expected 3 database side backups, got $bak_count"
+
+storage_cleanup_evaluations "$tmp_dir/backend/data/evaluations"
+evaluation_count="$(find "$tmp_dir/backend/data/evaluations" -maxdepth 1 -type f -name 'eval_*' | wc -l)"
+[[ "$evaluation_count" -eq 3 ]] || fail "expected 3 evaluation artifacts (minimum retention including the recent artifact), got $evaluation_count"
+assert_file "$tmp_dir/backend/data/evaluations/eval_history_20260824.json"
 
 archive_count="$(find "$tmp_dir/archive" -mindepth 1 -maxdepth 1 -type d -name 'interview-boss-backup-*' | wc -l)"
 [[ "$archive_count" -eq 1 ]] || fail "expected 1 recent full project archive, got $archive_count"

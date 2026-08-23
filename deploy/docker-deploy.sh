@@ -253,7 +253,7 @@ prune_build_cache() {
 
 # 清理测试专用镜像和卷。测试服务使用显式命名，生产服务不依赖它们。
 prune_test_resources() {
-  local volume project volume_kind links image image_id current_image linked_containers
+  local volume project volume_kind links image image_id current_image linked_containers compose_service
   current_image="interview-boss-test:$(current_test_tag)"
 
   for volume in $(docker volume ls -q 2>/dev/null); do
@@ -295,6 +295,32 @@ prune_test_resources() {
       fi
     fi
   done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' 'interview-boss-test:*' 2>/dev/null)
+
+  # 同一测试 tag 被重复构建时，旧 image 可能变成 <none>:<none>。
+  # 无标签镜像没有名称可匹配，只有同时具备 Compose project/service 标签时才处理，
+  # 并且仍跳过有容器引用的 image，避免触碰其他 Docker project。
+  while IFS= read -r image_id; do
+    [ -n "$image_id" ] || continue
+    project=$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$image_id" 2>/dev/null || true)
+    compose_service=$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$image_id" 2>/dev/null || true)
+    case "$project:$compose_service" in
+      interview-boss:test|interview-boss:backend|interview-boss:nginx|interview-boss:oauth-gateway|\
+      interview-boss-test-*:test|interview-boss-check-*:test)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    linked_containers=$(docker ps -a --filter "ancestor=$image_id" -q 2>/dev/null || true)
+    [ -z "$linked_containers" ] || continue
+    if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
+      log "would remove unused scoped dangling image: $image_id ($project/$compose_service)"
+    elif docker image rm "$image_id" >/dev/null 2>&1; then
+      log "已清理未使用的本项目悬空镜像: $image_id ($project/$compose_service)"
+    else
+      warn "本项目悬空镜像清理失败（保留）: $image_id"
+    fi
+  done < <(docker image ls --filter dangling=true --format '{{.ID}}' 2>/dev/null | sort -u)
 }
 
 # 清理 InterviewBoss 生产镜像的旧标签。当前和 previous 标签始终保留，
@@ -328,6 +354,7 @@ prune_production_images() {
       docker image ls --format '{{.Repository}}:{{.Tag}}' 'interview-boss-app:*' 2>/dev/null
       docker image ls --format '{{.Repository}}:{{.Tag}}' 'interview-boss-nginx:*' 2>/dev/null
       docker image ls --format '{{.Repository}}:{{.Tag}}' 'interview-boss-oauth-gateway:*' 2>/dev/null
+      docker image ls --format '{{.Repository}}:{{.Tag}}' 'interview-boss-taxonomy:*' 2>/dev/null
     } | sort -u
   )
 }

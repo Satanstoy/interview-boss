@@ -65,15 +65,26 @@ cleanup_test_project() {
   local project="$TEST_COMPOSE_PROJECT"
   [ -n "$project" ] || return 0
 
-  INTERVIEW_BOSS_TEST_TAG="$TEST_IMAGE_TAG" \
-    docker compose --project-name "$project" --profile test \
-    down --volumes --remove-orphans >/dev/null 2>&1 || \
+  if ! INTERVIEW_BOSS_TEST_TAG="$TEST_IMAGE_TAG" \
+      docker compose --project-name "$project" --profile test \
+      down --volumes --remove-orphans >/dev/null 2>&1; then
     printf 'WARNING: test Compose project cleanup failed: %s\n' "$project" >&2
+    blocking_failed=1
+  fi
   TEST_COMPOSE_PROJECT=""
 }
 
-trap cleanup_test_project EXIT
-trap 'cleanup_test_project; exit 130' INT TERM
+on_exit() {
+  local rc=$?
+  cleanup_test_project || true
+  if [ "$rc" -eq 0 ] && [ "$blocking_failed" -ne 0 ]; then
+    rc=1
+  fi
+  exit "$rc"
+}
+
+trap on_exit EXIT
+trap 'cleanup_test_project || true; exit 130' INT TERM
 
 record() {
   local status="$1"

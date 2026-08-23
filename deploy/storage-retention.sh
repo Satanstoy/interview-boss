@@ -28,6 +28,7 @@ storage_require_data_mount() {
 storage_prune_file_family() {
   local directory="$1"
   local pattern="$2"
+  local item_label="${3:-backup}"
   local retention_days="${BACKUP_RETENTION_DAYS:-7}"
   local min_keep="${BACKUP_MIN_KEEP_FILES:-3}"
   local cutoff_epoch
@@ -64,14 +65,19 @@ storage_prune_file_family() {
 
     if (( mtime_epoch < cutoff_epoch )); then
       if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
-        storage_retention_log "would remove expired backup: $path"
+        storage_retention_log "would remove expired $item_label: $path"
       else
         rm -f -- "$path"
-        storage_retention_log "removed expired backup: $path"
+        storage_retention_log "removed expired $item_label: $path"
       fi
     fi
     index=$((index + 1))
   done
+}
+
+storage_cleanup_evaluations() {
+  local directory="$1"
+  storage_prune_file_family "$directory" '*' "evaluation artifact"
 }
 
 storage_cleanup_project_archives() {
@@ -120,4 +126,5 @@ storage_cleanup_backups() {
   storage_cleanup_project_archives
   storage_prune_file_family "$project_dir/backend/data/backups" '*.db'
   storage_prune_file_family "$project_dir/backend/data" 'interview-boss.db.bak.*'
+  storage_cleanup_evaluations "$project_dir/backend/data/evaluations"
 }
