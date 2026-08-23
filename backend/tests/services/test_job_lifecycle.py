@@ -110,14 +110,39 @@ def test_answer_jobs_are_idempotent_per_import_question(test_db):
 
     assert second == first
     rows = test_db.execute(
-        "SELECT job_type, status, created_by FROM jobs "
+        "SELECT job_type, status, created_by, parent_job_id FROM jobs "
         "WHERE id IN (?, ?) ORDER BY id",
         first,
     ).fetchall()
     assert [dict(row) for row in rows] == [
-        {"job_type": "generate_answer", "status": "pending", "created_by": None},
-        {"job_type": "generate_answer", "status": "pending", "created_by": None},
+        {
+            "job_type": "generate_answer",
+            "status": "pending",
+            "created_by": None,
+            "parent_job_id": parent_id,
+        },
+        {
+            "job_type": "generate_answer",
+            "status": "pending",
+            "created_by": None,
+            "parent_job_id": parent_id,
+        },
     ]
+    test_db.execute(
+        "UPDATE jobs SET parent_job_id = NULL WHERE id IN (?, ?)", first
+    )
+    repaired = create_answer_generation_jobs(
+        test_db,
+        parent_id,
+        [(101, "什么是幂等性？"), (102, "解释事务隔离级别")],
+        user_id=None,
+    )
+    test_db.commit()
+    assert repaired == first
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM jobs WHERE id IN (?, ?) AND parent_job_id = ?",
+        (*first, parent_id),
+    ).fetchone()[0] == 2
     payload = test_db.execute(
         "SELECT payload FROM job_payloads WHERE job_id = ?", (first[0],)
     ).fetchone()[0]

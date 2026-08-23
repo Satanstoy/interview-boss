@@ -26,11 +26,11 @@ from app.core.config import DB_PATH
 from app.db.taxonomy_verification import select_agent_question_ids_without_answers
 
 
-def _load_ids(db_path: str) -> list[int]:
+def _load_ids(db_path: str, owner_id: int | None = None) -> list[int]:
     conn = sqlite3.connect(f"file:{Path(db_path)}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        return select_agent_question_ids_without_answers(conn)
+        return select_agent_question_ids_without_answers(conn, owner_id=owner_id)
     finally:
         conn.close()
 
@@ -42,7 +42,7 @@ def _stream_batch_generation(
     question_ids: list[int],
     allow_no_search: bool,
 ) -> int:
-    response = client.stream(
+    stream = client.stream(
         "POST",
         f"{base_url.rstrip('/')}/api/master-bank/batch-generate-answers",
         headers={"Authorization": f"Bearer {token}"},
@@ -53,7 +53,7 @@ def _stream_batch_generation(
             "allow_no_search": allow_no_search,
         },
     )
-    with response:
+    with stream as response:
         response.raise_for_status()
         final = None
         for line in response.iter_lines():
@@ -80,11 +80,6 @@ def main() -> int:
     if not args.username or not args.password:
         parser.error("请通过 --username/--password 或 ADMIN_USERNAME/ADMIN_PASSWORD 提供管理员凭据")
 
-    question_ids = _load_ids(args.db_path)
-    print(json.dumps({"agent_question_ids": question_ids, "total": len(question_ids)}, ensure_ascii=False))
-    if not question_ids:
-        return 0
-
     with httpx.Client(timeout=None, follow_redirects=False) as client:
         login = client.post(
             f"{args.base_url.rstrip('/')}/api/auth/login",
@@ -95,6 +90,26 @@ def main() -> int:
         token = login_payload.get("token")
         if not token:
             raise RuntimeError("管理员登录未返回 access token，可能需要先绑定邮箱")
+        user = login_payload.get("user") or {}
+        owner_id = user.get("id")
+        if owner_id is None:
+            raise RuntimeError("管理员登录未返回用户 ID，无法按权限筛选私有题")
+
+        all_question_ids = _load_ids(args.db_path)
+        question_ids = _load_ids(args.db_path, owner_id=int(owner_id))
+        skipped_ids = sorted(set(all_question_ids) - set(question_ids))
+        print(
+            json.dumps(
+                {
+                    "agent_question_ids": question_ids,
+                    "skipped_inaccessible_ids": skipped_ids,
+                    "total": len(question_ids),
+                },
+                ensure_ascii=False,
+            )
+        )
+        if not question_ids:
+            return 0
         failed = _stream_batch_generation(
             client,
             args.base_url,

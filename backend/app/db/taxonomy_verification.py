@@ -11,19 +11,29 @@ def _scalar(conn, query: str, params: tuple = (), default=0):
     return row[0] if row and row[0] is not None else default
 
 
-def select_agent_question_ids_without_answers(conn) -> list[int]:
-    """Return active Agent questions that need a real reference answer."""
+def select_agent_question_ids_without_answers(
+    conn, owner_id: int | None = None
+) -> list[int]:
+    """Return active Agent questions that need a real reference answer.
+
+    When ``owner_id`` is provided, return only public questions and that
+    owner's private questions, matching the API visibility contract.
+    """
 
     columns = {
         row[1] for row in conn.execute("PRAGMA table_info('question_bank')").fetchall()
     }
     deleted_column = ", deleted_at" if "deleted_at" in columns else ""
     rows = conn.execute(
-        "SELECT id, job_position, ai_answer" + deleted_column + " FROM question_bank"
+        "SELECT id, owner_id, job_position, ai_answer"
+        + deleted_column
+        + " FROM question_bank"
     ).fetchall()
     result = []
     for row in rows:
         if derive_job_family(row["job_position"]) != "agent_llm":
+            continue
+        if owner_id is not None and row["owner_id"] not in (None, owner_id):
             continue
         if deleted_column and row["deleted_at"] is not None:
             continue

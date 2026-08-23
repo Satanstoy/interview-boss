@@ -98,3 +98,28 @@ def test_missing_answer_selector_is_agent_only_and_excludes_deleted_rows(test_db
     test_db.commit()
 
     assert selector(test_db) == [7001, 7003]
+
+
+def test_missing_answer_selector_can_match_api_visibility(test_db):
+    from app.db.taxonomy_verification import select_agent_question_ids_without_answers
+
+    test_db.executemany(
+        "INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)",
+        [(7007, "owner7007", "hash"), (7042, "owner7042", "hash")],
+    )
+    test_db.executemany(
+        "INSERT INTO question_bank "
+        "(id, question, ai_answer, status, owner_id, job_position, deleted_at) "
+        "VALUES (?, ?, NULL, 'approved', ?, ?, NULL)",
+        [
+            (7010, "公共 Agent 题", None, "agent开发/大模型应用开发/大模型开发"),
+            (7011, "我的 Agent 题", 7007, "agent开发/大模型应用开发/大模型开发"),
+            (7012, "别人的 Agent 题", 7042, "agent开发/大模型应用开发/大模型开发"),
+        ],
+    )
+    test_db.commit()
+
+    assert select_agent_question_ids_without_answers(test_db, owner_id=7007) == [
+        7010,
+        7011,
+    ]

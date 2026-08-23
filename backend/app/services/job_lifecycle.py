@@ -216,9 +216,9 @@ def create_answer_generation_jobs(
         idempotency_key = f"submit:{parent_job_id}:answer:{question_id}"
         conn.execute(
             "INSERT OR IGNORE INTO jobs "
-            "(job_type, status, progress_total, created_by, idempotency_key) "
-            "VALUES (?, 'pending', 1, ?, ?)",
-            (ANSWER_GENERATION_JOB_TYPE, user_id, idempotency_key),
+            "(job_type, status, progress_total, created_by, idempotency_key, parent_job_id) "
+            "VALUES (?, 'pending', 1, ?, ?, ?)",
+            (ANSWER_GENERATION_JOB_TYPE, user_id, idempotency_key, parent_job_id),
         )
         row = conn.execute(
             "SELECT id FROM jobs WHERE job_type = ? AND idempotency_key = ?",
@@ -230,6 +230,14 @@ def create_answer_generation_jobs(
                 f"question_id={question_id}"
             )
         answer_job_id = int(row["id"])
+        # 兼容迁移前已创建、但尚未写入 parent_job_id 的答案任务。
+        # 幂等键包含 parent_job_id，因此只回填同一批次的历史记录，不会
+        # 把任务重新归属到另一个批次。
+        conn.execute(
+            "UPDATE jobs SET parent_job_id = ? "
+            "WHERE id = ? AND parent_job_id IS NULL",
+            (parent_job_id, answer_job_id),
+        )
         conn.execute(
             "INSERT OR IGNORE INTO job_payloads (job_id, payload) VALUES (?, ?)",
             (
