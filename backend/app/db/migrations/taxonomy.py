@@ -44,8 +44,15 @@ def _map_row_category(
 
 def _position_names(conn) -> list[str]:
     names: set[str] = {DEFAULT_TAXONOMY["job_position"]}
+    position_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('job_positions')").fetchall()
+    }
+    active_position_filter = ""
+    if "is_deleted" in position_columns:
+        active_position_filter = " AND (is_deleted = 0 OR is_deleted IS NULL)"
     queries = (
-        "SELECT name FROM job_positions WHERE name IS NOT NULL AND TRIM(name) != ''",
+        "SELECT name FROM job_positions WHERE name IS NOT NULL AND TRIM(name) != ''"
+        + active_position_filter,
         "SELECT job_position FROM question_bank WHERE job_position IS NOT NULL AND TRIM(job_position) != ''",
         "SELECT job_position FROM questions_detail WHERE job_position IS NOT NULL AND TRIM(job_position) != ''",
         "SELECT value FROM user_profile WHERE key = 'current_job_position'",
@@ -143,12 +150,13 @@ def _migrate_question_table(conn, table: str, has_answer: bool) -> tuple[int, in
     return changed, stale_answers
 
 
-def _migration_102_taxonomy_v11(conn):
+def _migration_106_taxonomy_v11(conn):
     """Upgrade taxonomy labels to 1.1 without calling an external API.
 
     This function is registered in ``run_migrations``. Production deployment
     runs it transactionally during startup/deploy, after the automatic backup
-    for destructive version 102 has been created.
+    for destructive version 106 has been created. Version 106 is intentional:
+    production already uses migration versions 102-105 for other changes.
     """
     _add_column_if_missing(conn, "taxonomy", "version", f"TEXT NOT NULL DEFAULT '{TAXONOMY_VERSION}'")
     # Personal taxonomies are user-owned extensions, not the system taxonomy
@@ -184,7 +192,7 @@ def _migration_102_taxonomy_v11(conn):
     qb_changed, stale_answers = _migrate_question_table(conn, "question_bank", True)
     qd_changed, _ = _migrate_question_table(conn, "questions_detail", False)
     logger.info(
-        "migration_102: taxonomy %s 完成，system_taxonomies=%s, "
+        "migration_106: taxonomy %s 完成，system_taxonomies=%s, "
         "question_bank_changed=%s, questions_detail_changed=%s, stale_answers=%s",
         TAXONOMY_VERSION,
         seeded,

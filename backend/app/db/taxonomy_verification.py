@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.taxonomy import TAXONOMY_VERSION, taxonomy_for_position
+from app.core.taxonomy import DEFAULT_TAXONOMY, TAXONOMY_VERSION, taxonomy_for_position
 
 
 def _scalar(conn, query: str, params: tuple = (), default=0):
@@ -48,9 +48,10 @@ def inspect_taxonomy_v11(conn) -> dict[str, int | str]:
         "SELECT cat1, cat2, job_position FROM question_bank"
     ).fetchall()
     for row in rows:
+        position = row["job_position"] or DEFAULT_TAXONOMY["job_position"]
         known_pairs = {
             (category.get("cat1", ""), child)
-            for category in taxonomy_for_position(row["job_position"]).get("categories", [])
+            for category in taxonomy_for_position(position).get("categories", [])
             for child in category.get("children", [])
         }
         if (row["cat1"] or "", row["cat2"] or "") not in known_pairs:

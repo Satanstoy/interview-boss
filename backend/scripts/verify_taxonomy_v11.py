@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only production verification for database taxonomy migration 102.
+"""Read-only production verification for database taxonomy migration 106.
 
 Examples:
     uv run python backend/scripts/verify_taxonomy_v11.py
@@ -40,7 +40,7 @@ def main() -> int:
         for key, value in report.items():
             print(f"{key}: {value}")
 
-    return 0 if report["schema_version"] >= 102 else 1
+    return 0 if report["schema_version"] >= 106 else 1
 
 
 if __name__ == "__main__":

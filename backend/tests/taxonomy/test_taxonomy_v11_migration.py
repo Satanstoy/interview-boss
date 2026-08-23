@@ -64,8 +64,8 @@ def test_legacy_category_mapping_is_deterministic_by_role_and_question():
     )[:2] == ("Z.其他", "Z1.待复核")
 
 
-def test_migration_102_rewrites_rows_preserves_answers_and_seeds_all_positions(test_db):
-    from app.db.migrations import _migration_102_taxonomy_v11
+def test_migration_106_rewrites_rows_preserves_answers_and_seeds_all_positions(test_db):
+    from app.db.migrations import _migration_106_taxonomy_v11
     from app.core.taxonomy import TAXONOMY_VERSION
 
     test_db.execute(
@@ -100,7 +100,7 @@ def test_migration_102_rewrites_rows_preserves_answers_and_seeds_all_positions(t
     )
     test_db.commit()
 
-    _migration_102_taxonomy_v11(test_db)
+    _migration_106_taxonomy_v11(test_db)
     test_db.commit()
 
     qb = test_db.execute(
@@ -160,9 +160,33 @@ def test_question_tagging_eval_uses_taxonomy_v11_suite():
 def test_taxonomy_v11_verifier_reports_migration_and_refresh_counts(test_db):
     from app.db.taxonomy_verification import inspect_taxonomy_v11
 
+    test_db.execute(
+        "INSERT INTO question_bank "
+        "(id, question, cat1, cat2, ai_answer, status, owner_id, job_position) "
+        "VALUES (9901, ?, ?, ?, NULL, 'approved', NULL, '')",
+        (
+            "Skill 与 MCP 的区别是什么？",
+            "C.Agent编排与工具",
+            "C1.Agent架构与工作流",
+        ),
+    )
+    test_db.commit()
+
     report = inspect_taxonomy_v11(test_db)
 
     assert report["taxonomy_version"] == "1.1"
-    assert report["schema_version"] >= 102
+    assert report["schema_version"] >= 106
     assert report["system_taxonomy_count"] >= 1
     assert "answer_refresh_required" in report
+    assert report["invalid_category_count"] == 0
+
+
+def test_taxonomy_v11_uses_an_unclaimed_production_migration_version():
+    from app.db.migrations import _MIGRATIONS
+
+    assert (106, "taxonomy_v11") in {
+        (version, name) for version, name, _ in _MIGRATIONS
+    }
+    assert (102, "taxonomy_v11") not in {
+        (version, name) for version, name, _ in _MIGRATIONS
+    }
