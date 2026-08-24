@@ -257,7 +257,8 @@ run_static_backend() {
 
   ensure_test_image || return
 
-  run_nonblocking "backend ruff" \
+  # ruff(E4/E7/E9/F) 自 2026-08-24 起基线清零,升级为 blocking;新增违例即 FAIL。
+  run_blocking "backend ruff" \
     compose_test run --rm test uv run ruff check backend/app
 
   run_nonblocking "backend mypy" \

@@ -1,6 +1,5 @@
 """简历管理端点"""
 import asyncio
-import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File

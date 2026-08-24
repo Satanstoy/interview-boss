@@ -16,7 +16,6 @@ LLM 消耗端点原来没有 per-user 配额，单个用户可无限调用以放
 
 import os
 import logging
-from datetime import date
 
 from app.db.connection import get_db_connection, run_db
 

@@ -60,9 +60,8 @@ filterwarnings = [
 addopts = "-v --tb=short"
 
 [tool.ruff]
-# 阶段 A: 先立闸防膨胀。全仓当前仍有历史累积违例,ruff 以 audit WARN 接入,
-# 只报告不拦截(对齐 CLAUDE.md「audit 第一阶段只报告不拦截」)。
-# 后续随债务清偿逐步收紧为 blocking。
+# 2026-08-24: E4/E7/E9/F 基线清零,check.sh 已将 ruff 升级为 blocking;
+# mypy 仍以 audit WARN 接入,只采集不拦截(对齐 CLAUDE.md「audit 第一阶段只报告不拦截」)。
 target-version = "py312"
 line-length = 100
 src = ["backend/app", "backend/tests"]
