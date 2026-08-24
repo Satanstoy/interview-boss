@@ -923,6 +923,59 @@ do_restore() {
   do_status
 }
 
+# 恢复演练（不触碰生产库）：把备份恢复到临时副本并做完整性/一致性校验。
+# audit 2026-08-24 P3：备份此前从未被验证可恢复。全量切换仍走 do_restore。
+do_restore_verify() {
+  local backup_path="${1:-}"
+  local backup_dir="$PROJECT_DIR/backups"
+  if [ -z "$backup_path" ]; then
+    backup_path="$(find_latest_backup)"
+    if [ -z "$backup_path" ]; then
+      err "未找到可用备份（$backup_dir/interview-boss_*.db），请先运行 backup 命令"
+      exit 1
+    fi
+    log "使用最新备份: $backup_path"
+  fi
+  [ -f "$backup_path" ] || { err "备份文件不存在: $backup_path"; exit 1; }
+
+  local tmp="/tmp/interview-boss-restore-drill-$(date +%Y%m%d_%H%M%S).db"
+  cp "$backup_path" "$tmp"
+
+  command -v python3 >/dev/null 2>&1 || { err "宿主机缺少 python3/sqlite3，无法演练"; rm -f "$tmp"; exit 1; }
+  log "[1/3] integrity_check ..."
+  local out
+  out=$(python3 - "$tmp" <<'PY'
+import sqlite3, sys
+conn = sqlite3.connect(sys.argv[1])
+integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+if integrity != "ok":
+    print(f"INTEGRITY_FAIL:{integrity}")
+    sys.exit(0)
+fk = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+counts = {
+    "users": conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+    "question_bank": conn.execute("SELECT COUNT(*) FROM question_bank WHERE deleted_at IS NULL").fetchone()[0],
+    "interview": conn.execute("SELECT COUNT(*) FROM interview WHERE deleted_at IS NULL").fetchone()[0],
+}
+print(f"OK fk_violations={fk} users={counts['users']} question_bank_active={counts['question_bank']} interview_active={counts['interview']}")
+PY
+)
+  echo "  $out"
+  case "$out" in
+    OK*)
+      local fk=$(echo "$out" | sed -E 's/.*fk_violations=([0-9]+).*/\1/')
+      [ "$fk" -ne 0 ] && warn "发现 $fk 行 FK 违规（不阻断演练，但应排查）"
+      local users=$(echo "$out" | sed -E 's/.*users=([0-9]+).*/\1/')
+      [ "$users" -eq 0 ] && { err "users 表为空，备份疑似损坏"; rm -f "$tmp"; exit 1; }
+      ;;
+    *)
+      err "integrity_check 失败: $out"; rm -f "$tmp"; exit 1 ;;
+  esac
+
+  rm -f "$tmp"
+  log "恢复演练 PASS：$(basename "$backup_path") 可正常恢复（临时副本已清理）"
+}
+
 # ── 运行测试 ──
 do_test() {
   EPHEMERAL_TEST_PROJECT="interview-boss-test-${BASHPID}-$(date +%s)"
@@ -1116,7 +1169,13 @@ case "$MODE" in
   test)            check_docker; do_test "${@:2}" ;;
   check)           check_docker; do_check "${@:2}" ;;
   backup)          check_docker; do_backup ;;
-  restore)         check_docker; do_restore "${2:-}" ;;
+  restore)
+    if [ "${2:-}" = "--verify" ]; then
+      do_restore_verify "${3:-}"
+    else
+      check_docker; do_restore "${2:-}"
+    fi ;;
+
   cleanup)         check_docker; do_cleanup "${@:2}" ;;
   maintenance)     check_docker; do_maintenance ;;
   storage-check)   do_storage_check ;;
@@ -1153,6 +1212,7 @@ case "$MODE" in
     echo "  check [backend|frontend|audit]  运行日常质量门禁（audit 只报告不拦截）"
     echo "  backup          备份数据库和 Redis 数据"
     echo "  restore [备份路径]  从备份恢复数据库（缺省用最新备份；恢复前自动再备份当前库）"
+  echo "  restore --verify [备份路径]  恢复演练：临时副本校验，不触碰生产库"
     echo "  cleanup [--dry-run] [--aggressive]  清理本项目资源（不影响其他项目）"
     echo "  storage-check   只检查根盘空间和 /data 是否真实挂载"
     echo "  storage-maintenance  执行定时清理：备份、测试资源和 BuildKit 缓存"
