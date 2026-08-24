@@ -19,6 +19,8 @@ async def persist_public_node(state: SubmitState) -> dict:
         saved_url = state.get("saved_url", "")
         season = state.get("season", "")
         is_admin = state.get("is_admin", False)
+        if not is_admin:
+            raise PermissionError("普通用户的公共化必须先创建审核申请")
         record_owner_id = None
         record_status = "approved" if is_admin else "pending"
 

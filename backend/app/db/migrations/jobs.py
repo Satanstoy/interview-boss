@@ -23,8 +23,7 @@ def _migration_009_analysis_queue(conn):
     """)
     # 迁移：为旧表添加 question_detail_id 列（必须在创建索引之前）
     aq_col_set = {
-        row[1]
-        for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()
+        row[1] for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()
     }
     if "question_detail_id" not in aq_col_set:
         conn.execute("ALTER TABLE analysis_queue ADD COLUMN question_detail_id INTEGER")
@@ -35,9 +34,7 @@ def _migration_009_analysis_queue(conn):
     if "idx_aq_interview" not in aq_indexes:
         conn.execute("CREATE INDEX idx_aq_interview ON analysis_queue(interview_id)")
     if "idx_aq_question_detail" not in aq_indexes:
-        conn.execute(
-            "CREATE INDEX idx_aq_question_detail ON analysis_queue(question_detail_id)"
-        )
+        conn.execute("CREATE INDEX idx_aq_question_detail ON analysis_queue(question_detail_id)")
 
 
 def _migration_022_jobs_table(conn):
@@ -86,15 +83,25 @@ def _migration_049_analysis_queue_owner(conn):
     owner_id = user_id → personal queue (cluster_batch matches only within
     that user's existing clusters, never mixing with public or other users).
     """
-    aq_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
-    }
+    aq_cols = {row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()}
     if "owner_id" not in aq_cols:
-        conn.execute(
-            "ALTER TABLE analysis_queue ADD COLUMN owner_id INTEGER DEFAULT NULL"
-        )
+        conn.execute("ALTER TABLE analysis_queue ADD COLUMN owner_id INTEGER DEFAULT NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_aq_owner ON analysis_queue(owner_id)")
     logger.info("migration_049: analysis_queue.owner_id 列已就绪")
+
+
+def _migration_100_analysis_queue_scope_idempotency(conn):
+    """Make one question occurrence enqueue idempotent within one scope.
+
+    ``owner_id`` is nullable for the public scope, so the expression index
+    normalizes NULL to a sentinel value before enforcing uniqueness.
+    """
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_analysis_queue_detail_scope "
+        "ON analysis_queue(interview_id, question_detail_id, COALESCE(owner_id, -1)) "
+        "WHERE question_detail_id IS NOT NULL"
+    )
+    logger.info("migration_100: analysis_queue scoped idempotency is ready")
 
 
 def _migration_074_durable_job_lifecycle(conn):
@@ -104,9 +111,7 @@ def _migration_074_durable_job_lifecycle(conn):
     jobs retain their current status and gain safe defaults so this migration
     does not replay or rewrite historical results.
     """
-    columns = {
-        row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()
-    }
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()}
     additions = {
         "attempts": "INTEGER NOT NULL DEFAULT 0",
         # SQLite does not allow a non-constant default in ALTER TABLE ADD COLUMN.
@@ -146,15 +151,23 @@ def _migration_075_job_retry_lineage(conn):
     lineage lets contextual UIs show only the latest attempt while operators
     retain the full audit trail.
     """
-    columns = {
-        row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()
-    }
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()}
     if "parent_job_id" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN parent_job_id INTEGER")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id, created_at)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id, created_at)")
     logger.info("migration_075: jobs retry lineage is ready")
+
+
+def _migration_099_job_progress_phase(conn):
+    """Add progress_phase column to jobs for granular stage tracking.
+
+    Stores the current processing phase name (extract/fill/tag/match/save/cluster)
+    so the frontend can display a stage-aware progress indicator.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('jobs')").fetchall()}
+    if "progress_phase" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN progress_phase TEXT DEFAULT ''")
+    logger.info("migration_099: jobs.progress_phase column is ready")
 
 
 def _migration_050_pipeline_metrics(conn):
@@ -180,7 +193,5 @@ def _migration_050_pipeline_metrics(conn):
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pm_op ON pipeline_metrics(operation)")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_pm_created ON pipeline_metrics(created_at)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pm_created ON pipeline_metrics(created_at)")
     logger.info("migration_050: pipeline_metrics 表已就绪")

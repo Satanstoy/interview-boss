@@ -170,28 +170,37 @@ def _record_pipeline_metric(
 
 
 async def cluster_batch(
-    batch: List[Dict], user_id: int = None, skip_clean: bool = False
-) -> int:
+    batch: List[Dict], user_id: int = None, skip_clean: bool = False,
+    return_new_ids: bool = False,
+) -> int | Dict:
     """对一批问题做增量聚类:匹配已有聚类 → 内部聚类剩余 → 原子写入 question_bank
 
     batch: dequeue_batch() 返回的问题列表（同一 owner_id）
     skip_clean: 是否跳过 URL 清理(全量重建时跳过)
-    返回:新创建的 question_bank 记录数
+    返回:新创建的 question_bank 记录数；return_new_ids=True 时返回
+    {count, ids}，供答案任务按最终题库归属创建 durable job。
     """
     import time as _time
 
     if not batch:
-        return 0
+        return {"count": 0, "ids": []} if return_new_ids else 0
 
     batch, filtered = sanitize_batch(batch)
     if filtered:
         mark_batch_done([item["queue_id"] for item in filtered])
         logger.info(f"清洗拦截 {len(filtered)} 条脏数据")
     if not batch:
-        return 0
+        return {"count": 0, "ids": []} if return_new_ids else 0
 
     job_position = batch[0].get("job_position", "") or ""
     owner_id = batch[0].get("owner_id")
+    batch_interview_ids = sorted(
+        {
+            int(item["interview_id"])
+            for item in batch
+            if item.get("interview_id") is not None
+        }
+    )
     batch_urls = list({item["url"] for item in batch if item.get("url")})
     t0 = _time.time()
 
@@ -202,8 +211,9 @@ async def cluster_batch(
         rows = conn.execute(
             "SELECT question, original_questions, ai_answer, answer_sources "
             "FROM question_bank "
-            "WHERE sources LIKE ? AND ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
-            (f"%{url}%", job_position),
+            "WHERE sources LIKE ? AND ai_answer IS NOT NULL AND ai_answer != '' "
+            "AND job_position = ? AND owner_id IS ?",
+            (f"%{url}%", job_position, owner_id),
         ).fetchall()
         for r in rows:
             saved = {"answer": r["ai_answer"], "sources": r["answer_sources"]}
@@ -222,10 +232,23 @@ async def cluster_batch(
             c = get_db_connection()
             c.execute("BEGIN")
             try:
-                for url in batch_urls:
-                    from app.db.operations import _cleanup_old_sources_txn_v2
+                from app.db.operations import (
+                    _cleanup_old_sources_txn_v2,
+                    cleanup_interview_question_bank_sources,
+                )
 
-                    _cleanup_old_sources_txn_v2(c.cursor(), url, job_position)
+                if batch_interview_ids:
+                    for interview_id in batch_interview_ids:
+                        cleanup_interview_question_bank_sources(
+                            c.cursor(), interview_id, job_position=job_position
+                        )
+                else:
+                    # Compatibility for legacy callers that construct queue
+                    # items without interview_id; keep the owner boundary.
+                    for url in batch_urls:
+                        _cleanup_old_sources_txn_v2(
+                            c.cursor(), url, job_position, owner_id=owner_id
+                        )
                 c.execute("COMMIT")
             except Exception:
                 c.execute("ROLLBACK")
@@ -256,8 +279,12 @@ async def cluster_batch(
         for item in batch
     ]
 
+    # The queue owner is the data/model scope.  A public batch may still carry
+    # the original submitter as ``user_id`` for audit/metrics, but that user
+    # must never select a personal LLM configuration for public clustering.
+    llm_user_id = owner_id
     result = await process_incremental_batch(
-        new_rows, existing_by_cat2, user_id=user_id
+        new_rows, existing_by_cat2, user_id=llm_user_id
     )
     del new_rows
 
@@ -277,7 +304,7 @@ async def cluster_batch(
         try:
             apply_matched(conn, matched_rows, job_position, answer_cache)
             new_qb_ids = insert_new_clusters(
-                conn, new_cluster_rows, job_position, answer_cache
+                conn, new_cluster_rows, job_position, answer_cache, owner_id=owner_id
             )
             conn.execute("COMMIT")
         except Exception:
@@ -325,6 +352,8 @@ async def cluster_batch(
     )
 
     del matched, new_clusters, saved_answers, existing_by_cat2
+    if return_new_ids:
+        return {"count": len(qb_ids), "ids": list(qb_ids)}
     return len(qb_ids)
 
 

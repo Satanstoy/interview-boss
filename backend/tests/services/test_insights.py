@@ -1,11 +1,29 @@
 """洞察工作台的聚合口径与用户隔离测试。"""
 
 
-def _insert_user(conn, user_id, position="测试岗位"):
+def _ensure_position(conn, position):
     conn.execute(
-        "INSERT INTO users (id, username, password_hash, personal_position) "
-        "VALUES (?, ?, ?, ?)",
-        (user_id, f"insights-user-{user_id}", "TEST_PASSWORD_PLACEHOLDER", position),
+        "INSERT OR IGNORE INTO job_positions (name) VALUES (?)",
+        (position,),
+    )
+    return conn.execute(
+        "SELECT id FROM job_positions WHERE name = ?",
+        (position,),
+    ).fetchone()[0]
+
+
+def _insert_user(conn, user_id, position="测试岗位"):
+    position_id = _ensure_position(conn, position)
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash, personal_position, current_position_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            user_id,
+            f"insights-user-{user_id}",
+            "TEST_PASSWORD_PLACEHOLDER",
+            position,
+            position_id,
+        ),
     )
 
 
@@ -64,6 +82,11 @@ def _insert_question(conn, question_id, topic, position="测试岗位", frequenc
             sources,
         ),
     )
+    position_id = _ensure_position(conn, position)
+    conn.execute(
+        "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
+        (question_id, position_id),
+    )
 
 
 def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
@@ -85,7 +108,7 @@ def test_insights_aggregates_current_position_and_calculates_statuses(test_db):
 
     snapshot = build_insights_snapshot({"id": 101})
 
-    assert snapshot["target_position"] == {"name": "测试岗位", "source": "user_position"}
+    assert snapshot["target_position"] == {"name": "测试岗位", "source": "position_id"}
     assert snapshot["summary"] == {
         "question_count": 2,
         "jd_count": 0,
@@ -452,15 +475,16 @@ def _insert_questions_detail(conn, detail_id, cat2, position="测试岗位", own
     interview 父行（owner_id + status='approved'）才能进入聚合。
     """
     url = f"https://insights.example/detail-{detail_id}"
-    conn.execute(
+    interview_cursor = conn.execute(
         "INSERT INTO interview (url, company, round, questions_list, owner_id, "
         "status, job_position) VALUES (?, ?, '一面', '[]', ?, 'approved', ?)",
         (url, f"{cat2}公司", owner_id, position),
     )
+    interview_id = interview_cursor.lastrowid
     conn.execute(
-        "INSERT INTO questions_detail (id, url, question, cat2, job_position, deleted_at) "
-        "VALUES (?, ?, ?, ?, ?, NULL)",
-        (detail_id, url, f"{cat2}面经题", cat2, position),
+        "INSERT INTO questions_detail (id, interview_id, url, question, cat2, job_position, deleted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        (detail_id, interview_id, url, f"{cat2}面经题", cat2, position),
     )
 
 

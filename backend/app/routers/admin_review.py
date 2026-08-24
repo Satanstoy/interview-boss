@@ -22,12 +22,12 @@ async def analysis_status(user: dict = Depends(get_admin_user)):
             # 已分析：有 detail 记录的面经
             analyzed = conn.execute(
                 "SELECT i.id, i.company, i.round FROM interview i "
-                "WHERE i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.url = i.url)"
+                "WHERE i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
             ).fetchall()
             # 未分析：没有 detail 记录的面经
             unanalyzed = conn.execute(
                 "SELECT i.id, i.company, i.round, LENGTH(i.questions_list) as ql_len FROM interview i "
-                "WHERE i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.url = i.url)"
+                "WHERE i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
             ).fetchall()
             return {
                 "analyzed_count": len(analyzed),

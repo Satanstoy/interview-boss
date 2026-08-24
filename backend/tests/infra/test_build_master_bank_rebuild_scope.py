@@ -55,8 +55,16 @@ def _seed_rebuild_data(test_db):
 
 
 @pytest.mark.asyncio
-async def test_build_master_bank_rebuild_only_enqueues_public_approved(_seed_rebuild_data):
+async def test_build_master_bank_rebuild_only_enqueues_public_approved(
+    _seed_rebuild_data, monkeypatch
+):
     """私有（pending/approved）面经题目不得进入重建聚类队列与公共题库。"""
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    from app.core import outbound_url
+
+    monkeypatch.setattr(
+        outbound_url, "assert_safe_outbound_url_sync", lambda _url, **_kwargs: None
+    )
     import app.worker as worker_mod
     import app.services.pipeline.queue as queue_mod
     import app.services.pipeline.batch as batch_mod

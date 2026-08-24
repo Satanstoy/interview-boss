@@ -4,6 +4,7 @@ ARQ Worker 配置
 独立于 FastAPI 进程运行，处理异步聚类任务。
 2c4g 资源优化：单并发、10 分钟超时、最多重试 3 次。
 """
+
 import os
 import time
 import json
@@ -23,6 +24,20 @@ REDIS_URL = build_redis_url(
     os.environ.get("REDIS_QUEUE_URL") or os.environ.get("REDIS_URL"),
     f"redis://{os.environ.get('REDIS_HOST', 'localhost')}:6379/0",
 )
+
+
+def _load_public_rebuild_answer_cache(conn, job_position: str) -> dict:
+    """Load only answers that are safe to restore into the public bank."""
+    rows = conn.execute(
+        "SELECT question, ai_answer, answer_sources FROM question_bank "
+        "WHERE ai_answer IS NOT NULL AND ai_answer != '' "
+        "AND job_position = ? AND owner_id IS NULL AND status = 'approved'",
+        (job_position,),
+    ).fetchall()
+    return {
+        row["question"]: {"answer": row["ai_answer"], "sources": row["answer_sources"]}
+        for row in rows
+    }
 
 
 def _ensure_observability_tables(conn):
@@ -143,9 +158,7 @@ def record_cron_execution(
     """Persist the latest scheduled-task result, including failures."""
     with _connection_context(conn) as connection:
         _ensure_observability_tables(connection)
-        result_json = json.dumps(
-            result or {}, ensure_ascii=False, sort_keys=True, default=str
-        )
+        result_json = json.dumps(result or {}, ensure_ascii=False, sort_keys=True, default=str)
         is_running = status == "running"
         connection.execute(
             """
@@ -286,6 +299,7 @@ from app.worker_enqueue import (
     enqueue_cluster_review_task,
 )
 
+
 async def recompute_embedding_task(ctx, job_id: int):
     """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
     from app.services.embedding_recompute import run_recompute
@@ -417,6 +431,7 @@ async def startup(ctx):
     from app.db.connection import init_db
     from app.core.config import _reload_from_db
     from app.services.embedding_service import reload_embedding_config
+
     init_db()
     await record_worker_heartbeat_async(
         "arq-worker",
@@ -452,6 +467,67 @@ async def shutdown(ctx):
 
     await close_cache_client()
     logger.info("ARQ Worker 已关闭")
+
+
+async def _schedule_cluster_answer_jobs(
+    parent_job_id: int,
+    question_bank_ids: list[int],
+    *,
+    owner_id: int | None,
+    actor_id: int | None,
+) -> list[int]:
+    """Create durable answer jobs with the final question-bank scope.
+
+    The clustering worker may be invoked by an admin on behalf of a user.
+    ``owner_id`` is therefore the only source of truth for model/search scope:
+    public rows use the global/public configuration, personal rows use the
+    owning user's configuration.
+    """
+    ids = sorted({int(item) for item in (question_bank_ids or [])})
+    if not ids:
+        return []
+
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import create_answer_generation_jobs
+
+    llm_scope = "global" if owner_id is None else "user"
+    search_scope = "public" if owner_id is None else "user"
+    answer_user_id = owner_id if owner_id is not None else actor_id
+
+    def _create():
+        placeholders = ",".join("?" * len(ids))
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, question FROM question_bank "
+                f"WHERE id IN ({placeholders}) AND deleted_at IS NULL "
+                "AND question IS NOT NULL AND question != '' "
+                "AND owner_id IS ? AND (ai_answer IS NULL OR ai_answer = '')",
+                [*ids, owner_id],
+            ).fetchall()
+            tasks = [(int(row["id"]), row["question"]) for row in rows]
+            job_ids = create_answer_generation_jobs(
+                conn,
+                parent_job_id,
+                tasks,
+                answer_user_id,
+                llm_scope=llm_scope,
+                search_scope=search_scope,
+            )
+            conn.commit()
+            return job_ids
+
+    try:
+        return await asyncio.to_thread(_create)
+    except Exception:
+        # Answer enrichment is secondary to the durable clustering result.
+        # The answer job dispatcher can be retried independently; never roll
+        # back a successfully written public/personal cluster here.
+        logger.exception(
+            "聚类完成但答案任务创建失败: parent_job_id=%s, owner_id=%s",
+            parent_job_id,
+            owner_id,
+        )
+        return []
 
 
 async def cluster_batch_task(ctx, job_id: int):
@@ -515,15 +591,35 @@ async def cluster_batch_task(ctx, job_id: int):
             _complete(result)
             return {"job_id": job_id, **result}
 
-        new_count = await cluster_batch(batch, user_id=payload.get("user_id"))
+        cluster_result = await cluster_batch(
+            batch, user_id=payload.get("user_id"), return_new_ids=True
+        )
+        if isinstance(cluster_result, dict):
+            new_count = int(cluster_result.get("count", 0))
+            new_qb_ids = cluster_result.get("ids", [])
+        else:  # compatibility with lightweight test/legacy implementations
+            new_count = int(cluster_result or 0)
+            new_qb_ids = []
         queue_ids = [item["queue_id"] for item in batch]
         mark_batch_done(queue_ids)
+        from app.services.public_contributions import mark_public_contribution_queue_done
+
+        mark_public_contribution_queue_done(get_db_connection(), queue_ids)
+        await _schedule_cluster_answer_jobs(
+            job_id,
+            new_qb_ids,
+            owner_id=batch[0].get("owner_id"),
+            actor_id=payload.get("user_id"),
+        )
         result = {"status": "done", "new_count": new_count, "processed": len(batch)}
         _complete(result)
         return {"job_id": job_id, **result}
     except Exception as exc:
         queue_ids = [item["queue_id"] for item in batch]
         mark_batch_failed(queue_ids)
+        from app.services.public_contributions import mark_public_contribution_queue_failed
+
+        mark_public_contribution_queue_failed(get_db_connection(), queue_ids, str(exc))
         outcome = _fail(str(exc)[:500])
         logger.exception("聚类攒批任务失败: job_id=%s", job_id)
         return {"status": outcome["status"], "job_id": job_id}
@@ -608,7 +704,7 @@ async def cluster_rebuild_task(ctx, job_id: int):
 
     try:
         while True:
-            batch = dequeue_batch(BATCH_SIZE)
+            batch = dequeue_batch(BATCH_SIZE, owner_id=None)
             if not batch:
                 result = {
                     "status": "done",
@@ -620,13 +716,29 @@ async def cluster_rebuild_task(ctx, job_id: int):
                 return {"job_id": job_id, **result}
 
             total_batches += 1
-            new_count = await cluster_batch(
+            cluster_result = await cluster_batch(
                 batch,
                 user_id=payload.get("user_id"),
                 skip_clean=True,
+                return_new_ids=True,
             )
+            if isinstance(cluster_result, dict):
+                new_count = int(cluster_result.get("count", 0))
+                new_qb_ids = cluster_result.get("ids", [])
+            else:
+                new_count = int(cluster_result or 0)
+                new_qb_ids = []
             queue_ids = [item["queue_id"] for item in batch]
             mark_batch_done(queue_ids)
+            from app.services.public_contributions import mark_public_contribution_queue_done
+
+            mark_public_contribution_queue_done(get_db_connection(), queue_ids)
+            await _schedule_cluster_answer_jobs(
+                job_id,
+                new_qb_ids,
+                owner_id=batch[0].get("owner_id"),
+                actor_id=payload.get("user_id"),
+            )
             processed += len(batch)
             total_new += new_count
             _touch(f"已完成 {processed} 道题，处理 {total_batches} 个批次")
@@ -634,6 +746,11 @@ async def cluster_rebuild_task(ctx, job_id: int):
     except Exception as exc:
         if batch:
             mark_batch_failed([item["queue_id"] for item in batch])
+            from app.services.public_contributions import mark_public_contribution_queue_failed
+
+            mark_public_contribution_queue_failed(
+                get_db_connection(), [item["queue_id"] for item in batch], str(exc)
+            )
         outcome = _fail(str(exc)[:500])
         logger.exception("全量聚类重建任务失败: job_id=%s", job_id)
         return {"status": outcome["status"], "job_id": job_id}
@@ -689,9 +806,7 @@ async def interview_reprocess_task(ctx, job_id: int):
 
     def _set_analysis_status(status: str):
         with get_db_connection() as conn:
-            columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(interview)").fetchall()
-            }
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(interview)").fetchall()}
             if "analysis_status" in columns:
                 conn.execute(
                     "UPDATE interview SET analysis_status = ?, "
@@ -819,18 +934,29 @@ async def process_chat_side_effects_task(ctx, limit: int = 10):
                 response_format={"type": "json_object"},
             )
             parsed = _extract_json(result)
-            memories = parsed if isinstance(parsed, list) else (
-                parsed.get("memories", parsed.get("items", []))
-                if isinstance(parsed, dict) else []
+            memories = (
+                parsed
+                if isinstance(parsed, list)
+                else (
+                    parsed.get("memories", parsed.get("items", []))
+                    if isinstance(parsed, dict)
+                    else []
+                )
             )
             metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
             note_parts = []
             for memory in memories if isinstance(memories, list) else []:
-                if isinstance(memory, dict) and memory.get("type") in {"weakness", "strength", "preference"}:
+                if isinstance(memory, dict) and memory.get("type") in {
+                    "weakness",
+                    "strength",
+                    "preference",
+                }:
                     note_parts.append(f"[{memory['type']}] {memory.get('content', '')}")
             selected = metadata.get("selected_question")
             if isinstance(selected, dict) and selected.get("question"):
-                note_parts.append(f"[asked] #{selected.get('id')}: {str(selected['question'])[:80]}")
+                note_parts.append(
+                    f"[asked] #{selected.get('id')}: {str(selected['question'])[:80]}"
+                )
             await asyncio.to_thread(
                 chat_service.commit_memory_extraction_job,
                 job["id"],
@@ -839,7 +965,9 @@ async def process_chat_side_effects_task(ctx, limit: int = 10):
             )
             processed += 1
         except Exception as exc:
-            await asyncio.to_thread(chat_service.fail_side_effect_job, job["id"], str(exc), retry=True)
+            await asyncio.to_thread(
+                chat_service.fail_side_effect_job, job["id"], str(exc), retry=True
+            )
             logger.warning("chat side-effect job failed: %s (%s)", job["id"], exc)
     return {"status": "completed", "processed": processed}
 
@@ -879,7 +1007,13 @@ async def build_master_bank_task(ctx, job_id: int):
 
 async def _build_master_bank_job(ctx, job_id: int):
     """后台任务：重建 master bank 题库"""
-    from app.services.pipeline import dequeue_batch, cluster_batch, mark_batch_done, mark_batch_failed, BATCH_SIZE
+    from app.services.pipeline import (
+        dequeue_batch,
+        cluster_batch,
+        mark_batch_done,
+        mark_batch_failed,
+        BATCH_SIZE,
+    )
     from app.db.connection import get_db_connection
     from app.core.config import DB_PATH
     from app.services.job_lifecycle import (
@@ -907,11 +1041,11 @@ async def _build_master_bank_job(ctx, job_id: int):
         logger.info("题库重建任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
 
-    def _update_progress(current, total, message=''):
+    def _update_progress(current, total, message=""):
         with get_db_connection() as conn:
             conn.execute(
                 "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, progress_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (current, total, message, job_id)
+                (current, total, message, job_id),
             )
             conn.commit()
 
@@ -925,23 +1059,29 @@ async def _build_master_bank_job(ctx, job_id: int):
 
     try:
         # Step 1: 备份
-        _update_progress(0, 0, '正在备份数据库...')
-        backup_dir = os.path.join(os.path.dirname(DB_PATH), 'backups')
+        _update_progress(0, 0, "正在备份数据库...")
+        backup_dir = os.path.join(os.path.dirname(DB_PATH), "backups")
         os.makedirs(backup_dir, exist_ok=True)
-        backup_path = os.path.join(backup_dir, f'interview-boss-build-{int(time.time())}.db')
+        backup_path = os.path.join(backup_dir, f"interview-boss-build-{int(time.time())}.db")
         _backup_db_online(DB_PATH, backup_path)
         # 清理旧备份（保留最近 3 个）
         try:
             import glob
-            backups = sorted(glob.glob(os.path.join(backup_dir, 'interview-boss-build-*.db')), key=os.path.getmtime, reverse=True)
+
+            backups = sorted(
+                glob.glob(os.path.join(backup_dir, "interview-boss-build-*.db")),
+                key=os.path.getmtime,
+                reverse=True,
+            )
             for old in backups[3:]:
                 os.remove(old)
         except Exception:
             pass
 
         # Step 2: 加载数据
-        _update_progress(0, 0, '加载题目数据...')
+        _update_progress(0, 0, "加载题目数据...")
         from app.db.connection import get_current_job_position
+
         current_pos = get_current_job_position()
 
         def _load():
@@ -949,31 +1089,25 @@ async def _build_master_bank_job(ctx, job_id: int):
                 raw = conn.execute(
                     "SELECT qd.id, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag, qd.url, qd.company, qd.round "
                     "FROM questions_detail qd "
-                    "JOIN interview i ON qd.url = i.url "
+                    "JOIN interview i ON qd.interview_id = i.id "
                     "WHERE qd.question IS NOT NULL AND qd.question != '' AND qd.deleted_at IS NULL "
                     "AND i.deleted_at IS NULL AND i.owner_id IS NULL AND i.status = 'approved' "
                     "AND qd.job_position = ?",
-                    (current_pos,)
+                    (current_pos,),
                 ).fetchall()
-                existing = conn.execute(
-                    "SELECT question, ai_answer, answer_sources FROM question_bank WHERE ai_answer IS NOT NULL AND ai_answer != '' AND job_position = ?",
-                    (current_pos,)
-                ).fetchall()
-                return raw, {
-                    r['question']: {"answer": r['ai_answer'], "sources": r['answer_sources']}
-                    for r in existing
-                }
+                return raw, _load_public_rebuild_answer_cache(conn, current_pos)
 
         raw_questions, existing_answers_map = await asyncio.to_thread(_load)
         if not raw_questions:
-            _mark_complete('completed', result='没有数据')
+            _mark_complete("completed", result="没有数据")
             return {"status": "empty"}
 
         total = len(raw_questions)
-        _update_progress(0, total, f'共 {total} 道题目，准备聚类...')
+        _update_progress(0, total, f"共 {total} 道题目，准备聚类...")
 
         # Step 3: 清空公共题库
-        _update_progress(0, total, '清空旧题库...')
+        _update_progress(0, total, "清空旧题库...")
+
         def _clear_bank():
             with get_db_connection() as conn:
                 cursor = conn.cursor()
@@ -982,17 +1116,17 @@ async def _build_master_bank_job(ctx, job_id: int):
                     cursor.execute(
                         "DELETE FROM user_question_view WHERE question_bank_id IN "
                         "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
+                        (current_pos,),
                     )
                     cursor.execute(
                         "DELETE FROM user_practice_history WHERE question_bank_id IN "
                         "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
+                        (current_pos,),
                     )
                     cursor.execute(
                         "DELETE FROM question_position WHERE question_id IN "
                         "(SELECT id FROM question_bank WHERE job_position = ? AND owner_id IS NULL)",
-                        (current_pos,)
+                        (current_pos,),
                     )
                     cursor.execute(
                         "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, "
@@ -1010,24 +1144,39 @@ async def _build_master_bank_job(ctx, job_id: int):
         # Step 4: 入队所有问题
         def _enqueue_all():
             with get_db_connection() as conn:
-                conn.execute("DELETE FROM analysis_queue")
+                queue_columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+                }
+                if "contribution_request_id" in queue_columns:
+                    # Rebuild owns only ordinary public work.  A personal
+                    # queue, or a public row attached to an approval request,
+                    # is durable user work and must survive a public rebuild.
+                    conn.execute(
+                        "DELETE FROM analysis_queue "
+                        "WHERE owner_id IS NULL AND contribution_request_id IS NULL"
+                    )
+                else:
+                    conn.execute(
+                        "DELETE FROM analysis_queue WHERE owner_id IS NULL"
+                    )
                 qd_rows = conn.execute(
                     "SELECT qd.id, i.id as interview_id FROM questions_detail qd "
-                    "JOIN interview i ON qd.url = i.url "
+                    "JOIN interview i ON qd.interview_id = i.id "
                     "WHERE qd.deleted_at IS NULL AND i.deleted_at IS NULL "
                     "AND i.owner_id IS NULL AND i.status = 'approved' AND qd.job_position = ?",
-                    (current_pos,)
+                    (current_pos,),
                 ).fetchall()
                 for row in qd_rows:
                     conn.execute(
                         "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status) VALUES (?, ?, 'pending')",
-                        (row['interview_id'], row['id'])
+                        (row["interview_id"], row["id"]),
                     )
                 conn.commit()
                 return len(qd_rows)
 
         enqueued = await asyncio.to_thread(_enqueue_all)
-        _update_progress(0, enqueued, f'已入队 {enqueued} 道题目，开始批量聚类...')
+        _update_progress(0, enqueued, f"已入队 {enqueued} 道题目，开始批量聚类...")
         logger.info(f"重建题库(ARQ): 已入队 {enqueued} 道题目")
 
         # Step 5: 分批聚类
@@ -1035,59 +1184,85 @@ async def _build_master_bank_job(ctx, job_id: int):
         def _get_job_creator():
             with get_db_connection() as conn:
                 row = conn.execute("SELECT created_by FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                return row['created_by'] if row else None
+                return row["created_by"] if row else None
 
         creator_id = await asyncio.to_thread(_get_job_creator)
 
         total_new = 0
         batch_num = 0
         while True:
-            batch = dequeue_batch(BATCH_SIZE)
+            batch = dequeue_batch(BATCH_SIZE, owner_id=None)
             if not batch:
                 break
             batch_num += 1
             try:
-                new_count = await cluster_batch(batch, user_id=creator_id, skip_clean=True)
-                queue_ids = [item['queue_id'] for item in batch]
+                cluster_result = await cluster_batch(
+                    batch,
+                    user_id=creator_id,
+                    skip_clean=True,
+                    return_new_ids=True,
+                )
+                if isinstance(cluster_result, dict):
+                    new_count = int(cluster_result.get("count", 0))
+                    new_qb_ids = cluster_result.get("ids", [])
+                else:
+                    new_count = int(cluster_result or 0)
+                    new_qb_ids = []
+                queue_ids = [item["queue_id"] for item in batch]
                 mark_batch_done(queue_ids)
+                from app.services.public_contributions import mark_public_contribution_queue_done
+
+                mark_public_contribution_queue_done(get_db_connection(), queue_ids)
+                await _schedule_cluster_answer_jobs(
+                    job_id,
+                    new_qb_ids,
+                    owner_id=batch[0].get("owner_id"),
+                    actor_id=creator_id,
+                )
                 total_new += new_count
-                _update_progress(batch_num * BATCH_SIZE, enqueued, f'批次 {batch_num}: 新增 {new_count} 个聚类（累计 {total_new}）')
+                _update_progress(
+                    batch_num * BATCH_SIZE,
+                    enqueued,
+                    f"批次 {batch_num}: 新增 {new_count} 个聚类（累计 {total_new}）",
+                )
             except Exception as e:
                 logger.error(f"重建聚类批次 {batch_num} 失败: {e}")
-                queue_ids = [item['queue_id'] for item in batch]
+                queue_ids = [item["queue_id"] for item in batch]
                 mark_batch_failed(queue_ids)
                 raise
 
         # Step 6: 恢复 AI 答案
-        _update_progress(enqueued, enqueued, '恢复 AI 答案...')
+        _update_progress(enqueued, enqueued, "恢复 AI 答案...")
+
         def _restore_answers():
             with get_db_connection() as conn:
                 restored = 0
                 rows = conn.execute(
                     "SELECT id, question, original_questions FROM question_bank "
                     "WHERE job_position = ? AND owner_id IS NULL AND (ai_answer IS NULL OR ai_answer = '')",
-                    (current_pos,)
+                    (current_pos,),
                 ).fetchall()
                 for r in rows:
-                    saved = existing_answers_map.get(r['question'])
-                    ai_answer = saved['answer'] if saved else None
-                    answer_sources = saved['sources'] if saved else None
+                    saved = existing_answers_map.get(r["question"])
+                    ai_answer = saved["answer"] if saved else None
+                    answer_sources = saved["sources"] if saved else None
                     if not ai_answer:
                         try:
                             import json
-                            oqs = json.loads(r['original_questions'] or '[]')
+
+                            oqs = json.loads(r["original_questions"] or "[]")
                             for oq in oqs:
                                 saved = existing_answers_map.get(oq)
-                                if saved and saved['answer']:
-                                    ai_answer = saved['answer']
-                                    answer_sources = saved['sources']
+                                if saved and saved["answer"]:
+                                    ai_answer = saved["answer"]
+                                    answer_sources = saved["sources"]
                                     break
                         except Exception:
                             pass
                     if ai_answer:
                         conn.execute(
                             "UPDATE question_bank SET ai_answer = ?, answer_sources = ? WHERE id = ?",
-                            (ai_answer, answer_sources, r['id'])
+                            (ai_answer, answer_sources, r["id"]),
                         )
                         restored += 1
                 conn.commit()
@@ -1095,7 +1270,9 @@ async def _build_master_bank_job(ctx, job_id: int):
 
         restored = await asyncio.to_thread(_restore_answers)
         logger.info(f"全量重建完成(ARQ): {total_new} 个聚类，恢复 {restored} 个 AI 答案")
-        _mark_complete('completed', result=f'重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案')
+        _mark_complete(
+            "completed", result=f"重建完成，新增 {total_new} 个聚类，恢复 {restored} 个 AI 答案"
+        )
         from app.core.cache import invalidate_master_bank_cache
 
         await invalidate_master_bank_cache()
@@ -1103,7 +1280,7 @@ async def _build_master_bank_job(ctx, job_id: int):
 
     except Exception as e:
         logger.exception(f"全量重建任务(ARQ)失败: job_id={job_id}")
-        _mark_complete('failed', error=str(e)[:500])
+        _mark_complete("failed", error=str(e)[:500])
         raise
 
 
@@ -1158,7 +1335,7 @@ async def submit_import_task(ctx, job_id: int):
             row = conn.execute(
                 "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
             ).fetchone()
-            return json.loads(row['payload']) if row else None
+            return json.loads(row["payload"]) if row else None
 
     payload = await asyncio.to_thread(_load_payload)
     if not payload:
@@ -1173,7 +1350,9 @@ async def submit_import_task(ctx, job_id: int):
         image_data = []
         for img in raw_images:
             if "content_b64" in img:
-                image_data.append({"content": base64.b64decode(img["content_b64"]), "mime": img["mime"]})
+                image_data.append(
+                    {"content": base64.b64decode(img["content_b64"]), "mime": img["mime"]}
+                )
             else:
                 image_data.append(img)  # 兼容直接传 bytes 的场景
 
@@ -1193,7 +1372,7 @@ async def submit_import_task(ctx, job_id: int):
         PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
         phase_index = {p: i for i, p in enumerate(PHASES)}
 
-        def _update_progress(phase, message=''):
+        def _update_progress(phase, message=""):
             idx = phase_index.get(phase, 0)
             with get_db_connection() as conn:
                 if not touch_job(
@@ -1203,6 +1382,7 @@ async def submit_import_task(ctx, job_id: int):
                     progress_current=idx + 1,
                     progress_total=len(PHASES),
                     progress_message=message,
+                    progress_phase=phase,
                 ):
                     raise RuntimeError(f"上传任务 lease 已失效: job_id={job_id}")
                 conn.commit()
@@ -1216,7 +1396,9 @@ async def submit_import_task(ctx, job_id: int):
 
         # 消费 graph 事件流（只读取事件，不产出 SSE）
         try:
-            async for sse_data in stream_submit_graph(input_state, result_collector=result_collector):
+            async for sse_data in stream_submit_graph(
+                input_state, result_collector=result_collector
+            ):
                 try:
                     # sse_data 格式: "data: {json}\n\n"
                     if sse_data.startswith("data: "):
@@ -1283,8 +1465,12 @@ async def submit_import_task(ctx, job_id: int):
         match_result = final_state_values.get("match_result")
         if match_result and isinstance(match_result, dict):
             result_data["match_result"] = {
-                "matched_count": match_result.get("matched_count", len(match_result.get("matched", []))),
-                "unmatched_count": match_result.get("unmatched_count", len(match_result.get("unmatched", []))),
+                "matched_count": match_result.get(
+                    "matched_count", len(match_result.get("matched", []))
+                ),
+                "unmatched_count": match_result.get(
+                    "unmatched_count", len(match_result.get("unmatched", []))
+                ),
             }
 
         # 耗时信息（如果 final_state 里有）
@@ -1299,9 +1485,7 @@ async def submit_import_task(ctx, job_id: int):
         if answer_tasks and uid is not None:
             from app.services.job_lifecycle import create_answer_generation_jobs
 
-            public_answer = bool(
-                payload.get("is_admin") and payload.get("target") == "public"
-            )
+            public_answer = bool(payload.get("is_admin") and payload.get("target") == "public")
             answer_llm_scope = "global" if public_answer else "user"
             answer_search_scope = "public" if public_answer else "user"
 
@@ -1516,9 +1700,7 @@ async def interview_import_analysis_task(ctx, job_id: int):
         return {"status": "already_claimed_or_finished", "job_id": job_id}
 
     try:
-        result = await asyncio.to_thread(
-            analyze_import, str(payload.get("import_id")), int(job_id)
-        )
+        result = await asyncio.to_thread(analyze_import, str(payload.get("import_id")), int(job_id))
         with get_db_connection() as conn:
             complete_job(
                 conn,
@@ -1568,10 +1750,14 @@ async def generate_recitation_task(ctx, job_id: int):
             payload_row = conn.execute(
                 "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
             ).fetchone()
-            question = conn.execute(
-                "SELECT question, ai_answer FROM question_bank WHERE id = ?",
-                (int(json.loads(payload_row["payload"])["question_id"]),),
-            ).fetchone() if payload_row else None
+            question = (
+                conn.execute(
+                    "SELECT question, ai_answer FROM question_bank WHERE id = ?",
+                    (int(json.loads(payload_row["payload"])["question_id"]),),
+                ).fetchone()
+                if payload_row
+                else None
+            )
             conn.commit()
             return (
                 dict(task),
@@ -1679,6 +1865,7 @@ scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
 scheduled_wal_checkpoint_task = observed_cron_task(scheduled_wal_checkpoint_task)
 process_chat_side_effects_task = observed_cron_task(process_chat_side_effects_task)
 
+
 class WorkerSettings:
     functions = [
         cluster_batch_task,
@@ -1706,10 +1893,10 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(REDIS_URL)
-    job_timeout = 900          # 单任务最长 15 分钟（重建可能较慢）
-    max_tries = 2              # 最多重试 2 次（重建任务重试成本高）
-    keep_result = 3600         # 结果保留 1 小时
-    queue_read_limit = 10      # 每次最多读取 10 个任务
+    job_timeout = 900  # 单任务最长 15 分钟（重建可能较慢）
+    max_tries = 2  # 最多重试 2 次（重建任务重试成本高）
+    keep_result = 3600  # 结果保留 1 小时
+    queue_read_limit = 10  # 每次最多读取 10 个任务
 
     # 定时任务：每天凌晨 3 点运行 compaction，每周日 3:30 质量审查、3:40 来源健康检查
     cron_jobs = [

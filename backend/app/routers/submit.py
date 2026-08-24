@@ -68,10 +68,12 @@ async def submit_data_stream_v2(
         )
     url = validate_source_url(url)
     submit_target = (target or "private").lower()
-    # 分享意愿：share → 公共审核队列；private → 个人路径（目标内部映射）
+    # share 是“申请公共化”，不是普通用户直写公共题库。
     if submit_target not in ("share", "private"):
         submit_target = "private"
-    bank_target = "personal" if submit_target == "private" else "public"
+    is_admin = bool(user.get("is_admin", 0))
+    request_public_review = submit_target == "share" and not is_admin
+    bank_target = "public" if submit_target == "share" and is_admin else "personal"
     if url:
         check_owner = user["id"] if bank_target == "personal" else None
         if await run_db(lambda: _check_duplicate_url_sync(url, owner_id=check_owner)):
@@ -120,8 +122,9 @@ async def submit_data_stream_v2(
         "season": season or "",
         "content_type_hint": (content_type or "").lower(),
         "target": bank_target,
+        "request_public_review": request_public_review,
         "user_id": user["id"],
-        "is_admin": bool(user.get("is_admin", 0)),
+        "is_admin": is_admin,
         "job_position": _get_current_position_for_user(user["id"]),
     }
 

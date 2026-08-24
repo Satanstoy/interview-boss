@@ -30,9 +30,9 @@ def _seed_questions_detail(test_db, user_id, cat2: str, job_position: str = ""):
     )
     interview_id = cur.lastrowid
     test_db.execute(
-        "INSERT INTO questions_detail (url, cat2, deleted_at, job_position) "
-        "VALUES (?, ?, NULL, ?)",
-        (f"https://x-{cat2}/a", cat2, job_position),
+        "INSERT INTO questions_detail (interview_id, url, cat2, deleted_at, job_position) "
+        "VALUES (?, ?, ?, NULL, ?)",
+        (interview_id, f"https://x-{cat2}/a", cat2, job_position),
     )
     test_db.commit()
     return interview_id

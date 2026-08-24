@@ -148,6 +148,8 @@ from app.db.migrations.jobs import (
     _migration_050_pipeline_metrics,
     _migration_074_durable_job_lifecycle,
     _migration_075_job_retry_lineage,
+    _migration_099_job_progress_phase,
+    _migration_100_analysis_queue_scope_idempotency,
 )
 from app.db.migrations.auth import _migration_079_users_email_unique
 from app.db.migrations.interview_distribution import (
@@ -165,8 +167,18 @@ from app.db.migrations.public_contributions import _migration_103_public_contrib
 from app.db.migrations.public_contributions import (
     _migration_102_public_contribution_workflow,
 )
+from app.db.migrations.taxonomy_system import _migration_104_system_taxonomies
+from app.db.migrations.position_lifecycle import _migration_105_position_retirement
+from app.db.migrations.question_bank_scope import (
+    _migration_108_question_bank_scope,
+    _migration_109_question_detail_scope_guard,
+)
 from app.db.migrations.evaluation_experiment import _migration_095_evaluation_experiment
-from app.db.migrations.practice import (_migration_094_review_event_answer_snapshot, _migration_096_review_event_evaluation_snapshot, _migration_098_practiced_list_index)
+from app.db.migrations.practice import (
+    _migration_094_review_event_answer_snapshot,
+    _migration_096_review_event_evaluation_snapshot,
+    _migration_098_practiced_list_index,
+)
 from app.db.migrations.schema_hygiene import (
     _migration_081_cleanup_fk_orphans,
     _migration_082_fts_rebuild_triggers,
@@ -290,9 +302,15 @@ _MIGRATIONS = [
     (96, "review_event_evaluation_snapshot", _migration_096_review_event_evaluation_snapshot),
     (97, "resume_user_unique", _migration_097_resume_user_unique),
     (98, "practiced_list_index", _migration_098_practiced_list_index),
+    (99, "job_progress_phase", _migration_099_job_progress_phase),
+    (100, "analysis_queue_scope_idempotency", _migration_100_analysis_queue_scope_idempotency),
     (101, "project_harness_releases", _migration_101_project_harness_releases),
     (102, "public_contribution_workflow", _migration_102_public_contribution_workflow),
     (103, "public_contribution_retry_scope", _migration_103_public_contribution_retry_scope),
+    (104, "system_taxonomies", _migration_104_system_taxonomies),
+    (105, "position_retirement", _migration_105_position_retirement),
+    (108, "question_bank_scope", _migration_108_question_bank_scope),
+    (109, "question_detail_scope_guard", _migration_109_question_detail_scope_guard),
 ]
 
 
@@ -306,10 +324,7 @@ def run_migrations(conn):
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    applied = {
-        row[0]
-        for row in cursor.execute("SELECT version FROM schema_version").fetchall()
-    }
+    applied = {row[0] for row in cursor.execute("SELECT version FROM schema_version").fetchall()}
     for version, name, func in _MIGRATIONS:
         if version in applied:
             continue

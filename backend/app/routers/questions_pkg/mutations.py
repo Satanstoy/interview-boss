@@ -66,8 +66,10 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 # 如果来源为空，从 questions_detail 查询原始来源
                 if not split_sources:
                     qd_row = cursor.execute(
-                        "SELECT url, company, round, cat1, cat2, tags, diff_tag FROM questions_detail WHERE question = ? AND deleted_at IS NULL LIMIT 1",
-                        (original_q,)
+                        "SELECT qd.url, qd.company, qd.round, qd.cat1, qd.cat2, qd.tags, qd.diff_tag "
+                        "FROM questions_detail qd JOIN interview i ON i.id = qd.interview_id "
+                        "WHERE qd.question = ? AND qd.deleted_at IS NULL AND i.owner_id IS ? LIMIT 1",
+                        (original_q, row['owner_id'])
                     ).fetchone()
                     if qd_row:
                         split_sources = [{"url": qd_row['url'], "company": qd_row['company'], "round": qd_row['round']}]
@@ -507,7 +509,11 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
 async def retag_master_question(question_id: int, user: dict = Depends(get_admin_user)):
     def _get():
         with get_db_connection() as conn:
-            return conn.execute("SELECT question, cat1, cat2, tags, difficulty FROM question_bank WHERE id = ?", (question_id,)).fetchone()
+            return conn.execute(
+                "SELECT question, cat1, cat2, tags, difficulty, owner_id, job_position "
+                "FROM question_bank WHERE id = ?",
+                (question_id,),
+            ).fetchone()
 
     row = await run_db(_get)
 
@@ -520,8 +526,12 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
     current_tags = row['tags'] or ''
     current_diff = row['difficulty'] or '未知'
 
-    # 读取当前岗位的分类体系
-    taxonomy_config = await run_db(get_taxonomy_for_position)
+    # 重新标注必须使用题目自身岗位的系统分类，不能使用管理员当前岗位。
+    taxonomy_config = await run_db(
+        lambda: get_taxonomy_for_position(position=row["job_position"])
+    )
+    if not taxonomy_config.get("configured", True):
+        raise HTTPException(status_code=409, detail="该题目所属岗位尚未配置系统分类")
 
     # 在 prompt 中告知当前分类，要求 LLM 重新审视并给出更准确的分类
     input_data = [{"id": question_id, "题目": question_text}]
@@ -575,13 +585,16 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
                     (cat1, cat2, tags, diff, question_id)
                 )
                 conn.execute(
-                    "UPDATE questions_detail SET cat1 = ?, cat2 = ?, tags = ?, diff_tag = ?, updated_at = CURRENT_TIMESTAMP WHERE question = ?",
-                    (cat1, cat2, tags, diff, question_text)
+                    "UPDATE questions_detail SET cat1 = ?, cat2 = ?, tags = ?, diff_tag = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE question = ? AND EXISTS (SELECT 1 FROM interview i "
+                    "WHERE i.id = questions_detail.interview_id AND i.owner_id IS ?)",
+                    (cat1, cat2, tags, diff, question_text, row['owner_id'])
                 )
                 from app.db.operations import _retype_distribution_details_txn
                 detail_rows = conn.execute(
-                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
-                    (question_text,),
+                    "SELECT qd.id FROM questions_detail qd JOIN interview i ON i.id = qd.interview_id "
+                    "WHERE qd.question = ? AND qd.deleted_at IS NULL AND i.owner_id IS ?",
+                    (question_text, row['owner_id']),
                 ).fetchall()
                 _retype_distribution_details_txn(conn.cursor(), [detail["id"] for detail in detail_rows])
                 from app.services.cluster_review_lifecycle import mark_cluster_review_pending

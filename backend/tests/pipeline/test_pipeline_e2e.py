@@ -71,6 +71,7 @@ def create_test_db():
         );
         CREATE TABLE questions_detail (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id INTEGER,
             url TEXT,
             company TEXT,
             round TEXT,
@@ -125,6 +126,7 @@ def create_test_db():
             question_detail_id INTEGER,
             status TEXT DEFAULT 'pending',
             owner_id INTEGER DEFAULT NULL,
+            contribution_request_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
             UNIQUE(question_detail_id),
@@ -779,9 +781,9 @@ class TestDataConsistency:
             for i in range(1, 4):
                 _make_interview(conn, i, f"https://iv{i}.com", "1. 题目？")
                 conn.execute(
-                    "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
-                    "VALUES (?, '公司', '一面', '题目？', 'A', 'B', '', 'L1', '后端开发')",
-                    (f"https://iv{i}.com",),
+                    "INSERT INTO questions_detail (interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
+                    "VALUES (?, ?, '公司', '一面', '题目？', 'A', 'B', '', 'L1', '后端开发')",
+                    (i, f"https://iv{i}.com"),
                 )
                 enqueue_questions(i)
 

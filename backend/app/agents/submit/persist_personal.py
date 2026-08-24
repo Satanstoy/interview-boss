@@ -149,7 +149,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         record_owner_id = user_id
         record_status = "approved"
 
-        answer_tasks, interview_id = await run_db(
+        answer_tasks, interview_id, detail_ids = await run_db(
             lambda: submit_interview_txn(
                 saved_url,
                 data,
@@ -167,14 +167,42 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                 bool(is_admin),
                 user_id,
                 qb_owner_id=user_id,
+                persist_unmatched=False,
             )
         )
 
-        # 统一入库路径：个人题也入 analysis_queue（owner_id 隔离），
-        # 由 cluster_batch 在个人题库范围内做后续聚类/跨面经去重。
+        # 只有真正未匹配的个人题进入个人聚类队列。命中公共题的题目仍保留
+        # 在个人面经的 questions_detail 中，但不复制成个人题，也不再次聚类。
         from app.services.pipeline import enqueue_questions
 
-        enqueue_questions(interview_id, owner_id=user_id)
+        excluded_ids = personal_matched_ids | pub_dup_ids
+        queue_detail_ids = []
+        valid_index = 0
+        for row, detail_id in zip(tagged_rows, detail_ids):
+            if not row[3].strip():
+                continue
+            if valid_index not in excluded_ids:
+                queue_detail_ids.append(detail_id)
+            valid_index += 1
+        enqueue_questions(
+            interview_id,
+            owner_id=user_id,
+            question_detail_ids=queue_detail_ids,
+        )
+
+        contribution_request_id = None
+        if state.get("request_public_review"):
+            from app.services.public_contributions import create_public_contribution_request
+
+            def _create_contribution():
+                with get_db_connection() as conn:
+                    return create_public_contribution_request(
+                        conn, "interview", interview_id, user_id
+                    )
+
+            contribution = await run_db(_create_contribution)
+            contribution_request_id = contribution["id"]
+            emit_progress(state, "review", "面经已保留在个人题库，已提交公共化审核")
 
     emit_progress(state, "save", "个人题库写入完成")
 
@@ -184,6 +212,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         "answer_tasks": answer_tasks,
         "record_owner_id": record_owner_id,
         "record_status": record_status,
+        "public_contribution_request_id": contribution_request_id,
         "node_timings": {
             **state.get("node_timings", {}),
             "match_persist": timer.elapsed,
@@ -215,7 +244,7 @@ async def jd_persist_node(state: SubmitState) -> dict:
             else "未提供"
         )
 
-        await run_db(
+        jd_id = await run_db(
             lambda: _insert_jd(
                 saved_url,
                 data,
@@ -227,9 +256,28 @@ async def jd_persist_node(state: SubmitState) -> dict:
             )
         )
 
-    emit_progress(state, "save", "JD 保存完成")
+        contribution_request_id = None
+        if state.get("request_public_review"):
+            from app.db.connection import get_db_connection
+            from app.services.public_contributions import create_public_contribution_request
+
+            def _create_contribution():
+                with get_db_connection() as conn:
+                    return create_public_contribution_request(conn, "jd", jd_id, user_id)
+
+            contribution = await run_db(_create_contribution)
+            contribution_request_id = contribution["id"]
+
+    emit_progress(
+        state,
+        "save",
+        "JD 保存完成，已提交公共化审核"
+        if contribution_request_id
+        else "JD 保存完成",
+    )
     return {
         "node_timings": {**state.get("node_timings", {}), "jd_persist": timer.elapsed},
+        "public_contribution_request_id": contribution_request_id,
     }
 
 

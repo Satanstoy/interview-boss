@@ -12,6 +12,7 @@ class SubmitState(TypedDict, total=False):
     season: str                             # 届次
     content_type_hint: str                  # "auto" | "jd" | "interview"
     target: str                             # "personal" | "public"
+    request_public_review: bool             # share intent: private source + admin review
     user_id: int                            # 当前用户 ID
     is_admin: bool                          # 是否管理员
     job_position: str                       # 当前岗位
@@ -23,6 +24,7 @@ class SubmitState(TypedDict, total=False):
     tagged_rows: list[list[str]]            # 分类结果 [url, company, round, q, cat1, cat2, tags, diff_tag]
     match_result: dict                      # 聚类匹配结果 {matched: [...], unmatched: [...]}
     saved_interview_id: int                 # 写入 DB 后的 interview ID
+    public_contribution_request_id: int     # 公共化申请 ID（如有）
     answer_tasks: list[tuple[int, str]]     # 需要生成答案的 (question_id, question_text) 列表
     cluster_result: dict                    # 聚类结果
 

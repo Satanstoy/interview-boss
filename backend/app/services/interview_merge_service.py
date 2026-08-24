@@ -156,12 +156,12 @@ def _preview_actions(conn, table, keep_id, drop_pairs) -> dict:
     # detail 重挂 + 去重：预估挂到 keep 的 detail 数与重复的 question 数
     actions["questions_detail_rehung"] = conn.execute(
         f"SELECT COUNT(*) FROM questions_detail WHERE interview_id IN ({ph}) "
-        f"AND owner_id IS NULL AND deleted_at IS NULL",
+        f"AND deleted_at IS NULL",
         drop_ids,
     ).fetchone()[0]
     dup_detail = conn.execute(
         "SELECT COUNT(*) - COUNT(DISTINCT question) FROM questions_detail "
-        "WHERE interview_id = ? AND owner_id IS NULL AND deleted_at IS NULL",
+        "WHERE interview_id = ? AND deleted_at IS NULL",
         (keep_id,),
     ).fetchone()[0]
     actions["questions_detail_deduped"] = max(0, dup_detail)
@@ -218,15 +218,15 @@ def _execute_merge(conn, table, keep_id, keep_url, drop_pairs) -> dict:
         for drop_id, drop_url in drop_pairs:
             cur = conn.execute(
                 "UPDATE questions_detail SET interview_id = ? "
-                "WHERE interview_id = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                "WHERE interview_id = ? AND deleted_at IS NULL",
                 (keep_id, drop_id),
             )
             actions["questions_detail_rehung"] += cur.rowcount
         cur = conn.execute(
-            "DELETE FROM questions_detail WHERE deleted_at IS NULL AND owner_id IS NULL "
+            "DELETE FROM questions_detail WHERE deleted_at IS NULL "
             "AND interview_id = ? AND id NOT IN ("
             "  SELECT MIN(id) FROM questions_detail "
-            "  WHERE interview_id = ? AND owner_id IS NULL AND deleted_at IS NULL "
+            "  WHERE interview_id = ? AND deleted_at IS NULL "
             "  GROUP BY question"
             ")",
             (keep_id, keep_id),

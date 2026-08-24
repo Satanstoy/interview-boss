@@ -3,19 +3,20 @@ TDD 测试 — 面试上下文构建器
 
 验证 build_interview_context 正确收集和格式化用户画像信息
 """
-import pytest
-
-
 class TestBuildContext:
     """面试上下文构建测试"""
 
     def test_build_context_returns_position(self, test_db):
         """应包含用户目标岗位信息"""
         from app.agents.chat.context_builder import build_interview_context
-        from app.db.connection import get_db_connection
-
         conn = test_db
-        conn.execute("INSERT INTO users (username, password_hash, is_admin, personal_position) VALUES ('test_user', 'hash', 0, 'Java 后端开发')")
+        conn.execute("INSERT INTO job_positions (name) VALUES ('Java 后端开发')")
+        position_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute("INSERT INTO users (username, password_hash, is_admin, current_position_id) VALUES ('test_user', 'hash', 0, ?)", (position_id,))
+        conn.execute(
+            "INSERT INTO taxonomy (position_name, categories_json, tags_json, source) VALUES (?, ?, ?, 'system')",
+            ('Java 后端开发', '[]', '["Java"]'),
+        )
         conn.commit()
         user_id = conn.execute("SELECT id FROM users WHERE username = 'test_user'").fetchone()[0]
 
@@ -27,17 +28,18 @@ class TestBuildContext:
     def test_build_context_includes_taxonomy(self, test_db):
         """应包含岗位分类体系"""
         from app.agents.chat.context_builder import build_interview_context
-        from app.db.connection import get_db_connection
         import json
 
         conn = test_db
-        conn.execute("INSERT INTO users (username, password_hash, is_admin, personal_position) VALUES ('test_user2', 'hash', 0, 'Python 开发')")
+        conn.execute("INSERT INTO job_positions (name) VALUES ('Python 开发')")
+        position_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute("INSERT INTO users (username, password_hash, is_admin, current_position_id) VALUES ('test_user2', 'hash', 0, ?)", (position_id,))
         conn.execute(
-            "INSERT INTO taxonomy (position_name, categories_json, is_default, source) VALUES (?, ?, 1, 'system')",
+            "INSERT INTO taxonomy (position_name, categories_json, tags_json, is_default, source) VALUES (?, ?, ?, 1, 'system')",
             ("Python 开发", json.dumps([
                 {"name": "Python 基础", "children": [{"name": "装饰器"}, {"name": "生成器"}]},
                 {"name": "Web 框架", "children": [{"name": "Django"}, {"name": "Flask"}]},
-            ], ensure_ascii=False))
+            ], ensure_ascii=False), '["Python"]')
         )
         conn.commit()
         user_id = conn.execute("SELECT id FROM users WHERE username = 'test_user2'").fetchone()[0]
@@ -50,8 +52,6 @@ class TestBuildContext:
     def test_build_context_no_practice_returns_message(self, test_db):
         """无练习记录时应显示"尚未开始练习" """
         from app.agents.chat.context_builder import build_interview_context
-        from app.db.connection import get_db_connection
-
         conn = test_db
         conn.execute("INSERT INTO users (username, password_hash, is_admin, personal_position) VALUES ('test_user3', 'hash', 0, '测试岗位')")
         conn.commit()
@@ -64,8 +64,6 @@ class TestBuildContext:
     def test_build_context_with_practice_stats(self, test_db):
         """有练习记录时应包含统计信息"""
         from app.agents.chat.context_builder import build_interview_context
-        from app.db.connection import get_db_connection
-
         conn = test_db
         conn.execute("INSERT INTO users (username, password_hash, is_admin, personal_position) VALUES ('test_user4', 'hash', 0, '测试岗位')")
         user_id = conn.execute("SELECT id FROM users WHERE username = 'test_user4'").fetchone()[0]

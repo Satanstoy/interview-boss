@@ -423,12 +423,12 @@ async def get_data(
                 join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
                 params = (user["id"],)
                 total = conn.execute(
-                    f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.url = iv.url WHERE {join_where}",
+                    f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.interview_id = iv.id WHERE {join_where}",
                     params,
                 ).fetchone()[0]
                 rows = conn.execute(
                     f"SELECT qd.id, qd.url, qd.company, qd.round, qd.question, qd.cat1, qd.cat2, qd.tags, qd.diff_tag "
-                    f"FROM {safe_name} qd JOIN interview iv ON qd.url = iv.url "
+                    f"FROM {safe_name} qd JOIN interview iv ON qd.interview_id = iv.id "
                     f"WHERE {join_where} ORDER BY qd.id ASC LIMIT ? OFFSET ?",
                     (*params, page_size, offset),
                 ).fetchall()
@@ -526,28 +526,18 @@ async def delete_data(
 
             url = target_row["url"]
 
-            if table_name == "jd":
-                if url:
-                    # BUG-017: 先清理关联面经在 question_bank 中的 sources（仅限同一 owner 范围）
-                    owner_scope = target_row["owner_id"]
-                    interview_urls = cursor.execute(
-                        "SELECT DISTINCT url FROM interview WHERE url = ? AND deleted_at IS NULL",
-                        (url,),
-                    ).fetchall()
-                    for iu in interview_urls:
-                        if iu["url"]:
-                            _cleanup_sources_in_txn(cursor, iu["url"], owner_scope)
-                    # 级联软删除关联的 interview 和 questions_detail（仅限同一 owner 范围）
-                    cursor.execute(
-                        "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP "
-                        "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
-                        (url, owner_scope),
-                    )
-                    cursor.execute(
-                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
-                        "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
-                        (url, owner_scope),
-                    )
+            if table_name == "jd" and url:
+                # Cascade only through interviews in the same ownership scope.
+                # questions_detail has no reliable independent owner boundary;
+                # interview_id is the boundary.
+                owner_scope = target_row["owner_id"]
+                interview_rows = cursor.execute(
+                    "SELECT id, url, owner_id FROM interview "
+                    "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
+                    (url, owner_scope),
+                ).fetchall()
+                for interview_row in interview_rows:
+                    _delete_interview_txn(cursor, interview_row["id"], interview_row)
 
             if table_name == "interview":
                 _delete_interview_txn(cursor, record_id, target_row)
@@ -609,21 +599,18 @@ async def batch_delete_data(
 
             if table_name == "jd":
                 for url in urls_to_delete:
-                    # BUG-017: 先清理关联面经在 question_bank 中的 sources
                     owner_scope = next(
                         (row["owner_id"] for row in rows if row["url"] == url), None
                     )
-                    _cleanup_sources_in_txn(cursor, url, owner_scope)
-                    cursor.execute(
-                        "UPDATE interview SET deleted_at = CURRENT_TIMESTAMP "
+                    interview_rows = cursor.execute(
+                        "SELECT id, url, owner_id FROM interview "
                         "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
                         (url, owner_scope),
-                    )
-                    cursor.execute(
-                        "UPDATE questions_detail SET deleted_at = CURRENT_TIMESTAMP "
-                        "WHERE url = ? AND owner_id IS ? AND deleted_at IS NULL",
-                        (url, owner_scope),
-                    )
+                    ).fetchall()
+                    for interview_row in interview_rows:
+                        _delete_interview_txn(
+                            cursor, interview_row["id"], interview_row
+                        )
 
             if table_name == "interview":
                 for row in rows:
@@ -680,20 +667,29 @@ async def restore_data(
             )
 
             if table_name == "jd" and url:
-                # JD 恢复时级联恢复关联的 interview 和 questions_detail
-                cursor.execute(
-                    "UPDATE interview SET deleted_at = NULL WHERE url = ?", (url,)
-                )
-                cursor.execute(
-                    "UPDATE questions_detail SET deleted_at = NULL WHERE url = ?",
-                    (url,),
-                )
+                # JD 恢复只恢复同一 ownership scope 的面经，再按
+                # interview_id 恢复明细，避免同 URL 的公共/个人记录串联。
+                interview_rows = cursor.execute(
+                    "SELECT id FROM interview WHERE url = ? AND owner_id IS ?",
+                    (url, owner_scope),
+                ).fetchall()
+                for interview_row in interview_rows:
+                    cursor.execute(
+                        "UPDATE interview SET deleted_at = NULL WHERE id = ?",
+                        (interview_row["id"],),
+                    )
+                    cursor.execute(
+                        "UPDATE questions_detail SET deleted_at = NULL "
+                        "WHERE interview_id = ?",
+                        (interview_row["id"],),
+                    )
 
             if table_name == "interview" and url:
                 # interview 恢复时级联恢复关联的 questions_detail
                 cursor.execute(
-                    "UPDATE questions_detail SET deleted_at = NULL WHERE url = ?",
-                    (url,),
+                    "UPDATE questions_detail SET deleted_at = NULL "
+                    "WHERE interview_id = ?",
+                    (record_id,),
                 )
                 # BUG-018: 从 original_question_sources 中恢复该 URL 对应的 source 条目
                 _restore_sources_for_url(cursor, url, owner_scope)
@@ -705,13 +701,7 @@ async def restore_data(
 
             if table_name == "jd" and url:
                 # JD 恢复时级联恢复关联面经的 sources
-                interview_urls = cursor.execute(
-                    "SELECT DISTINCT url FROM interview WHERE url = ? AND deleted_at IS NULL",
-                    (url,),
-                ).fetchall()
-                for iu in interview_urls:
-                    if iu["url"]:
-                        _restore_sources_for_url(cursor, iu["url"], owner_scope)
+                _restore_sources_for_url(cursor, url, owner_scope)
 
             conn.commit()
 

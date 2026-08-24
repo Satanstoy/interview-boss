@@ -457,16 +457,20 @@ async def edit_question(
             # 同步 questions_detail
             if "question" in updates:
                 conn.execute(
-                    "UPDATE questions_detail SET question = ? WHERE question = ?",
-                    (updates["question"], row["question"]),
+                    "UPDATE questions_detail SET question = ? WHERE question = ? "
+                    "AND EXISTS (SELECT 1 FROM interview i "
+                    "WHERE i.id = questions_detail.interview_id AND i.owner_id IS ?)",
+                    (updates["question"], row["question"], row["owner_id"]),
                 )
 
             if {"question", "cat1", "cat2", "tags"} & set(updates):
                 from app.db.operations import _retype_distribution_details_txn
 
                 detail_rows = conn.execute(
-                    "SELECT id FROM questions_detail WHERE question IN (?, ?) AND deleted_at IS NULL",
-                    (row["question"], updates.get("question", row["question"])),
+                    "SELECT id FROM questions_detail WHERE question IN (?, ?) "
+                    "AND deleted_at IS NULL AND EXISTS (SELECT 1 FROM interview i "
+                    "WHERE i.id = questions_detail.interview_id AND i.owner_id IS ?)",
+                    (row["question"], updates.get("question", row["question"]), row["owner_id"]),
                 ).fetchall()
                 _retype_distribution_details_txn(
                     conn.cursor(), [detail["id"] for detail in detail_rows]

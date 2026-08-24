@@ -76,7 +76,7 @@ async def get_analytics(user: dict = Depends(get_current_user)):
             qd_params = (uid, current_pos)
 
             for r in conn.execute(
-                f"SELECT qd.tags, qd.diff_tag FROM questions_detail qd JOIN interview iv ON qd.url = iv.url {qd_where}",
+                f"SELECT qd.tags, qd.diff_tag FROM questions_detail qd JOIN interview iv ON qd.interview_id = iv.id {qd_where}",
                 qd_params,
             ).fetchall():
                 if r["tags"]:

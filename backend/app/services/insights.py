@@ -240,7 +240,7 @@ def build_insights_snapshot(user: dict) -> dict:
         high_scope, high_scope_params = _scope_condition("iv", user_id)
         high_freq_rows = conn.execute(
             "SELECT qd.cat2 AS topic, COUNT(*) AS frequency "
-            "FROM questions_detail qd JOIN interview iv ON qd.url = iv.url "
+            "FROM questions_detail qd JOIN interview iv ON qd.interview_id = iv.id "
             f"WHERE {high_scope} AND (iv.job_position = ? OR iv.job_position = '' OR iv.job_position IS NULL) "
             "AND qd.deleted_at IS NULL "
             "AND qd.cat2 IS NOT NULL AND qd.cat2 != '' AND qd.cat2 NOT IN ('其他', '未分类') "

@@ -125,15 +125,18 @@ async def delete_original_question(
                 )
 
                 detail_ids = cursor.execute(
-                    "SELECT id FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
-                    (original_q,),
+                    "SELECT qd.id FROM questions_detail qd JOIN interview i ON i.id = qd.interview_id "
+                    "WHERE qd.question = ? AND qd.deleted_at IS NULL AND i.owner_id IS ?",
+                    (original_q, row['owner_id']),
                 ).fetchall()
                 _mark_distribution_refresh_for_detail_ids_txn(
                     cursor, [detail["id"] for detail in detail_ids]
                 )
                 cursor.execute(
-                    "DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL",
-                    (original_q,),
+                    "DELETE FROM questions_detail WHERE question = ? AND deleted_at IS NULL "
+                    "AND EXISTS (SELECT 1 FROM interview i "
+                    "WHERE i.id = questions_detail.interview_id AND i.owner_id IS ?)",
+                    (original_q, row['owner_id']),
                 )
 
                 if len(new_orig) == 0:

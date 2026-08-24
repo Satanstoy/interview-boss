@@ -14,28 +14,73 @@ from .sanitize import BATCH_SIZE
 logger = logging.getLogger("interview-boss")
 
 STUCK_PROCESSING_THRESHOLD_MINUTES = 30
+_ANY_OWNER = object()
 
 
-def enqueue_questions(interview_id: int, owner_id: int = None) -> int:
-    """将一条面经的所有 questions_detail 加入分析队列，返回队列记录数。
+def enqueue_questions(
+    interview_id: int,
+    owner_id: int = None,
+    question_detail_ids: List[int] | None = None,
+    contribution_request_id: int | None = None,
+    conn=None,
+) -> int:
+    """将指定面经明细加入分析队列，返回本次新建的队列记录数。
 
     Args:
         interview_id: 面经 ID
         owner_id: NULL = 公共队列, user_id = 个人队列（隔离匹配）
+        question_detail_ids: 可选的明细白名单；为空时入队整条面经。
+        contribution_request_id: 可选的公共化申请追踪 ID。
     """
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT id FROM questions_detail WHERE url = (SELECT url FROM interview WHERE id = ?) AND deleted_at IS NULL",
+    owns_connection = conn is None
+    conn = conn or get_db_connection()
+    interview = conn.execute(
+        "SELECT owner_id, status, deleted_at FROM interview WHERE id = ?",
         (interview_id,),
-    ).fetchall()
+    ).fetchone()
+    if not interview or interview["deleted_at"] is not None:
+        raise ValueError("面经不存在或已删除，不能加入分析队列")
+    if interview["owner_id"] != owner_id:
+        raise ValueError("分析队列作用域与面经归属不一致")
+    if owner_id is None and interview["status"] != "approved":
+        raise ValueError("公共面经尚未通过审核，不能加入公共分析队列")
+    if question_detail_ids is None:
+        rows = conn.execute(
+            "SELECT id FROM questions_detail WHERE interview_id = ? AND deleted_at IS NULL",
+            (interview_id,),
+        ).fetchall()
+    else:
+        ids = [int(item) for item in question_detail_ids]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        rows = conn.execute(
+            f"SELECT id FROM questions_detail WHERE interview_id = ? "
+            f"AND id IN ({placeholders}) AND deleted_at IS NULL",
+            [interview_id, *ids],
+        ).fetchall()
     count = 0
+    queue_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
     for r in rows:
-        conn.execute(
-            "INSERT OR IGNORE INTO analysis_queue (interview_id, question_detail_id, status, owner_id) VALUES (?, ?, 'pending', ?)",
-            (interview_id, r[0], owner_id),
-        )
-        count += 1
-    conn.commit()
+        if "contribution_request_id" in queue_columns:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO analysis_queue "
+                "(interview_id, question_detail_id, status, owner_id, contribution_request_id) "
+                "VALUES (?, ?, 'pending', ?, ?)",
+                (interview_id, r[0], owner_id, contribution_request_id),
+            )
+        else:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO analysis_queue "
+                "(interview_id, question_detail_id, status, owner_id) VALUES (?, ?, 'pending', ?)",
+                (interview_id, r[0], owner_id),
+            )
+        count += max(0, cursor.rowcount)
+    if owns_connection:
+        conn.commit()
     return count
 
 
@@ -74,7 +119,7 @@ def should_trigger_clustering(batch_size: int = BATCH_SIZE) -> bool:
     return processing == 0 and pending > 0
 
 
-def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
+def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dict]:
     """原子取出一批 pending 任务并标记为 processing（防并发重复取出）。
 
     Returns items from a single owner_id bucket (NULL for public, or a specific
@@ -84,15 +129,32 @@ def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
     _recover_stuck_processing()
     conn = get_db_connection()
     cursor = conn.cursor()
+    queue_columns = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
+    contribution_returning = (
+        "contribution_request_id"
+        if "contribution_request_id" in queue_columns
+        else "NULL AS contribution_request_id"
+    )
     cursor.execute("BEGIN")
     try:
         # Pick the owner_id bucket with the most pending items.
         # NULL owner_id (public) gets priority when tied.
-        bucket = cursor.execute(
-            "SELECT owner_id, COUNT(*) as cnt FROM analysis_queue "
-            "WHERE status = 'pending' "
-            "GROUP BY owner_id ORDER BY cnt DESC LIMIT 1"
-        ).fetchone()
+        bucket_sql = (
+            "SELECT aq.owner_id, COUNT(*) as cnt FROM analysis_queue aq "
+            "JOIN interview i ON i.id = aq.interview_id "
+            "WHERE aq.status = 'pending' AND i.deleted_at IS NULL "
+            "AND i.status = 'approved' "
+            "AND (i.owner_id = aq.owner_id OR (i.owner_id IS NULL AND aq.owner_id IS NULL))"
+        )
+        bucket_params = []
+        if owner_id is not _ANY_OWNER:
+            bucket_sql += " AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL))"
+            bucket_params.extend([owner_id, owner_id])
+        bucket_sql += " GROUP BY aq.owner_id ORDER BY cnt DESC LIMIT 1"
+        bucket = cursor.execute(bucket_sql, bucket_params).fetchone()
         if not bucket:
             conn.commit()
             return []
@@ -102,11 +164,15 @@ def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
             "UPDATE analysis_queue SET status = 'processing', processed_at = CURRENT_TIMESTAMP "
             "WHERE id IN ("
             "  SELECT aq.id FROM analysis_queue aq "
+            "  JOIN interview i ON aq.interview_id = i.id "
             "  JOIN questions_detail qd ON aq.question_detail_id = qd.id "
-            "  WHERE aq.status = 'pending' AND qd.deleted_at IS NULL "
+            "  WHERE aq.status = 'pending' AND i.deleted_at IS NULL "
+            "  AND i.status = 'approved' AND qd.deleted_at IS NULL "
+            "  AND (i.owner_id = aq.owner_id OR (i.owner_id IS NULL AND aq.owner_id IS NULL)) "
             "  AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL)) "
             "  ORDER BY aq.id LIMIT ?"
-            ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id",
+            ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id, "
+            + contribution_returning,
             (target_owner, target_owner, batch_size),
         ).fetchall()
         conn.commit()
@@ -123,7 +189,7 @@ def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
         return []
     placeholders = ",".join("?" * len(qd_ids))
     details = conn.execute(
-        f"SELECT id, question, cat1, cat2, tags, diff_tag, url, company, round, job_position "
+        f"SELECT id, interview_id, question, cat1, cat2, tags, diff_tag, url, company, round, job_position "
         f"FROM questions_detail WHERE id IN ({placeholders}) AND deleted_at IS NULL",
         qd_ids,
     ).fetchall()
@@ -136,6 +202,7 @@ def dequeue_batch(batch_size: int = BATCH_SIZE) -> List[Dict]:
             d["queue_id"] = r["queue_id"]
             d["qd_id"] = r["qd_id"]
             d["owner_id"] = batch_owner_id
+            d["contribution_request_id"] = r["contribution_request_id"]
             result.append(d)
     return result
 

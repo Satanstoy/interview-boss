@@ -59,6 +59,7 @@ def create_test_db():
         );
         CREATE TABLE questions_detail (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id INTEGER,
             url TEXT,
             company TEXT,
             round TEXT,
@@ -201,7 +202,7 @@ def make_interview(conn, interview_id, url, questions_list, job_position="agent�
     conn.execute(
         "INSERT INTO interview (id, url, company, round, questions_list, job_position, owner_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (interview_id, url, "测试公司", "一面", questions_list, job_position, 1),
+        (interview_id, url, "测试公司", "一面", questions_list, job_position, None),
     )
     conn.commit()
 
@@ -209,9 +210,10 @@ def make_interview(conn, interview_id, url, questions_list, job_position="agent�
 def make_questions_detail(conn, url, questions, job_position="agent开发"):
     for i, q in enumerate(questions):
         conn.execute(
-            "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO questions_detail (interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
+            "VALUES ((SELECT id FROM interview WHERE url = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
+                url,
                 url,
                 "测试公司",
                 "一面",

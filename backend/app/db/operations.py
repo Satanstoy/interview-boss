@@ -75,8 +75,9 @@ def _purge_soft_deleted(url: str, owner_id=None):
             old_url = row["url"]
             if old_url:
                 cursor.execute(
-                    "DELETE FROM questions_detail WHERE url = ? AND deleted_at IS NOT NULL",
-                    (old_url,),
+                    "DELETE FROM questions_detail WHERE interview_id = ? "
+                    "AND deleted_at IS NOT NULL",
+                    (row["id"],),
                 )
             cursor.execute(
                 "DELETE FROM analysis_queue WHERE interview_id = ?", (row["id"],)
@@ -96,18 +97,23 @@ def _purge_soft_deleted(url: str, owner_id=None):
         for row in old_jds:
             old_url = row["url"]
             if old_url:
-                cursor.execute(
-                    "DELETE FROM questions_detail WHERE url = ? AND deleted_at IS NOT NULL",
-                    (old_url,),
-                )
-                cursor.execute(
-                    "DELETE FROM analysis_queue WHERE interview_id IN (SELECT id FROM interview WHERE url = ? AND deleted_at IS NOT NULL)",
-                    (old_url,),
-                )
-                cursor.execute(
-                    "DELETE FROM interview WHERE url = ? AND deleted_at IS NOT NULL",
-                    (old_url,),
-                )
+                old_interview_rows = cursor.execute(
+                    f"SELECT id FROM interview WHERE url = ? AND {where}",
+                    [old_url, *params],
+                ).fetchall()
+                for interview_row in old_interview_rows:
+                    cursor.execute(
+                        "DELETE FROM questions_detail WHERE interview_id = ? "
+                        "AND deleted_at IS NOT NULL",
+                        (interview_row["id"],),
+                    )
+                    cursor.execute(
+                        "DELETE FROM analysis_queue WHERE interview_id = ?",
+                        (interview_row["id"],),
+                    )
+                    cursor.execute(
+                        "DELETE FROM interview WHERE id = ?", (interview_row["id"],)
+                    )
             cursor.execute("DELETE FROM jd WHERE id = ?", (row["id"],))
 
         conn.commit()
@@ -305,13 +311,23 @@ def _insert_details_txn(
     cursor, tagged_rows, job_position="", *, interview_id: int | None = None
 ):
     """Write typed facts for one already-known interview inside its transaction."""
+    detail_ids = []
     if not _distribution_storage_available(cursor):
+        detail_columns = _table_columns(cursor, "questions_detail")
         for tr in tagged_rows:
-            cursor.execute(
-                "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (*tr, job_position),
-            )
-        return
+            if interview_id is not None and "interview_id" in detail_columns:
+                cursor.execute(
+                    "INSERT INTO questions_detail (interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (interview_id, *tr, job_position),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (*tr, job_position),
+                )
+            detail_ids.append(cursor.lastrowid)
+        return detail_ids
     for tr in tagged_rows:
         question_type = map_question_type(tr[4], tr[5], tr[6], tr[3])
         cursor.execute(
@@ -329,18 +345,46 @@ def _insert_details_txn(
                 map_dimension(question_type),
             ),
         )
+        detail_ids.append(cursor.lastrowid)
     _mark_distribution_refresh_for_interview_txn(cursor, interview_id)
+    return detail_ids
 
 
-def _cleanup_old_sources_txn(cursor, url: str):
+def _cleanup_old_sources_txn(cursor, url: str, owner_id: int | None = None):
     """移除某面经对 question_bank 的所有贡献，frequency=0 直接删除。
 
     Delegates to _cleanup_old_sources_txn_v2 for complete cleanup.
     """
-    _cleanup_old_sources_txn_v2(cursor, url)
+    _cleanup_old_sources_txn_v2(cursor, url, owner_id=owner_id)
 
 
-def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
+def cleanup_interview_question_bank_sources(
+    cursor, interview_id: int, *, job_position: str = ""
+):
+    """Remove one interview's question-bank contribution in its owner scope.
+
+    The interview ID is the authoritative input.  The URL is read from that
+    row only because normalized question-bank source rows still use URL as
+    their legacy identity; owner scope prevents a same-URL public/private
+    contribution from being touched together.
+    """
+    interview = cursor.execute(
+        "SELECT url, owner_id, job_position FROM interview WHERE id = ?",
+        (interview_id,),
+    ).fetchone()
+    if not interview or not interview["url"]:
+        return
+    _cleanup_old_sources_txn_v2(
+        cursor,
+        interview["url"],
+        job_position or interview["job_position"] or "",
+        owner_id=interview["owner_id"],
+    )
+
+
+def _cleanup_old_sources_txn_v2(
+    cursor, url: str, job_position: str = "", owner_id: int | None = None
+):
     """彻底移除某面经对 question_bank 的所有贡献。
 
     比 v1 多清理：
@@ -348,6 +392,12 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
     - original_question_sources 中属于该 URL 的条目
     - 被删除 QB 记录的 question_position 映射
     """
+    # A URL is not an ownership boundary: the same source URL may exist in a
+    # user's private interview and in the public canonical corpus.  Cleanup
+    # must therefore stay inside the queue's owner bucket.
+    owner_sql = "owner_id IS NULL" if owner_id is None else "owner_id = ?"
+    owner_params = [] if owner_id is None else [owner_id]
+
     # Use normalized question_sources table with indexed url column instead of LIKE scan
     try:
         affected_ids = cursor.execute(
@@ -357,8 +407,9 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
         if affected_ids:
             id_placeholders = ",".join("?" * len(affected_ids))
             affected_rows = cursor.execute(
-                f"SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE id IN ({id_placeholders})",
-                [r[0] for r in affected_ids],
+                f"SELECT id, sources, original_questions, original_question_sources "
+                f"FROM question_bank WHERE id IN ({id_placeholders}) AND {owner_sql}",
+                [r[0] for r in affected_ids] + owner_params,
             ).fetchall()
         else:
             affected_rows = []
@@ -376,15 +427,16 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
             affected_rows.extend(
                 cursor.execute(
                     f"SELECT id, sources, original_questions, original_question_sources "
-                    f"FROM question_bank WHERE id IN ({placeholders})",
-                    missing_ids,
+                    f"FROM question_bank WHERE id IN ({placeholders}) AND {owner_sql}",
+                    missing_ids + owner_params,
                 ).fetchall()
             )
     except Exception:
         # Fallback for tests / missing normalized tables
         affected_rows = cursor.execute(
-            "SELECT id, sources, original_questions, original_question_sources FROM question_bank WHERE sources LIKE ?",
-            (f"%{url}%",),
+            f"SELECT id, sources, original_questions, original_question_sources "
+            f"FROM question_bank WHERE sources LIKE ? AND {owner_sql}",
+            [f"%{url}%", *owner_params],
         ).fetchall()
 
     ids_to_delete = []
@@ -470,11 +522,15 @@ def _cleanup_old_sources_txn_v2(cursor, url: str, job_position: str = ""):
         )
 
     cursor.execute(
-        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE frequency <= 0 AND owner_id IS NULL AND deleted_at IS NULL"
+        "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, "
+        f"updated_at = CURRENT_TIMESTAMP WHERE frequency <= 0 AND {owner_sql} "
+        "AND deleted_at IS NULL",
+        owner_params,
     )
     cursor.execute(
         "DELETE FROM question_position WHERE question_id IN "
-        "(SELECT id FROM question_bank WHERE frequency <= 0 AND owner_id IS NULL)"
+        f"(SELECT id FROM question_bank WHERE frequency <= 0 AND {owner_sql})",
+        owner_params,
     )
 
 
@@ -498,6 +554,7 @@ def _apply_incremental_txn(
     user_id,
     current_pos,
     owner_id=None,
+    persist_unmatched=True,
 ):
     """增量更新 question_bank（matched 增频，unmatched 新建）。
 
@@ -597,7 +654,12 @@ def _apply_incremental_txn(
     pos_row_cache = cursor.execute(
         "SELECT id FROM job_positions WHERE name = ?", (current_pos,)
     ).fetchone()
-    for item in unmatched_rows:
+    # Personal uploads use the durable analysis queue as the sole creator of
+    # new clusters.  Keeping the old synchronous singleton insert here would
+    # create the same personal question twice: once as a singleton now and
+    # once again when the queue batch runs.
+    rows_to_persist = unmatched_rows if persist_unmatched else []
+    for item in rows_to_persist:
         row = item.get("_orig_row") if isinstance(item, dict) else item
         url, company, round_, q_text = row[0], row[1], row[2], row[3]
         cat1 = normalize_category(row[4])
@@ -688,12 +750,13 @@ def submit_interview_txn(
     submitter_is_admin,
     user_id,
     qb_owner_id=None,
+    persist_unmatched=True,
 ):
     """操作3 提交新面经：insert_interview + insert_details + incremental_update。
 
     qb_owner_id: question_bank 中 unmatched 新建行的 owner_id（个人题库传 user_id）。
     单事务，全部成功或全部回滚。
-    返回 (answer_tasks, interview_id)。
+    返回 (answer_tasks, interview_id, question_detail_ids)。
     """
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -710,7 +773,7 @@ def submit_interview_txn(
                 job_position,
             )
             interview_id = cursor.lastrowid
-            _insert_details_txn(
+            detail_ids = _insert_details_txn(
                 cursor, tagged_rows, job_position, interview_id=interview_id
             )
             answer_tasks = _apply_incremental_txn(
@@ -722,9 +785,10 @@ def submit_interview_txn(
                 user_id,
                 job_position,
                 owner_id=qb_owner_id,
+                persist_unmatched=persist_unmatched,
             )
             conn.commit()
-            return answer_tasks, interview_id
+            return answer_tasks, interview_id, detail_ids
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):
@@ -787,7 +851,9 @@ def sync_interview_details(
         cursor = conn.cursor()
         try:
             cursor.execute("BEGIN")
-            _cleanup_old_sources_txn(cursor, url)
+            cleanup_interview_question_bank_sources(
+                cursor, interview_id, job_position=job_position
+            )
             _replace_details_txn(cursor, interview_id, url, tagged_rows, job_position)
             answer_tasks = _apply_incremental_txn(
                 cursor,
@@ -902,7 +968,9 @@ def _insert_jd(
                     job_position,
                 ),
             )
+            jd_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.commit()
+            return int(jd_id)
         except Exception as e:
             if "UNIQUE" in str(e):
                 raise ValueError("该 URL 已存在，不可重复上传")
@@ -975,8 +1043,8 @@ async def update_taxonomy_permissions(
     if taxonomy["source"] == "system" and not user.get("is_admin"):
         raise PermissionError("只有管理员可以编辑系统分类")
 
-    if taxonomy["source"] == "user" and taxonomy["owner_id"] != user["id"]:
-        raise PermissionError("无权编辑此分类")
+    if taxonomy["source"] != "system":
+        raise ValueError("个人分类体系已停用，历史记录不可编辑")
 
     # 更新分类
     categories_json = json.dumps(categories, ensure_ascii=False)
@@ -999,85 +1067,41 @@ async def update_taxonomy_permissions(
 
 
 async def create_personal_taxonomy(position: str, categories: list, user: dict) -> dict:
-    """创建个人分类体系"""
-    categories_json = json.dumps(categories, ensure_ascii=False)
-    with get_db_connection() as conn:
-        # 检查用户是否已有该岗位的个人分类
-        existing = conn.execute(
-            "SELECT id FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
-            (position, user["id"]),
-        ).fetchone()
-
-        if existing:
-            # 更新现有分类
-            conn.execute(
-                "UPDATE taxonomy SET categories_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (categories_json, existing[0]),
-            )
-            taxonomy_id = existing[0]
-        else:
-            # 创建新分类
-            cursor = conn.execute(
-                "INSERT INTO taxonomy (position_name, categories_json, source, owner_id) VALUES (?, ?, 'user', ?)",
-                (position, categories_json, user["id"]),
-            )
-            taxonomy_id = cursor.lastrowid
-
-        conn.commit()
-
-    return {
-        "success": True,
-        "taxonomy": {
-            "id": taxonomy_id,
-            "position_name": position,
-            "categories": categories,
-            "source": "user",
-            "owner_id": user["id"],
-        },
-    }
+    """Reject the former user-owned taxonomy write path."""
+    raise ValueError("岗位分类体系由系统维护，不支持个人分类")
 
 
 async def share_taxonomy(taxonomy_id: int, user: dict) -> dict:
-    """分享分类体系（设为公开）"""
-    taxonomy = get_taxonomy_by_id(taxonomy_id)
-    if not taxonomy:
-        raise ValueError("分类体系不存在")
-
-    # 只能分享自己的分类
-    if taxonomy["source"] != "user" or taxonomy["owner_id"] != user["id"]:
-        raise PermissionError("只能分享自己的分类")
-
-    with get_db_connection() as conn:
-        conn.execute(
-            "UPDATE taxonomy SET is_public = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (taxonomy_id,),
-        )
-        conn.commit()
-
-    return {"success": True, "taxonomy": {"id": taxonomy_id, "is_public": 1}}
+    """Reject the former user-owned taxonomy sharing path."""
+    raise ValueError("个人分类体系已停用，不支持分享")
 
 
 def delete_taxonomy_by_id(taxonomy_id: int) -> bool:
-    """删除分类体系（管理员用）"""
+    """撤下旧的公开分类记录，不物理删除历史数据。"""
     with get_db_connection() as conn:
         row = conn.execute(
-            "SELECT id FROM taxonomy WHERE id = ?", (taxonomy_id,)
+            "SELECT id, source, is_public FROM taxonomy WHERE id = ?", (taxonomy_id,)
         ).fetchone()
-        if not row:
+        if not row or row[1] == "system" or not row[2]:
             return False
-        conn.execute("DELETE FROM taxonomy WHERE id = ?", (taxonomy_id,))
+        conn.execute(
+            "UPDATE taxonomy SET is_public = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (taxonomy_id,),
+        )
         conn.commit()
         return True
 
 
 async def get_public_shared_taxonomies(user: dict) -> list:
-    """获取公开分享的分类体系列表"""
+    """获取系统分类；历史个人分类不再作为公共分类暴露。"""
     with get_db_connection() as conn:
         rows = conn.execute(
             """SELECT t.id, t.position_name, t.categories_json, t.source, t.owner_id, t.is_public, u.username
                FROM taxonomy t
+               JOIN job_positions jp ON jp.name = t.position_name
                LEFT JOIN users u ON t.owner_id = u.id
-               WHERE t.is_public = 1"""
+               WHERE t.source = 'system' AND t.owner_id IS NULL
+                 AND (jp.is_deleted = 0 OR jp.is_deleted IS NULL)"""
         ).fetchall()
 
     return [
@@ -1094,13 +1118,15 @@ async def get_public_shared_taxonomies(user: dict) -> list:
 
 
 def query_public_taxonomies() -> list:
-    """查询公开分享的分类体系"""
+    """查询系统分类；历史个人分类不再作为公共分类暴露。"""
     with get_db_connection() as conn:
         rows = conn.execute(
             """SELECT t.id, t.position_name, t.categories_json, t.source, t.owner_id, t.is_public, u.username
                FROM taxonomy t
+               JOIN job_positions jp ON jp.name = t.position_name
                LEFT JOIN users u ON t.owner_id = u.id
-               WHERE t.is_public = 1"""
+               WHERE t.source = 'system' AND t.owner_id IS NULL
+                 AND (jp.is_deleted = 0 OR jp.is_deleted IS NULL)"""
         ).fetchall()
 
     return [

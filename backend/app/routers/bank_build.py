@@ -13,9 +13,7 @@ from app.services.question_bank_integrity import (
 )
 
 logger = logging.getLogger("interview-boss")
-router = (
-    APIRouter()
-)  # NO prefix - paths include both /api/jobs/... and /api/master-bank/...
+router = APIRouter()  # NO prefix - paths include both /api/jobs/... and /api/master-bank/...
 
 
 @router.get("/api/jobs/{job_id}/stream")
@@ -31,7 +29,7 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
             def _check():
                 with get_db_connection() as conn:
                     return conn.execute(
-                        "SELECT status, progress_current, progress_total, progress_message, result, error "
+                        "SELECT status, progress_current, progress_total, progress_message, progress_phase, result, last_error "
                         "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
                         (job_id, is_admin, user_id),
                     ).fetchone()
@@ -40,18 +38,15 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
             if not job:
                 yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'})}\n\n"
                 break
-
             update = {
-                "type": "progress"
-                if job["status"] in ("queued", "running")
-                else job["status"],
+                "type": "progress" if job["status"] in ("queued", "running") else job["status"],
                 "status": job["status"],
                 "current": job["progress_current"],
                 "total": job["progress_total"],
                 "message": job["progress_message"]
                 or ("等待 worker 调度" if job["status"] == "queued" else ""),
+                "step": job["progress_phase"] or "",
             }
-
             current_update = json.dumps(update)
             if current_update != last_update:
                 yield f"data: {current_update}\n\n"
@@ -166,6 +161,7 @@ async def build_master_bank(user: dict = Depends(get_admin_user)):
         "message": "重建任务已提交，请通过 SSE 监听进度",
     }
 
+
 @router.post("/api/master-bank/compact")
 async def compact_singletons(
     admin: dict = Depends(get_admin_user),
@@ -201,6 +197,19 @@ async def compact_singletons(
 @router.post("/api/master-bank/build-personal")
 async def build_personal_bank(user: dict = Depends(get_current_user)):
     """个人题库与公共题库聚类合并（SSE 流式推送进度）"""
+
+    # 并发保护：检查是否有运行中的个人重建任务
+    def _check_existing():
+        with get_db_connection() as conn:
+            return conn.execute(
+                "SELECT id FROM jobs WHERE job_type = 'build_personal_bank' "
+                "AND status IN ('pending', 'queued', 'running') AND created_by = ?",
+                (user["id"],),
+            ).fetchone()
+
+    existing = await run_db(_check_existing)
+    if existing:
+        raise HTTPException(status_code=409, detail="已有个人题库重建任务在执行中，请等待完成")
 
     async def event_stream():
         try:
@@ -299,9 +308,7 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                         if existing:
                             try:
                                 sources = (
-                                    json.loads(existing["sources"])
-                                    if existing["sources"]
-                                    else []
+                                    json.loads(existing["sources"]) if existing["sources"] else []
                                 )
                             except (json.JSONDecodeError, TypeError):
                                 sources = []
@@ -365,11 +372,11 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                 sync_question_bank_projections(
                                     conn.cursor(), qb_id, sources, orig_qs, orig_qs_src
                                 )
-                                from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-                                mark_cluster_review_pending(
-                                    conn, qb_id, "private_question_merged"
+                                from app.services.cluster_review_lifecycle import (
+                                    mark_cluster_review_pending,
                                 )
+
+                                mark_cluster_review_pending(conn, qb_id, "private_question_merged")
                                 # 删除已合并的个人题目
                                 conn.execute(
                                     "DELETE FROM question_bank WHERE id = ?",
@@ -386,7 +393,9 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                                     ),
                                 )
                                 personal_oqs = personal_row.get("original_questions") or []
-                                personal_oqs_src = personal_row.get("original_question_sources") or []
+                                personal_oqs_src = (
+                                    personal_row.get("original_question_sources") or []
+                                )
                                 if isinstance(personal_oqs, str):
                                     personal_oqs = json.loads(personal_oqs or "[]")
                                 if isinstance(personal_oqs_src, str):

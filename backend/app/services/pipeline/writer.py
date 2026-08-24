@@ -73,7 +73,13 @@ async def tag_and_write_details(
             if resolved_interview_id is None:
                 # Compatibility-only utility use.  An unlinked detail cannot enter
                 # distribution statistics, so it cannot contaminate their default.
-                conn.execute("DELETE FROM questions_detail WHERE url = ?", (url,))
+                # Compatibility-only legacy rows have no interview_id.  Never
+                # delete linked details from another same-URL source.
+                conn.execute(
+                    "DELETE FROM questions_detail WHERE url = ? "
+                    "AND interview_id IS NULL",
+                    (url,),
+                )
                 from app.db.operations import _insert_details_txn
                 _insert_details_txn(conn.cursor(), tagged_rows, job_position)
             else:
@@ -162,7 +168,7 @@ def apply_matched(conn, matched, job_position, saved_answers):
             _mark_review_pending_if_available(conn, cluster_id, "new_variant_matched")
 
 
-def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
+def insert_new_clusters(conn, new_clusters, job_position, saved_answers, owner_id=None):
     """插入新聚类到 question_bank"""
     new_qb_ids = []
     pos_rows_cache = conn.execute("SELECT id FROM job_positions WHERE name = ?",
@@ -173,13 +179,13 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
             "INSERT INTO question_bank "
             "(question, cat1, cat2, tags, difficulty, frequency, sources, "
             "original_questions, original_question_sources, owner_id, job_position) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (entry['question'], entry['cat1'], entry['cat2'], entry['tags'],
              entry['difficulty'], entry['frequency'],
              json.dumps(entry['sources'], ensure_ascii=False),
              json.dumps(entry['original_questions'], ensure_ascii=False),
              json.dumps(entry['original_question_sources'], ensure_ascii=False),
-             job_position)
+             owner_id, job_position)
         )
         new_id = cursor.lastrowid
         # 设置 cluster_id = 自身 id（新建聚类自己就是代表）
@@ -195,7 +201,7 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
         new_qb_ids.append(new_id)
 
         claim_public_original_questions(
-            conn, new_id, entry.get("owner_id"), "approved", entry["original_questions"]
+            conn, new_id, owner_id, "approved", entry["original_questions"]
         )
         sync_question_bank_projections(
             conn.cursor(),
@@ -227,7 +233,7 @@ def insert_new_clusters(conn, new_clusters, job_position, saved_answers):
 
         # The new cluster and its durable review outbox row are committed by
         # the caller's single atomic cluster-batch transaction.
-        if entry.get("owner_id") is None:
+        if owner_id is None:
             _mark_review_pending_if_available(conn, new_id, "new_cluster")
 
     return new_qb_ids

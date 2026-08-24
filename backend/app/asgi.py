@@ -31,6 +31,7 @@ from app.routers import (
     chat,
     coding,
     error_report,
+    public_contributions,
 )
 from app.routers.profile_pkg import router as profile_pkg_router
 from app.routers.questions_pkg import router as questions_pkg_router
@@ -257,6 +258,7 @@ app.include_router(profile_pkg_router)
 app.include_router(chat.router)
 app.include_router(coding.router)
 app.include_router(error_report.router)
+app.include_router(public_contributions.router)
 app.mount("/mcp", mcp_app)
 
 

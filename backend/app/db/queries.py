@@ -31,25 +31,23 @@ def get_current_job_position() -> str:
 def get_user_job_position(user_id: int) -> tuple[int | None, str]:
     """获取用户的当前岗位：返回 (position_id, position_name)
 
-    优先级：users.personal_position → users.current_position_id → 全局 fallback
+    只使用系统登记且 active 的岗位；旧 personal_position 字段不再参与运行时决策。
     """
     from app.db.connection import get_db_connection
 
     default_name = DEFAULT_TAXONOMY["job_position"]
     try:
         with get_db_connection() as conn:
-            # 最高优先：用户个人岗位（不关联 job_positions 表）
-            row = conn.execute(
-                "SELECT personal_position FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
-            if row and row["personal_position"]:
-                return None, row["personal_position"]
+            position_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('job_positions')").fetchall()
+            }
+            deleted_filter = "AND (jp.is_deleted = 0 OR jp.is_deleted IS NULL)" if "is_deleted" in position_columns else ""
 
-            # 次优先：users.current_position_id → job_positions.name
+            # 优先：users.current_position_id → active job_positions.name
             row = conn.execute(
                 "SELECT u.current_position_id, jp.name FROM users u "
                 "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
-                "WHERE u.id = ?",
+                f"WHERE u.id = ? {deleted_filter}",
                 (user_id,),
             ).fetchone()
             if row and row["current_position_id"] and row["name"]:
@@ -61,7 +59,8 @@ def get_user_job_position(user_id: int) -> tuple[int | None, str]:
             ).fetchone()
             if pos_row and pos_row[0]:
                 jp_row = conn.execute(
-                    "SELECT id FROM job_positions WHERE name = ?", (pos_row[0],)
+                    f"SELECT id FROM job_positions WHERE name = ? {('AND (is_deleted = 0 OR is_deleted IS NULL)' if 'is_deleted' in position_columns else '')}",
+                    (pos_row[0],),
                 ).fetchone()
                 return (jp_row[0] if jp_row else None), pos_row[0]
     except Exception:
@@ -203,53 +202,68 @@ def can_edit_question(owner_id, user_id: int, is_admin: bool) -> bool:
 
 
 def get_taxonomy_for_position(position: str = None, user_id: int = None) -> dict:
-    """从 taxonomy 表读取岗位分类配置，fallback 链: 用户个人分类 → 系统默认分类 → 常量
+    """读取系统维护的岗位分类配置，个人 taxonomy 仅作为历史数据保留。
 
     Args:
         position: 岗位名称
-        user_id: 用户ID（用于获取个人分类）
+        user_id: 保留该参数以兼容旧调用方，但不会影响分类结果。
     """
     from app.db.connection import get_db_connection
 
+    requested_position = position
     if position is None:
         position = get_current_job_position()
     try:
         with get_db_connection() as conn:
-            # 1. 优先查找用户个人分类
-            if user_id:
-                row = conn.execute(
-                    "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'user' AND owner_id = ?",
-                    (position, user_id),
-                ).fetchone()
-                if row and row["categories_json"]:
-                    return {
-                        "job_position": position,
-                        "categories": json.loads(row["categories_json"]),
-                    }
-
-            # 2. 查找系统默认分类
+            # 仅读取系统分类。用户分类记录保留用于历史审计，但不能参与
+            # 上传、聚类、公共提交或聊天上下文，避免同一岗位出现多套语义。
+            taxonomy_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('taxonomy')").fetchall()
+            }
+            tags_column = ", tags_json" if "tags_json" in taxonomy_columns else ""
             row = conn.execute(
-                "SELECT categories_json FROM taxonomy WHERE position_name = ? AND source = 'system'",
+                f"SELECT categories_json{tags_column} FROM taxonomy "
+                "WHERE position_name = ? AND source = 'system' AND owner_id IS NULL",
                 (position,),
             ).fetchone()
             if row and row["categories_json"]:
+                tags_json = row["tags_json"] if "tags_json" in taxonomy_columns else "[]"
                 return {
                     "job_position": position,
                     "categories": json.loads(row["categories_json"]),
+                    "tags": json.loads(tags_json or "[]"),
+                    "source": "system",
+                    "configured": True,
                 }
 
-            # 3. fallback 到默认行
-            row2 = conn.execute(
-                "SELECT position_name, categories_json FROM taxonomy WHERE is_default = 1"
-            ).fetchone()
-            if row2 and row2["categories_json"]:
-                return {
-                    "job_position": row2["position_name"],
-                    "categories": json.loads(row2["categories_json"]),
-                }
+            # 只有未明确指定岗位时，才允许兼容旧版 default taxonomy。
+            if not requested_position:
+                row2 = conn.execute(
+                    f"SELECT position_name, categories_json{tags_column} FROM taxonomy "
+                    "WHERE is_default = 1 AND source = 'system' AND owner_id IS NULL"
+                ).fetchone()
+                if row2 and row2["categories_json"]:
+                    tags_json = row2["tags_json"] if "tags_json" in taxonomy_columns else "[]"
+                    return {
+                        "job_position": row2["position_name"],
+                        "categories": json.loads(row2["categories_json"]),
+                        "tags": json.loads(tags_json or "[]"),
+                        "source": "system",
+                        "configured": True,
+                    }
     except Exception:
         pass
-    # 4. 最终 fallback 到代码常量
+    # 对明确指定但尚未配置标准分类的岗位，不得静默套用 Agent 分类。
+    # 调用方可以据此阻止上传/聚类，等待管理员先完成 taxonomy 配置。
+    if requested_position:
+        return {
+            "job_position": requested_position,
+            "categories": [],
+            "tags": [],
+            "source": "system",
+            "configured": False,
+        }
+    # 没有明确岗位时保留旧版常量 fallback，兼容尚未初始化数据库的工具调用。
     return DEFAULT_TAXONOMY
 
 
@@ -264,6 +278,9 @@ def save_taxonomy_for_position(
         source: 来源 ('system' 或 'user')
         owner_id: 用户ID (仅 user 来源时需要)
     """
+    if source != "system" or owner_id is not None:
+        raise ValueError("岗位分类体系由系统维护，不支持个人分类")
+
     from app.db.connection import get_db_connection
 
     with get_db_connection() as conn:

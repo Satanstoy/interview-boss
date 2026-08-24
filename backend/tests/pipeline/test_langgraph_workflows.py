@@ -75,6 +75,7 @@ def create_test_db():
         );
         CREATE TABLE questions_detail (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id INTEGER,
             url TEXT,
             company TEXT,
             round TEXT,
@@ -323,6 +324,13 @@ MOCK_FILL_RESPONSE = json.dumps(
 )
 
 MOCK_ANSWER = "这是 AI 生成的答案。**Redis 持久化**主要分为 RDB 和 AOF 两种方式。RDB 是快照式备份，AOF 是追加式日志。"
+
+TEST_SYSTEM_TAXONOMY = {
+    "job_position": "后端开发",
+    "configured": True,
+    "categories": [],
+    "tags": [],
+}
 
 
 def _mock_tag_batch(
@@ -659,7 +667,10 @@ class TestSubmitNodes:
                 "app.services.submit_service.tag_questions_batch",
                 side_effect=_mock_tag_batch,
             ),
-            patch("app.db.connection.get_taxonomy_for_position", return_value=None),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TEST_SYSTEM_TAXONOMY,
+            ),
             patch(
                 "app.db.connection.run_db",
                 new_callable=AsyncMock,
@@ -798,15 +809,15 @@ class TestSubmitNodes:
                 ],
                 "saved_url": "https://test.com/2",
                 "season": "2027届",
-                "user_id": 2,
-                "is_admin": False,
+                "user_id": 1,
+                "is_admin": True,
                 "job_position": "后端开发",
             }
             result = asyncio.run(persist_public_node(state))
 
         assert result["saved_interview_id"] is not None
         assert result["record_owner_id"] is None  # public: no owner
-        assert result["record_status"] == "pending"  # non-admin → pending
+        assert result["record_status"] == "approved"  # direct public path is admin-only
 
         conn = mock_db
         iv = conn.execute(
@@ -942,7 +953,7 @@ class TestBuildNodes:
             "INSERT INTO interview (id, url, company, round, job_position) VALUES (100, 'https://test.com', '字节', '一面', '后端开发')"
         )
         conn.execute(
-            "INSERT INTO questions_detail (id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (200, 'https://test.com', '字节', '一面', 'Redis持久化', '数据库', 'Redis', '', 'L2-中等', '后端开发')"
+            "INSERT INTO questions_detail (id, interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (200, 100, 'https://test.com', '字节', '一面', 'Redis持久化', '数据库', 'Redis', '', 'L2-中等', '后端开发')"
         )
         conn.commit()
 
@@ -960,7 +971,7 @@ class TestBuildNodes:
             "INSERT INTO interview (id, url, company, round, job_position) VALUES (101, 'https://t.com', '公司', '一面', '后端开发')"
         )
         conn.execute(
-            "INSERT INTO questions_detail (id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (301, 'https://t.com', '公司', '一面', 'Q1', 'A', 'B', '', 'L2', '后端开发')"
+            "INSERT INTO questions_detail (id, interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (301, 101, 'https://t.com', '公司', '一面', 'Q1', 'A', 'B', '', 'L2', '后端开发')"
         )
         conn.execute(
             "INSERT INTO analysis_queue (interview_id, question_detail_id, status) VALUES (101, 301, 'pending')"
@@ -1169,7 +1180,10 @@ class TestSubmitGraphE2E:
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
             ),
-            patch("app.db.connection.get_taxonomy_for_position", return_value=None),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TEST_SYSTEM_TAXONOMY,
+            ),
             patch(
                 "app.db.connection.run_db",
                 new_callable=AsyncMock,
@@ -1235,7 +1249,10 @@ class TestSubmitGraphE2E:
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
             ),
-            patch("app.db.connection.get_taxonomy_for_position", return_value=None),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TEST_SYSTEM_TAXONOMY,
+            ),
             patch(
                 "app.db.connection.run_db",
                 new_callable=AsyncMock,
@@ -1324,7 +1341,10 @@ class TestSubmitGraphE2E:
                 "app.services.submit_service.tag_questions_batch",
                 AsyncMock(side_effect=_mock_tag_batch_low_quality),
             ),
-            patch("app.db.connection.get_taxonomy_for_position", return_value=None),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TEST_SYSTEM_TAXONOMY,
+            ),
             patch(
                 "app.db.connection.run_db",
                 new_callable=AsyncMock,
