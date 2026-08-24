@@ -5,14 +5,15 @@ import json
 import logging
 import uuid
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Header
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from app.core.auth import get_current_user
 from app.db.connection import run_db, get_user_job_position
 from app.models.schemas import CreateConversationRequest
 from app.services import chat_service, resume_service
 from app.services.llm_quota import check_and_record
+from app.worker_enqueue import enqueue_interview_turn_job
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/chat")
@@ -35,6 +36,8 @@ class SendMessageRequest(BaseModel):
     client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)
     existing_user_message_id: Optional[int] = Field(None, gt=0)
     regenerate_message_id: Optional[int] = Field(None, gt=0)
+    revision_of_turn_id: Optional[str] = Field(None, min_length=1, max_length=64)
+    harness_version: Optional[str] = Field(None, pattern=r"^(1\.0|2\.0)$")
 
 
 class RegenerateMessageRequest(BaseModel):
@@ -42,6 +45,9 @@ class RegenerateMessageRequest(BaseModel):
 
     model: Optional[str] = None
     client_request_id: Optional[str] = Field(None, min_length=1, max_length=128)
+    # Keep omitted legacy requests on the old inline SSE path.  New clients
+    # send an explicit 2.0 value and therefore use the durable 202 flow.
+    harness_version: Optional[str] = Field(None, pattern=r"^(1\.0|2\.0)$")
 
 
 class CancelTurnRequest(BaseModel):
@@ -85,16 +91,12 @@ async def create_conversation(
 
         # 如果上传了简历，保存到长期记忆
         if resume_text and resume_text != "__saved__":
-            await run_db(
-                lambda: chat_service.save_resume_memory(user["id"], resume_text)
-            )
+            await run_db(lambda: chat_service.save_resume_memory(user["id"], resume_text))
 
         # 只有没有 first_message 时才生成开场白
         if not req.first_message:
             opening = chat_service.generate_opening_message(req.mode)
-            await run_db(
-                lambda: chat_service.save_message(result["id"], "assistant", opening)
-            )
+            await run_db(lambda: chat_service.save_message(result["id"], "assistant", opening))
             result["opening_message"] = opening
         else:
             result["opening_message"] = None
@@ -127,9 +129,7 @@ async def list_conversations(
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: str, user: dict = Depends(get_current_user)
-):
+async def get_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
     """获取对话详情"""
     conv = await run_db(
         lambda: chat_service.get_conversation(
@@ -142,9 +142,7 @@ async def get_conversation(
 
 
 @router.put("/conversations/{conversation_id}/title")
-async def update_title(
-    conversation_id: str, body: dict, user: dict = Depends(get_current_user)
-):
+async def update_title(conversation_id: str, body: dict, user: dict = Depends(get_current_user)):
     """更新对话标题"""
     title = body.get("title", "").strip()
     if not title:
@@ -163,9 +161,7 @@ async def update_title(
 
 
 @router.put("/conversations/{conversation_id}/archive")
-async def archive_conversation(
-    conversation_id: str, user: dict = Depends(get_current_user)
-):
+async def archive_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
     """归档对话"""
     success = await run_db(
         lambda: chat_service.archive_conversation(
@@ -178,9 +174,7 @@ async def archive_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(
-    conversation_id: str, user: dict = Depends(get_current_user)
-):
+async def delete_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
     """删除对话"""
     success = await run_db(
         lambda: chat_service.delete_conversation(
@@ -199,9 +193,7 @@ def _metadata_events_from_done(meta: dict) -> list[dict]:
     """Split run_chat done metadata into public SSE events."""
     events: list[dict] = []
     if meta.get("candidate_questions"):
-        events.append(
-            {"type": "candidates", "questions": meta.get("candidate_questions", [])}
-        )
+        events.append({"type": "candidates", "questions": meta.get("candidate_questions", [])})
     if "selected_question" in meta:
         events.append(
             {
@@ -278,23 +270,76 @@ async def cancel_turn(
 ):
     """Immediately invalidate a running turn; repeated cancellation is safe."""
     try:
+        before = await run_db(
+            lambda: chat_service.get_chat_turn(
+                turn_id,
+                conversation_id=conversation_id,
+                user_id=user["id"],
+            )
+        )
+        if not before:
+            raise chat_service.TurnNotFound("turn not found")
+        initial_events = await run_db(
+            lambda: chat_service.get_turn_events(
+                turn_id,
+                user_id=user["id"],
+                conversation_id=conversation_id,
+                limit=1,
+            )
+        )
+        harness_v2 = any(
+            event.get("type") == "turn.started"
+            and (event.get("payload") or {}).get("harness_version") == "2.0"
+            for event in initial_events
+        )
         turn = await run_db(
             lambda: chat_service.cancel_chat_turn(
                 turn_id,
                 conversation_id,
                 user["id"],
                 req.reason,
+                defer_terminal=harness_v2,
             )
         )
     except chat_service.TurnNotFound:
         raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+
+    if before.get("status") == "running" and not harness_v2:
+        await run_db(
+            lambda: chat_service.append_turn_event(
+                user_id=user["id"],
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                event_id=f"evt:{turn_id}:cancel-requested",
+                event_type="turn.cancel_requested",
+                action_id=None,
+                phase="commit",
+                channel="system",
+                payload={"reason": req.reason},
+            )
+        )
+        await run_db(
+            lambda: chat_service.append_turn_event(
+                user_id=user["id"],
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                event_id=f"evt:{turn_id}:cancelled",
+                event_type="turn.cancelled",
+                action_id=None,
+                phase="commit",
+                channel="system",
+                payload={"reason": req.reason},
+            )
+        )
 
     return {
         "status": "success",
         "data": {
             "turn_id": turn.id,
             "fence": turn.fence,
-            "status": turn.status,
+            "status": (
+                "cancel_requested" if harness_v2 and turn.status == "running" else turn.status
+            ),
         },
     }
 
@@ -324,6 +369,7 @@ async def stream_turn_events(
     turn_id: str,
     after_sequence: int = 0,
     follow: bool = False,
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
     user: dict = Depends(get_current_user),
 ):
     """Replay canonical turn events and optionally follow until terminal state.
@@ -345,6 +391,20 @@ async def stream_turn_events(
 
     async def event_stream():
         cursor = max(0, int(after_sequence))
+        if last_event_id:
+            try:
+                cursor = max(cursor, int(last_event_id))
+            except (TypeError, ValueError):
+                resolved = await run_db(
+                    lambda: chat_service.get_turn_event_sequence(
+                        turn_id,
+                        event_id=last_event_id,
+                        user_id=user["id"],
+                        conversation_id=conversation_id,
+                    )
+                )
+                if resolved is not None:
+                    cursor = max(cursor, int(resolved))
         idle_polls = 0
         while True:
             events = await run_db(
@@ -357,7 +417,7 @@ async def stream_turn_events(
             )
             for event in events:
                 cursor = max(cursor, int(event.get("sequence") or cursor))
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                yield f"id: {event.get('event_id', cursor)}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             if not follow:
                 return
 
@@ -372,6 +432,8 @@ async def stream_turn_events(
                 "completed",
                 "failed",
                 "cancelled",
+                "timed_out",
+                "budget_exhausted",
             }:
                 return
             idle_polls += 1
@@ -422,9 +484,7 @@ async def send_message(
     from app.core.cache import try_claim_chat_turn
 
     if not req.regenerate_message_id:
-        claimed = await try_claim_chat_turn(
-            conversation_id, client_request_id, user["id"]
-        )
+        claimed = await try_claim_chat_turn(conversation_id, client_request_id, user["id"])
         if not claimed:
             raise HTTPException(
                 status_code=409,
@@ -436,7 +496,19 @@ async def send_message(
 
     # 回合占用和用户消息必须在同一个事务内完成，避免并发请求先后通过检查。
     try:
-        if req.regenerate_message_id:
+        if req.revision_of_turn_id:
+            turn = await run_db(
+                lambda: chat_service.reserve_chat_edit_revision(
+                    conversation_id,
+                    user["id"],
+                    req.revision_of_turn_id,
+                    req.content,
+                    client_request_id,
+                    model=req.model,
+                    harness_version=req.harness_version,
+                )
+            )
+        elif req.regenerate_message_id:
             turn, turn_content = await run_db(
                 lambda: chat_service.reserve_chat_revision(
                     conversation_id,
@@ -444,6 +516,7 @@ async def send_message(
                     req.regenerate_message_id,
                     client_request_id,
                     model=req.model,
+                    harness_version=req.harness_version,
                 )
             )
         else:
@@ -459,6 +532,8 @@ async def send_message(
                     req.content,
                     request_fingerprint,
                     existing_user_message_id=req.existing_user_message_id,
+                    harness_version=req.harness_version,
+                    model=req.model,
                 )
             )
     except chat_service.ConversationNotWritable:
@@ -477,7 +552,7 @@ async def send_message(
     except chat_service.ConversationNotFound:
         raise HTTPException(status_code=404, detail="对话不存在")
     except chat_service.TurnNotFound:
-        raise HTTPException(status_code=404, detail="消息不可重新生成")
+        raise HTTPException(status_code=404, detail="回合不可编辑或重新生成")
     except chat_service.TurnUserMessageConflict:
         raise HTTPException(status_code=409, detail="TURN_USER_MESSAGE_CONFLICT")
 
@@ -504,15 +579,79 @@ async def send_message(
             },
         )
 
+    if req.harness_version == "2.0":
+        try:
+            job = await enqueue_interview_turn_job(turn.id)
+            arq_job_id = getattr(job, "job_id", None)
+            await run_db(
+                lambda: chat_service.append_turn_event(
+                    user_id=user["id"],
+                    conversation_id=conversation_id,
+                    turn_id=turn.id,
+                    event_id=f"evt:{turn.id}:queued",
+                    event_type="turn.queued",
+                    action_id=None,
+                    phase="observe_propose",
+                    channel="system",
+                    payload={
+                        "queue": "interview-turn",
+                        "arq_job_id": str(arq_job_id or ""),
+                    },
+                )
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "accepted",
+                    "data": {
+                        "turn_run_id": turn.id,
+                        "turn_id": turn.id,
+                        "fence": turn.fence,
+                        "status": "queued",
+                        "harness_version": "2.0",
+                        "arq_job_id": str(arq_job_id or ""),
+                    },
+                },
+            )
+        except Exception as exc:
+            # The DB TurnRun remains authoritative and recoverable. A scheduled
+            # dispatcher can retry the ARQ handoff without losing the request.
+            logger.warning("Harness 2.0 turn queued for dispatcher retry: %s", exc)
+            queue_error = str(exc)[:200]
+            await run_db(
+                lambda: chat_service.append_turn_event(
+                    user_id=user["id"],
+                    conversation_id=conversation_id,
+                    turn_id=turn.id,
+                    event_id=f"evt:{turn.id}:queue-failed",
+                    event_type="turn.queue_failed",
+                    action_id=None,
+                    phase="observe_propose",
+                    channel="system",
+                    payload={"queue": "interview-turn", "error": queue_error},
+                )
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "accepted",
+                    "data": {
+                        "turn_run_id": turn.id,
+                        "turn_id": turn.id,
+                        "fence": turn.fence,
+                        "status": "pending_dispatch",
+                        "harness_version": "2.0",
+                    },
+                },
+            )
+
     # 自动生成标题（第一条消息时，用 LLM 提取主题）
     from app.services.title_service import generate_title, should_generate_title
 
     if not req.regenerate_message_id and should_generate_title(conv.get("title", "")):
         try:
             title = await generate_title(turn_content, user_id=user["id"])
-            await run_db(
-                lambda: chat_service.update_conversation_title(conversation_id, title)
-            )
+            await run_db(lambda: chat_service.update_conversation_title(conversation_id, title))
         except Exception:
             await run_db(
                 lambda: chat_service.fail_chat_turn(
@@ -864,9 +1003,7 @@ async def send_message(
     )
 
 
-@router.post(
-    "/conversations/{conversation_id}/messages/{assistant_message_id}/regenerate"
-)
+@router.post("/conversations/{conversation_id}/messages/{assistant_message_id}/regenerate")
 async def regenerate_message(
     conversation_id: str,
     assistant_message_id: int,
@@ -881,6 +1018,7 @@ async def regenerate_message(
             model=req.model,
             client_request_id=req.client_request_id,
             regenerate_message_id=assistant_message_id,
+            harness_version=req.harness_version,
         ),
         user,
     )
@@ -902,9 +1040,7 @@ async def get_memories(
 @router.delete("/memories/{memory_id}")
 async def delete_memory(memory_id: int, user: dict = Depends(get_current_user)):
     """停用一条记忆"""
-    success = await run_db(
-        lambda: chat_service.deactivate_memory(memory_id, user["id"])
-    )
+    success = await run_db(lambda: chat_service.deactivate_memory(memory_id, user["id"]))
     if not success:
         raise HTTPException(status_code=404, detail="记忆不存在")
     return {"status": "success"}
@@ -914,9 +1050,7 @@ async def delete_memory(memory_id: int, user: dict = Depends(get_current_user)):
 
 
 @router.post("/extract-pdf")
-async def extract_pdf(
-    file: UploadFile = File(...), user: dict = Depends(get_current_user)
-):
+async def extract_pdf(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     """从上传的 PDF 中提取文本"""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
@@ -931,9 +1065,7 @@ async def extract_pdf(
         full_text = await asyncio.to_thread(resume_service.extract_pdf_text, content)
 
         if not full_text.strip():
-            raise HTTPException(
-                status_code=400, detail="无法从 PDF 中提取文本，可能是扫描件"
-            )
+            raise HTTPException(status_code=400, detail="无法从 PDF 中提取文本，可能是扫描件")
 
         # 限制长度
         if len(full_text) > 50000:
