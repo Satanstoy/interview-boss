@@ -36,7 +36,8 @@ jobs:
       - name: Frontend build & test
         run: ./scripts/check.sh frontend
       - name: Frontend audit (WARN only, non-blocking)
-        run: ./scripts/check.sh audit || true
+        continue-on-error: true
+        run: cd frontend && npm run audit:prod
 
   # 后端 job：backend/.env 与 backend/.redis-password 均 gitignored 不入库，但
   # docker-compose.yml 用 env_file/secret 引用它们；fresh clone 必须先创建占位，
