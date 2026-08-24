@@ -1,7 +1,7 @@
 <script setup>
 import { computed, inject, ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, ArrowDown, ArrowUp, Clock3, Ellipsis, Layers, Loader2, Menu, Plus, Settings, Trash2, X } from '@lucide/vue'
+import { AlertCircle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronRight, Clock3, Ellipsis, FileText, Layers, Loader2, Menu, Plus, Settings, Tag, Trash2, X } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -52,6 +52,7 @@ const emit = defineEmits(['show-settings', 'toggle-mobile-nav', 'practice-select
 // ── 全局上传任务进度 ──
 const { activeJobs } = useSubmitJobs()
 const showJobPanel = ref(false)
+const expandedJobs = ref(new Set())
 const { success, error } = useToast()
 const codingNavigation = inject('codingNavigation', null)
 const codingPlaylists = computed(() => codingNavigation?.playlists?.value || [])
@@ -62,14 +63,36 @@ const playlistDescription = ref('')
 const isCreatingPlaylist = ref(false)
 const practiceSelectOpen = ref(false)
 
+// 阶段配置
+const PHASE_CONFIG = {
+  extract: { label: '提取题目', icon: FileText, color: 'text-blue-500' },
+  fill: { label: '补全信息', icon: FileText, color: 'text-cyan-500' },
+  tag: { label: '分类标注', icon: Tag, color: 'text-violet-500' },
+  match: { label: '匹配聚类', icon: Layers, color: 'text-amber-500' },
+  save: { label: '写入题库', icon: CheckCircle2, color: 'text-green-500' },
+  cluster: { label: '聚类完成', icon: CheckCircle2, color: 'text-emerald-500' },
+}
+
+const PHASE_ORDER = ['extract', 'fill', 'tag', 'match', 'save', 'cluster']
+
 const primaryJob = computed(() => {
   if (activeJobs.value.length === 0) return null
-  // 优先显示 running 状态的任务
   return activeJobs.value.find(j => j.status === 'running') || activeJobs.value[0]
 })
 
+const toggleJobExpand = (jobId) => {
+  if (expandedJobs.value.has(jobId)) {
+    expandedJobs.value.delete(jobId)
+  } else {
+    expandedJobs.value.add(jobId)
+  }
+}
+
+const getPhaseIndex = (step) => PHASE_ORDER.indexOf(step)
+
 const onCloseJob = (jobId) => {
   removeJob(jobId)
+  expandedJobs.value.delete(jobId)
 }
 
 const openCreatePlaylist = () => {
@@ -245,12 +268,18 @@ const createPlaylist = async () => {
         <Transition name="fade-slide">
           <div
             v-if="showJobPanel"
-            class="absolute right-0 top-full z-50 mt-1 w-[min(20rem,calc(100vw-1rem))] rounded-xl border border-border bg-card p-3 shadow-lg"
+            class="absolute right-0 top-full z-50 mt-1 w-[min(24rem,calc(100vw-1rem))] rounded-xl border border-border bg-card shadow-lg overflow-hidden"
           >
-            <div class="text-xs font-semibold text-foreground mb-2 px-1">后台任务</div>
-            <div v-for="job in activeJobs" :key="job.id" class="flex flex-col gap-1.5 p-2 rounded-lg bg-muted/50 mb-1.5 last:mb-0">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-1.5">
+            <div class="text-xs font-semibold text-foreground p-3 pb-2">处理进度</div>
+            <div class="max-h-[60vh] overflow-y-auto px-3 pb-3">
+              <div v-for="job in activeJobs" :key="job.id" class="rounded-lg border border-border/50 bg-muted/30 mb-2 last:mb-0">
+                <!-- 任务头部 -->
+                <div
+                  class="flex items-center gap-2 p-2.5 cursor-pointer hover:bg-muted/50 transition"
+                  @click="toggleJobExpand(job.id)"
+                >
+                  <ChevronDown v-if="expandedJobs.has(job.id)" class="size-3.5 text-muted-foreground flex-shrink-0" />
+                  <ChevronRight v-else class="size-3.5 text-muted-foreground flex-shrink-0" />
                   <span
                     class="size-2 rounded-full flex-shrink-0"
                     :class="{
@@ -260,29 +289,101 @@ const createPlaylist = async () => {
                       'bg-red-500': job.status === 'failed',
                     }"
                   />
-                  <span class="text-xs font-medium text-foreground truncate max-w-[180px]">
+                  <span class="text-xs font-medium text-foreground truncate flex-1">
                     {{ job.status === 'completed' ? '处理完成' : job.status === 'failed' ? '处理失败' : job.message || '处理中...' }}
                   </span>
+                  <span v-if="job.status === 'running' && job.current > 0" class="text-[10px] text-muted-foreground tabular-nums">
+                    {{ job.current }}/{{ job.total }}
+                  </span>
+                  <AppTooltip v-if="job.status === 'completed' || job.status === 'failed'" text="移除">
+                    <button
+                      @click.stop="onCloseJob(job.id)"
+                      aria-label="移除任务"
+                      class="text-muted-foreground hover:text-foreground transition p-0.5"
+                    >
+                      <X class="size-3" />
+                    </button>
+                  </AppTooltip>
                 </div>
-                <AppTooltip v-if="job.status === 'completed' || job.status === 'failed'" text="移除任务">
-                  <button
-                    @click="onCloseJob(job.id)"
-                    aria-label="移除任务"
-                    class="text-muted-foreground hover:text-foreground transition p-0.5"
-                  >
-                    <X class="size-3.5" />
-                  </button>
-                </AppTooltip>
+
+                <!-- 阶段进度条（紧凑模式） -->
+                <div v-if="job.status === 'running' || job.status === 'pending'" class="px-2.5 pb-2">
+                  <div class="flex gap-0.5">
+                    <div
+                      v-for="phase in PHASE_ORDER"
+                      :key="phase"
+                      class="h-1 flex-1 rounded-full transition-colors duration-300"
+                      :class="{
+                        'bg-blue-500': getPhaseIndex(job.step) > PHASE_ORDER.indexOf(phase),
+                        'bg-blue-500 animate-pulse': job.step === phase,
+                        'bg-muted': getPhaseIndex(job.step) < PHASE_ORDER.indexOf(phase),
+                      }"
+                    />
+                  </div>
+                </div>
+
+                <!-- 展开的详情 -->
+                <Transition name="expand">
+                  <div v-if="expandedJobs.has(job.id)" class="px-2.5 pb-2.5">
+                    <!-- 阶段列表 -->
+                    <div class="space-y-1">
+                      <div
+                        v-for="phase in PHASE_ORDER"
+                        :key="phase"
+                        class="flex items-center gap-2 py-1 text-[11px]"
+                      >
+                        <component
+                          :is="PHASE_CONFIG[phase].icon"
+                          class="size-3 flex-shrink-0"
+                          :class="{
+                            'text-blue-500': getPhaseIndex(job.step) > PHASE_ORDER.indexOf(phase),
+                            'text-blue-500': job.step === phase,
+                            'text-muted-foreground/40': getPhaseIndex(job.step) < PHASE_ORDER.indexOf(phase),
+                          }"
+                        />
+                        <span
+                          :class="{
+                            'text-foreground font-medium': job.step === phase,
+                            'text-foreground/70': getPhaseIndex(job.step) > PHASE_ORDER.indexOf(phase),
+                            'text-muted-foreground/50': getPhaseIndex(job.step) < PHASE_ORDER.indexOf(phase),
+                          }"
+                        >
+                          {{ PHASE_CONFIG[phase].label }}
+                        </span>
+                        <CheckCircle2
+                          v-if="getPhaseIndex(job.step) > PHASE_ORDER.indexOf(phase)"
+                          class="size-3 text-green-500 ml-auto"
+                        />
+                        <Loader2
+                          v-else-if="job.step === phase"
+                          class="size-3 text-blue-500 animate-spin ml-auto"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- 当前阶段消息 -->
+                    <div v-if="job.message && job.status === 'running'" class="mt-2 pt-2 border-t border-border/50">
+                      <p class="text-[11px] text-muted-foreground">{{ job.message }}</p>
+                    </div>
+
+                    <!-- 错误信息 -->
+                    <div v-if="job.error" class="mt-2 pt-2 border-t border-border/50">
+                      <p class="text-[11px] text-red-500">{{ job.error }}</p>
+                    </div>
+
+                    <!-- 完成结果 -->
+                    <div v-if="job.status === 'completed' && job.result" class="mt-2 pt-2 border-t border-border/50">
+                      <p class="text-[11px] text-green-600">
+                        提取完成
+                        <template v-if="job.result.question_count">，{{ job.result.question_count }} 道题</template>
+                        <template v-if="job.result.match_result">
+                          （{{ job.result.match_result.matched_count }} 道已有、{{ job.result.match_result.unmatched_count }} 道新题）
+                        </template>
+                      </p>
+                    </div>
+                  </div>
+                </Transition>
               </div>
-              <!-- 进度条 -->
-              <div v-if="job.status === 'running' || job.status === 'pending'" class="w-full bg-muted rounded-full h-1 overflow-hidden">
-                <div
-                  class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500 ease-out"
-                  :style="{ width: `${job.percent}%` }"
-                />
-              </div>
-              <!-- 错误信息 -->
-              <p v-if="job.error" class="text-[11px] text-red-500 truncate">{{ job.error }}</p>
             </div>
           </div>
         </Transition>
@@ -342,4 +443,8 @@ const createPlaylist = async () => {
 .fade-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateY(-4px); }
 .fade-slide-leave-to { opacity: 0; transform: translateY(-4px); }
+.expand-enter-active { transition: all 0.2s ease-out; }
+.expand-leave-active { transition: all 0.15s ease-in; }
+.expand-enter-from, .expand-leave-to { opacity: 0; max-height: 0; }
+.expand-enter-to, .expand-leave-from { opacity: 1; max-height: 300px; }
 </style>

@@ -255,7 +255,8 @@ export function usePracticeDecks(filter = 'all') {
     const queueReviewIds = reviewedDueQueueIds
     const wasReviewedInQueue = queueReviewIds.has(questionId)
     try {
-      const response = await api.submitPracticeReview({ question_id: questionId, rating, score })
+      const idempotencyKey = `review:${questionId}:${rating}:${Date.now()}`
+      const response = await api.submitPracticeReview({ question_id: questionId, rating, score, idempotency_key: idempotencyKey })
       const nextState = response.review || {}
       // 同一道题可能同时存在于今日复习、全部题、收藏和自定义题单缓存中。
       // 选择评分后立即同步所有缓存；是否暂时保留当前卡供用户核对答案，由

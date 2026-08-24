@@ -83,6 +83,13 @@
               <span class="text-[10px] leading-tight">链接</span>
             </a>
           </AppTooltip>
+          <AppTooltip v-if="isOwnPrivateInterview(row)" text="提交到公共题库审核">
+            <button @click="submitInterviewToPublic(row)" :disabled="contributionIds.has(row.id)" class="flex flex-col items-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 px-1 disabled:opacity-50 transition-colors duration-200">
+              <Loader2 v-if="contributionIds.has(row.id)" class="size-4 animate-spin" />
+              <Share2 v-else class="size-4" />
+              <span class="text-[10px] leading-tight">公共化</span>
+            </button>
+          </AppTooltip>
           <AppTooltip v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" text="删除">
             <button @click="deleteDataRow('interview', row.id)" :disabled="deletingIds.has(row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1 disabled:opacity-50 transition-colors duration-200">
               <Loader2 v-if="deletingIds.has(row.id)" class="size-4 animate-spin" />
@@ -136,12 +143,14 @@
 </template>
 
 <script setup>
-import { inject } from 'vue'
-import { ArrowLeft, ExternalLink, FileText, Loader2, RefreshCw, SortAsc, SortDesc, Trash2 } from '@lucide/vue'
+import { inject, ref } from 'vue'
+import { ArrowLeft, ExternalLink, FileText, Loader2, RefreshCw, Share2, SortAsc, SortDesc, Trash2 } from '@lucide/vue'
 import DataTable from '@/components/common/DataTable.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { createPublicContribution } from '@/api/index.js'
+import { useToast } from '@/composables/useNotification.js'
 
 const InterviewDataTable = DataTable
 
@@ -156,6 +165,25 @@ const {
   returnTab, handleReturn, floatingReturnBtn, floatingBtnStyle,
   returnToPracticeMode, formatDate,
 } = inject('appData')
+
+const toast = useToast()
+const contributionIds = ref(new Set())
+
+const isOwnPrivateInterview = (row) => (
+  row.owner_id != null && Number(row.owner_id) === Number(displayUser?.id)
+)
+
+const submitInterviewToPublic = async (row) => {
+  if (!isOwnPrivateInterview(row) || contributionIds.value.has(row.id)) return
+  contributionIds.value.add(row.id)
+  try {
+    await createPublicContribution('interview', row.id)
+    toast.success('已提交公共题库审核，原个人面经仍保留')
+  } catch (error) {
+    toast.error(`提交失败: ${error.message || '未知错误'}`)
+    contributionIds.value.delete(row.id)
+  }
+}
 
 const interviewColumns = [
   { key: 'company', label: '公司', frontendKey: '公司', width: '10%' },

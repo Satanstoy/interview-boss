@@ -883,7 +883,7 @@ function goNext() {
   resetState()
 }
 function markAndNext(rating) {
-  if (!currentQ.value?.id) return
+  if (!currentQ.value?.id || props.reviewLoading) return
   pendingReviewedId.value = currentQ.value.id
   if (serverDeckMode.value) {
     const payload = { questionId: currentQ.value.id, rating }

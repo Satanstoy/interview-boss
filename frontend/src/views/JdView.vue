@@ -41,6 +41,13 @@
               <span class="text-[10px] leading-tight">链接</span>
             </a>
           </AppTooltip>
+          <AppTooltip v-if="isOwnPrivateJd(row)" text="提交到公共 JD 审核">
+            <button @click="submitJdToPublic(row)" :disabled="contributionIds.has(row.id)" class="flex flex-col items-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 px-1 disabled:opacity-50 transition-colors duration-200">
+              <Loader2 v-if="contributionIds.has(row.id)" class="size-4 animate-spin" />
+              <Share2 v-else class="size-4" />
+              <span class="text-[10px] leading-tight">公共化</span>
+            </button>
+          </AppTooltip>
           <AppTooltip v-if="displayUser?.is_admin || row.owner_id === displayUser?.id" text="删除">
             <button @click="deleteDataRow('jd', row.id)" class="flex flex-col items-center text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 px-1 transition-colors duration-200">
               <Trash2 class="size-4" />
@@ -71,11 +78,13 @@
 </template>
 
 <script setup>
-import { inject } from 'vue'
-import { Briefcase, ExternalLink, Trash2 } from '@lucide/vue'
+import { inject, ref } from 'vue'
+import { Briefcase, ExternalLink, Loader2, Share2, Trash2 } from '@lucide/vue'
 import DataTable from '@/components/common/DataTable.vue'
 import InlineEdit from '@/components/common/InlineEdit.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
+import { createPublicContribution } from '@/api/index.js'
+import { useToast } from '@/composables/useNotification.js'
 
 // Alias to avoid collision with possible native table element names
 const JdDataTable = DataTable
@@ -86,6 +95,25 @@ const {
   jdCurrentPage, jdPageSize,
   safeUrl, saveField, deleteDataRow,
 } = inject('appData')
+
+const toast = useToast()
+const contributionIds = ref(new Set())
+
+const isOwnPrivateJd = (row) => (
+  row.owner_id != null && Number(row.owner_id) === Number(displayUser?.id)
+)
+
+const submitJdToPublic = async (row) => {
+  if (!isOwnPrivateJd(row) || contributionIds.value.has(row.id)) return
+  contributionIds.value.add(row.id)
+  try {
+    await createPublicContribution('jd', row.id)
+    toast.success('已提交公共 JD 审核，原个人 JD 仍保留')
+  } catch (error) {
+    toast.error(`提交失败: ${error.message || '未知错误'}`)
+    contributionIds.value.delete(row.id)
+  }
+}
 
 const jdColumns = [
   { key: 'company', label: '公司', frontendKey: '公司', width: '12%' },

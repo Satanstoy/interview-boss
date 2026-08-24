@@ -37,6 +37,19 @@ export const fetchPendingQuestions = () => get(`${API}/master-bank/pending`)
 export const approveQuestion = (id) => post(`${API}/master-bank/approve/${id}`)
 export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 
+// ── Public contribution review (interview + JD) ──
+export const createPublicContribution = (sourceType, sourceId) =>
+  post(`${API}/public-contributions`, { source_type: sourceType, source_id: sourceId })
+export const fetchPublicContributions = ({ status = 'pending_review', sourceType = '' } = {}) => {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (sourceType) params.set('source_type', sourceType)
+  return get(`${API}/admin/public-contributions?${params.toString()}`, { noCache: true })
+}
+export const fetchPublicContribution = (id) => get(`${API}/admin/public-contributions/${id}`, { noCache: true })
+export const approvePublicContribution = (id, payload = {}) => post(`${API}/admin/public-contributions/${id}/approve`, payload)
+export const rejectPublicContribution = (id, reason = '') => post(`${API}/admin/public-contributions/${id}/reject`, { reason })
+
 // ── Batch operations ──
 export const batchDeleteMasterBank = (ids) => post(`${API}/master-bank/batch-delete`, { ids })
 export const batchGenerateAnswers = (ids, onEvent, { force = false, allowNoSearch = false } = {}) => postSSE(`${API}/master-bank/batch-generate-answers`, { ids, force, allow_no_search: allowNoSearch }, onEvent)

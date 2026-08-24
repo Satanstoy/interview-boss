@@ -24,7 +24,7 @@ let _onDataRefresh = null
 // ── 内部：加载待审核数量（仅 admin） ──
 const loadPendingCount = async () => {
   if (!currentUser.value?.is_admin) { pendingReviewCount.value = 0; return }
-  try { const data = await api.fetchPendingQuestions(); pendingReviewCount.value = data.total || 0 }
+  try { const data = await api.fetchPublicContributions(); pendingReviewCount.value = data.total || 0 }
   catch { pendingReviewCount.value = 0 }
 }
 

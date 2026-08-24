@@ -63,6 +63,7 @@ function _ensureJob(jobId) {
       total: 7,
       percent: 0,
       phase: 'queued',
+      step: '',
       message: '等待中...',
       result: null,
       error: null,
@@ -128,6 +129,7 @@ function _subscribeJobSSE(jobId) {
         current: event.current || 0,
         total: event.total || 7,
         message: event.message || '',
+        step: event.step || '',
       })
     } else if (event.type === 'done') {
       _updateJob(jobId, {
