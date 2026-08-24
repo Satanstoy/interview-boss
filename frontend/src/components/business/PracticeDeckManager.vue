@@ -84,12 +84,17 @@
               <div class="flex flex-col gap-2 sm:flex-row">
                 <div class="relative min-w-0 flex-1">
                   <Search class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <select v-model="questionToAdd" data-testid="practice-deck-question-select" class="h-9 w-full appearance-none rounded-md border border-input bg-background pl-8 pr-3 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/20">
-                    <option value="">选择一道高频题加入题单...</option>
-                    <option v-for="question in addableQuestions" :key="question.id" :value="String(question.id)">{{ question.question }}</option>
-                  </select>
+                  <Select v-model="questionToAdd">
+                    <SelectTrigger data-testid="practice-deck-question-select" aria-label="加入题单的题目" class="h-9 w-full pl-8 text-sm">
+                      <SelectValue placeholder="选择一道高频题加入题单..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem :value="NO_QUESTION_VALUE" disabled>选择一道高频题加入题单...</SelectItem>
+                      <SelectItem v-for="question in addableQuestions" :key="question.id" :value="String(question.id)">{{ question.question }}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                    <Button size="sm" class="h-10 shrink-0 gap-1.5 sm:h-9" :disabled="!questionToAdd" @click="addQuestion"><Plus class="size-3.5" />加入题单</Button>
+                    <Button size="sm" class="h-10 shrink-0 gap-1.5 sm:h-9" :disabled="questionToAdd === NO_QUESTION_VALUE" @click="addQuestion"><Plus class="size-3.5" />加入题单</Button>
               </div>
               <p v-if="!availableQuestions.length" class="mt-2 text-xs text-muted-foreground">当前题库筛选下没有可加入的题目，请先回到高频题库调整筛选。</p>
             </div>
@@ -127,6 +132,7 @@ import { computed, ref } from 'vue'
 import { BookOpen, ChevronRight, Layers, List, LockKeyhole, Pencil, Plus, Search, Trash2, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AppDialog from '@/components/common/AppDialog.vue'
 
 const props = defineProps({
@@ -139,7 +145,8 @@ const props = defineProps({
 const emit = defineEmits(['select-deck', 'start-deck', 'create-deck', 'update-deck', 'delete-deck', 'add-item', 'remove-item'])
 const editorOpen = ref(false)
 const editingDeck = ref(null)
-const questionToAdd = ref('')
+const NO_QUESTION_VALUE = '__none__'
+const questionToAdd = ref(NO_QUESTION_VALUE)
 const form = ref({ name: '', description: '', visibility: 'private' })
 
 const customDecks = computed(() => props.decks.filter(deck => deck.kind === 'custom'))
@@ -187,8 +194,8 @@ function saveDeck() {
   editorOpen.value = false
 }
 function addQuestion() {
-  if (!questionToAdd.value || !selectedCustomDeck.value) return
+  if (questionToAdd.value === NO_QUESTION_VALUE || !selectedCustomDeck.value) return
   emit('add-item', { deckKey: selectedCustomDeck.value.key, questionId: Number(questionToAdd.value) })
-  questionToAdd.value = ''
+  questionToAdd.value = NO_QUESTION_VALUE
 }
 </script>

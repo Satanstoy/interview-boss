@@ -21,13 +21,13 @@
               aria-label="分享到公共题库"
               @click.stop="$emit('share', question)"
             >
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+              <Share2 class="size-3.5" aria-hidden="true" />
             </Button>
           </AppTooltip>
           <AppTooltip v-if="canEdit" text="编辑题目">
             <button @click.stop="startEditQuestion"
               class="flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-primary sm:min-h-0 sm:px-1 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
-              <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+              <Pencil class="size-4" aria-hidden="true" />
               <span class="text-xs sm:hidden">编辑</span>
             </button>
           </AppTooltip>
@@ -74,14 +74,12 @@
         <div class="mt-2 flex gap-1.5 opacity-100 transition-opacity duration-200 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
           <Button variant="ghost" size="sm" v-if="isAdmin" @click.stop="$emit('retag', question)" :disabled="question._isRetagging"
             class="px-2 py-1 flex items-center gap-1">
-            <svg v-if="question._isRetagging" class="animate-spin size-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <Loader2 v-if="question._isRetagging" class="size-3 animate-spin" aria-hidden="true" />
             {{ question._isRetagging ? '分类中...' : '重新分类' }}
           </Button>
           <AppTooltip v-if="canDelete" text="删除">
             <Button variant="ghost" size="sm" @click.stop="$emit('delete', question)" class="px-2 py-1 text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/15 transition-all duration-200">
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-              </svg>
+              <Trash2 class="size-3.5" aria-hidden="true" />
             </Button>
           </AppTooltip>
         </div>
@@ -91,7 +89,7 @@
       <AppTooltip text="做题">
         <Button variant="default" size="sm" @click.stop="$emit('practice', question)"
           class="shrink-0 text-xs px-2.5 py-1 font-semibold">
-          <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          <Pencil class="size-3" aria-hidden="true" />
           做题
         </Button>
       </AppTooltip>
@@ -99,16 +97,14 @@
       <!-- Star (always visible, tertiary action) -->
       <AppTooltip :text="question.is_starred ? '取消收藏' : '收藏'">
         <button @click.stop="$emit('toggle-star', question)" class="star-btn flex min-h-9 shrink-0 items-center gap-1 rounded-md px-2 transition-colors duration-200 hover:bg-muted sm:min-h-0 sm:px-1">
-          <svg class="size-4.5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-border dark:text-foreground hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
-          </svg>
+          <Star class="size-4.5 transition-colors" :class="question.is_starred ? 'text-amber-400' : 'text-border dark:text-foreground hover:text-amber-300 dark:hover:text-amber-500'" :fill="question.is_starred ? 'currentColor' : 'none'" aria-hidden="true" />
           <span class="text-xs text-muted-foreground sm:hidden">{{ question.is_starred ? '取消收藏' : '收藏' }}</span>
         </button>
       </AppTooltip>
 
       <!-- Expand chevron -->
       <div class="text-muted-foreground dark:text-muted-foreground mt-0.5 shrink-0">
-        <svg class="size-4 transform transition-transform duration-200" :class="question._showAnswer ? 'rotate-180 text-primary dark:text-primary' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        <ChevronDown class="size-4 transform transition-transform duration-200" :class="question._showAnswer ? 'rotate-180 text-primary dark:text-primary' : ''" aria-hidden="true" />
       </div>
     </div>
 
@@ -117,11 +113,11 @@
 
       <div v-if="contentOnly" class="flex items-center gap-2 border-b border-border/70 bg-background/70 px-3 py-2">
         <Button size="sm" class="h-10 flex-1 gap-1.5 text-xs sm:h-8 sm:flex-none" @click="$emit('practice', question)">
-          <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4Z"/></svg>
+          <PenLine class="size-3.5" aria-hidden="true" />
           开始练习这道题
         </Button>
         <Button variant="ghost" size="sm" class="h-10 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8" @click="$emit('toggle-star', question)">
-          <svg class="size-4" :class="question.is_starred ? 'fill-amber-400 text-amber-500' : ''" :fill="question.is_starred ? 'currentColor' : 'none'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+          <Star class="size-4" :class="question.is_starred ? 'fill-amber-400 text-amber-500' : ''" :fill="question.is_starred ? 'currentColor' : 'none'" aria-hidden="true" />
           {{ question.is_starred ? '已收藏' : '收藏' }}
         </Button>
       </div>
@@ -176,30 +172,30 @@
           </div>
 
           <div v-else-if="isLoadingDetail" class="flex flex-col items-center justify-center py-8 text-primary gap-3">
-            <svg class="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <Loader2 class="size-6 animate-spin" aria-hidden="true" />
             <span class="font-medium text-sm">加载答案中...</span>
           </div>
 
           <div v-else-if="detailError" class="flex flex-col items-center justify-center py-6 text-amber-600 dark:text-amber-400 gap-2">
-            <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <AlertCircle class="size-5" aria-hidden="true" />
             <span class="text-sm">答案加载失败</span>
             <button @click="detailError = false; fullAnswer = null; loadFullAnswer()" class="text-xs text-primary hover:underline mt-1">重试</button>
           </div>
 
           <div v-else-if="question._isLoadingAnswer" class="flex flex-col items-center justify-center py-8 text-primary gap-3">
-            <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <Loader2 class="size-8 animate-spin" aria-hidden="true" />
             <span class="font-medium text-sm">AI 正在生成答案，请稍候...</span>
           </div>
 
           <div v-else class="text-center py-6">
             <p v-if="isFailedAnswer(displayAnswer)" class="text-destructive mb-3 text-sm flex items-center justify-center gap-1.5">
-              <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <AlertCircle class="size-4" aria-hidden="true" />
               上次生成失败，请重试。
             </p>
             <p v-else class="text-muted-foreground mb-4 text-sm">该题目暂无答案</p>
             <div class="flex gap-2 justify-center flex-wrap">
               <Button v-if="isAdmin" variant="default" size="sm" @click.stop="$emit('generate-answer', question)" class="px-5 py-2">
-                <svg class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <Zap class="size-4" aria-hidden="true" />
                 AI 生成答案
               </Button>
               <Button v-if="isAdmin" variant="ghost" size="sm" @click="localQuestion._isEditingAnswer = true; localQuestion._editAnswer = ''" class="px-5 py-2">
@@ -215,7 +211,7 @@
       <div v-if="hasSources" class="border-t border-border/50 mt-4">
         <button ref="sourceBtnRef" @click.stop="toggleSources"
           class="w-full px-4 py-2 flex items-center gap-2 text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 dark:hover:bg-muted/25 transition-colors">
-          <svg class="size-3 transform transition-transform duration-200" :class="question._showSources ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <ChevronDown class="size-3 transform transition-transform duration-200" :class="question._showSources ? 'rotate-180' : ''" aria-hidden="true" />
           <span>来源详情</span>
           <span class="text-label text-muted-foreground ml-0.5">{{ sourceCount }}条</span>
         </button>
@@ -230,7 +226,7 @@
               <div class="flex flex-wrap items-center gap-1.5">
                 <span @click="$emit('navigate-to-interview', src)"
                   class="text-caption bg-primary/10 dark:bg-primary/15 text-primary px-2 py-0.5 rounded-md inline-flex items-center cursor-pointer hover:bg-primary/15 dark:hover:bg-primary/20 transition-colors">
-                  <svg class="size-3 mr-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                  <Link2 class="mr-0.5 size-3 shrink-0" aria-hidden="true" />
                   {{ src.company === '未提供' ? '未知' : src.company }}
                   <span class="text-primary/40 dark:text-primary/50 mx-0.5">|</span>
                   {{ src.round === '未提供' ? '未知' : src.round }}
@@ -267,6 +263,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import SourceList from '@/components/common/SourceList.vue'
+import { AlertCircle, ChevronDown, Link2, Loader2, Pencil, PenLine, Share2, Star, Trash2, Zap } from '@lucide/vue'
 
 const sourceBtnRef = ref(null)
 const sourcesContentRef = ref(null)

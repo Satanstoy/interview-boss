@@ -9,11 +9,14 @@ import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cancelEvaluationExperiment, fetchEvaluationExperiment, streamEvaluationExperiment } from '@/services/evaluationApi.js'
+import { useConfirm, useToast } from '@/composables/useNotification.js'
 import { evaluationTargetLabel, formatDate, qualityStatusLabel, runDistribution, runProgress, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { confirm: showConfirm } = useConfirm()
+const { success } = useToast()
 const experiment = ref(null)
 const loading = ref(true)
 const error = ref('')
@@ -73,10 +76,16 @@ async function watchEvents() {
 
 async function cancel() {
   cancelling.value = true
-  error.value = ''
   try {
+    const confirmed = await showConfirm(
+      '已开始的实验会被终止，尚未完成的 Case 不再继续。确定要取消这个评测实验吗？',
+      { title: '确认取消评测实验', variant: 'danger', confirmLabel: '确认取消' },
+    )
+    if (!confirmed) return
+    error.value = ''
     await cancelEvaluationExperiment(route.params.experimentId)
     await load()
+    success('评测实验已取消')
   } catch (err) {
     error.value = err.message || '取消评测实验失败'
   } finally {

@@ -1,14 +1,14 @@
 <script setup>
 import { computed, inject, ref } from 'vue'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, ArrowDown, ArrowUp, Clock3, Ellipsis, Layers, Loader2, Menu, Plus, Settings, Trash2, X } from '@lucide/vue'
+import { AlertCircle, ArrowDown, ArrowUp, Clock3, Ellipsis, Layers, Loader2, Menu, Plus, RefreshCw, Settings, Trash2, X } from '@lucide/vue'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
 import { useSubmitJobs, removeJob } from '@/composables/useSubmitJobs.js'
-import { useToast } from '@/composables/useNotification.js'
+import { useConfirm, useToast } from '@/composables/useNotification.js'
 import { createCodingPlaylist, deleteCodingPlaylist, moveCodingPlaylist } from '@/services/codingApi.js'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
@@ -53,9 +53,12 @@ const emit = defineEmits(['show-settings', 'toggle-mobile-nav', 'practice-select
 const { activeJobs } = useSubmitJobs()
 const showJobPanel = ref(false)
 const { success, error } = useToast()
+const { confirm: showConfirm } = useConfirm()
 const codingNavigation = inject('codingNavigation', null)
 const codingPlaylists = computed(() => codingNavigation?.playlists?.value || [])
 const codingSelectedListKey = computed(() => codingNavigation?.selectedListKey?.value || 'all')
+const codingPlaylistsLoading = computed(() => codingNavigation?.loading?.value || false)
+const codingPlaylistsError = computed(() => codingNavigation?.error?.value || '')
 const playlistDialogOpen = ref(false)
 const playlistName = ref('')
 const playlistDescription = ref('')
@@ -96,6 +99,11 @@ const movePlaylist = async (playlist, direction) => {
 }
 
 const removePlaylist = async (playlist) => {
+  const confirmed = await showConfirm(
+    `确定删除题单「${playlist.name}」吗？题单内的题目不会被删除。`,
+    { title: '确认删除题单', variant: 'danger', confirmLabel: '删除' },
+  )
+  if (!confirmed) return
   try {
     await deleteCodingPlaylist(playlist.id)
     if (codingSelectedListKey.value === String(playlist.id)) codingNavigation?.selectList('all')
@@ -160,9 +168,9 @@ const createPlaylist = async () => {
       </span>
 
       <template v-if="showCodingControls">
-        <Select :model-value="codingSelectedListKey" @update:model-value="selectCodingList">
+        <Select :model-value="codingSelectedListKey" :disabled="codingPlaylistsLoading" @update:model-value="selectCodingList">
           <SelectTrigger class="h-10 w-[min(42vw,150px)] rounded-lg text-xs sm:h-8 sm:w-[150px]">
-            <SelectValue placeholder="选择题单" />
+            <SelectValue :placeholder="codingPlaylistsLoading ? '正在加载题单…' : '选择题单'" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部题目</SelectItem>
@@ -201,6 +209,11 @@ const createPlaylist = async () => {
             </button>
           </SelectContent>
         </Select>
+        <div v-if="codingPlaylistsLoading" data-testid="coding-playlists-loading" class="sr-only" role="status">正在加载代码题单</div>
+        <div v-if="codingPlaylistsError" data-testid="coding-playlists-error" class="flex min-w-0 items-center gap-1 text-[11px] text-destructive" role="status">
+          <span class="truncate">题单加载失败</span>
+          <Button variant="ghost" size="icon-sm" aria-label="重试加载代码题单" @click="refreshCodingPlaylists"><RefreshCw class="size-3.5" /></Button>
+        </div>
       </template>
 
       <template v-else-if="showPracticeControls">

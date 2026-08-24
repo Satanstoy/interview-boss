@@ -178,21 +178,29 @@ const practiceQuestion = ref(null)
 // 手撕代码题单由应用壳统一持有，让全局顶栏和题目工作区使用同一份选择状态。
 const codingPlaylists = ref([])
 const codingSelectedListKey = ref('all')
+const codingPlaylistsError = ref('')
+const codingPlaylistsLoading = ref(false)
 
 const loadCodingPlaylists = async () => {
+  codingPlaylistsLoading.value = true
+  codingPlaylistsError.value = ''
   try {
     codingPlaylists.value = await fetchCodingPlaylists()
     if (/^\d+$/.test(String(codingSelectedListKey.value)) && !codingPlaylists.value.some(item => item.id === Number(codingSelectedListKey.value))) {
       codingSelectedListKey.value = 'all'
     }
-  } catch {
-    codingPlaylists.value = []
+  } catch (err) {
+    codingPlaylistsError.value = err.message || '题单加载失败，请重试'
+  } finally {
+    codingPlaylistsLoading.value = false
   }
 }
 
 const codingNavigation = {
   playlists: codingPlaylists,
   selectedListKey: codingSelectedListKey,
+  error: codingPlaylistsError,
+  loading: codingPlaylistsLoading,
   loadPlaylists: loadCodingPlaylists,
   selectList: (value) => { codingSelectedListKey.value = value },
 }
@@ -626,6 +634,7 @@ provide('appData', {
 watch(authCompleted, (done) => {
   if (done && currentUser.value) {
     loadAllData()
+    if (!isPreviewMode) void loadCodingPlaylists()
   }
 }, { immediate: true })
 

@@ -21,6 +21,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme.js'
+import { porcelain } from '@/utils/chartTokens.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -46,16 +47,18 @@ const totalHeat = computed(() => topItems.value.reduce((s, i) => s + (i.question
 
 // 掌握状态三档 → porcelain 蓝阶明度（未练最浅 → 熟练最深）
 function statusLevel(item, dark) {
+  const t = porcelain(dark)
   const st = item.status
-  if (st === 'stable') return dark ? '#EDEFF1' : '#334EAC'
-  if (st === 'developing') return dark ? '#9EB3CD' : '#7096D1'
-  return dark ? '#6C93C7' : '#BAD6EB'
+  if (st === 'stable') return t.hero
+  if (st === 'developing') return t.data2
+  return t.faint
 }
 
 function statusBorder(item, dark) {
-  if (item.status === 'stable') return dark ? '#EDEFF1' : '#081F5C'
-  if (item.status === 'developing') return dark ? '#BCC7D7' : '#334EAC'
-  return dark ? '#9EB3CD' : '#334EAC'
+  const t = porcelain(dark)
+  if (item.status === 'stable') return t.hero
+  if (item.status === 'developing') return dark ? t.muted : t.data
+  return dark ? t.data2 : t.data
 }
 
 const STATUS_LABEL = {
@@ -74,14 +77,15 @@ function buildSvg(dark) {
   const cy = 235
   const nodeR = (i) => 8 + Math.sqrt(i.question_frequency) * 3.2
   const lineW = (i) => 0.8 + (i.question_frequency / maxHeat.value) * 1.8
-  const hubFill = dark ? '#EDEFF1' : '#081F5C'
-  const hubText = dark ? '#081F5C' : '#EDEFF1'
-  const lineCol = dark ? 'rgba(237,239,241,.22)' : 'rgba(8,31,92,.15)'
-  const labelCol = dark ? '#EDEFF1' : '#081F5C'
-  const subCol = dark ? '#9EB3CD' : 'rgba(8,31,92,.60)'
+  const t = porcelain(dark)
+  const hubFill = t.hero
+  const hubText = t.heroText
+  const lineCol = t.line
+  const labelCol = t.txt
+  const subCol = t.muted
 
   let s = ''
-  s += `<circle cx="${cx}" cy="${cy}" r="74" fill="#334EAC" opacity="${dark ? 0.35 : 0.12}"></circle>`
+  s += `<circle cx="${cx}" cy="${cy}" r="74" fill="${t.data}" opacity="${dark ? 0.35 : 0.12}"></circle>`
   items.forEach((item, i) => {
     const a = -Math.PI / 2 + (i * 2 * Math.PI) / items.length
     const r = R * 0.82
@@ -100,7 +104,7 @@ function buildSvg(dark) {
   })
   s += `<circle cx="${cx}" cy="${cy}" r="56" fill="${hubFill}"></circle>`
   s += `<text x="${cx}" y="${cy - 3}" text-anchor="middle" font-size="14" font-weight="800" fill="${hubText}">${totalHeat.value} 次</text>`
-  s += `<text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="9.5" fill="${dark ? '#081F5C' : 'rgba(237,239,241,.85)'}">岗位总热度</text>`
+  s += `<text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="9.5" fill="${t.heroSubText}">岗位总热度</text>`
   return s
 }
 

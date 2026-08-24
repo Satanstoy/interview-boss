@@ -20,10 +20,14 @@ const { ensureModelReady } = useModelGuard()
 const { confirm: showConfirm } = useConfirm()
 
 const resume = ref(null)          // { id, filename, created_at }
+const resumeLoading = ref(true)
+const resumeError = ref('')
 const rawText = ref('')           // 原文预览
 const showRaw = ref(false)
 
 const positions = ref([])         // 用户已配置岗位
+const positionsLoading = ref(true)
+const positionsError = ref('')
 const selectedPosition = ref('')
 const manualPosition = ref('')
 const useManual = ref(false)
@@ -32,6 +36,8 @@ const optimizing = ref(false)
 const points = ref([])            // 当前/最近一次优化要点
 const optimizedText = ref('')     // 流式全文（实时累积）
 const savedOptimization = ref(null) // 存库结果（重进页面可见）
+const optimizationLoading = ref(true)
+const optimizationError = ref('')
 const optimizingErrors = ref('')
 
 const hasResume = computed(() => !!resume.value)
@@ -42,32 +48,44 @@ const targetPosition = computed(() => (useManual.value ? manualPosition.value : 
 const renderMarkdown = (text) => (text ? renderSafeMarkdown(text) : '')
 
 async function loadResume() {
+  resumeLoading.value = true
+  resumeError.value = ''
   try {
     const data = await getResume()
     resume.value = data.has_resume ? data.resume : null
-  } catch {
-    resume.value = null
+  } catch (err) {
+    resumeError.value = err.message || '简历加载失败，请重试'
+  } finally {
+    resumeLoading.value = false
   }
 }
 
 async function loadOptimization() {
+  optimizationLoading.value = true
+  optimizationError.value = ''
   try {
     const data = await getResumeOptimization()
     savedOptimization.value = data.has_optimization ? data.optimization : null
-  } catch {
-    savedOptimization.value = null
+  } catch (err) {
+    optimizationError.value = err.message || '优化记录加载失败，请重试'
+  } finally {
+    optimizationLoading.value = false
   }
 }
 
 async function loadPositions() {
+  positionsLoading.value = true
+  positionsError.value = ''
   try {
     const list = await fetchPositions()
     positions.value = Array.isArray(list) ? list.map(p => (typeof p === 'string' ? p : p.name)) : []
     if (!selectedPosition.value && positions.value.length) {
       selectedPosition.value = positions.value[0]
     }
-  } catch {
-    positions.value = []
+  } catch (err) {
+    positionsError.value = err.message || '岗位列表加载失败，请重试'
+  } finally {
+    positionsLoading.value = false
   }
 }
 
@@ -93,6 +111,7 @@ async function handleUpload(event) {
     const res = await uploadResume(formData)
     toast.success('简历上传成功')
     resume.value = { id: res.id, filename: res.filename, created_at: null }
+    resumeError.value = ''
     rawText.value = ''
     showRaw.value = false
     savedOptimization.value = null
@@ -210,7 +229,14 @@ onUnmounted(() => {
         <CardDescription>上传 PDF 简历用于 AI 优化与模拟面试上下文</CardDescription>
       </CardHeader>
       <CardContent>
-        <div v-if="!hasResume" class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center">
+        <div v-if="resumeLoading && !hasResume" data-testid="resume-loading" class="flex min-h-32 items-center justify-center rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground" role="status">
+          正在加载简历…
+        </div>
+        <div v-else-if="resumeError && !hasResume" data-testid="resume-load-error" class="flex flex-col items-center justify-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center" role="alert">
+          <p class="text-sm text-destructive">{{ resumeError }}</p>
+          <Button variant="outline" size="sm" @click="loadResume">重试</Button>
+        </div>
+        <div v-else-if="!hasResume" class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center">
           <Upload :size="28" class="text-muted-foreground" />
           <p class="text-sm text-muted-foreground">尚未上传简历</p>
           <label class="cursor-pointer">
@@ -221,6 +247,10 @@ onUnmounted(() => {
           </label>
         </div>
         <div v-else class="flex flex-col gap-3">
+          <div v-if="resumeError" data-testid="resume-refresh-error" class="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+            <span>{{ resumeError }} 当前显示的是上次成功加载的数据。</span>
+            <Button variant="ghost" size="sm" class="shrink-0 text-destructive" @click="loadResume">重试</Button>
+          </div>
           <div class="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
             <FileText :size="18" class="shrink-0 text-primary" />
             <div class="min-w-0 flex-1">
@@ -257,14 +287,23 @@ onUnmounted(() => {
         <CardDescription>选择目标岗位，AI 生成优化版简历与优化要点</CardDescription>
       </CardHeader>
       <CardContent class="flex flex-col gap-3">
+        <div v-if="positionsError" data-testid="positions-load-error" class="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+          <span>{{ positionsError }} 当前保留已有岗位选项。</span>
+          <Button variant="ghost" size="sm" class="shrink-0 text-destructive" @click="loadPositions">重试</Button>
+        </div>
+        <div v-if="optimizationError" data-testid="optimization-load-error" class="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+          <span>{{ optimizationError }}</span>
+          <Button variant="ghost" size="sm" class="shrink-0 text-destructive" @click="loadOptimization">重试</Button>
+        </div>
+        <p v-else-if="optimizationLoading" class="text-xs text-muted-foreground" role="status">正在加载最近的优化记录…</p>
         <div class="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <Select
             v-model="selectedPosition"
-            :disabled="useManual"
+            :disabled="useManual || positionsLoading"
             class="w-full sm:w-56"
           >
             <SelectTrigger class="h-10 w-full text-sm sm:h-9">
-              <SelectValue :placeholder="positions.length ? '选择目标岗位' : '暂无岗位，可在设置中添加'" />
+              <SelectValue :placeholder="positionsLoading ? '正在加载岗位…' : (positions.length ? '选择目标岗位' : '暂无岗位，可在设置中添加')" />
             </SelectTrigger>
             <SelectContent v-if="positions.length">
               <SelectItem v-for="p in positions" :key="p" :value="p">{{ p }}</SelectItem>

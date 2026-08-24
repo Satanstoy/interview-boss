@@ -209,7 +209,8 @@ const onRebuild = () => {
                 <ChevronRight :class="['size-4 transition-transform', { 'rotate-90': cat._open }]" />
               </Button>
             </AppTooltip>
-            <input v-model="cat.cat1"
+            <label :for="`settings-cat1-${ci}`" class="sr-only">分类名称</label>
+            <input :id="`settings-cat1-${ci}`" v-model="cat.cat1"
               class="flex-1 text-sm font-semibold bg-transparent border-none outline-none text-foreground placeholder-muted-foreground"
               placeholder="如 A.项目经验与设计" />
             <span class="text-xs text-muted-foreground">{{ (cat.children || []).length }} 个子类</span>
@@ -225,7 +226,8 @@ const onRebuild = () => {
           <div v-if="cat._open" class="p-3 flex flex-col gap-1.5">
             <div v-for="(child, ci2) in cat.children" :key="ci2" class="flex items-center gap-2">
               <span class="text-muted-foreground/50 text-xs">-</span>
-              <input v-model="cat.children[ci2]"
+              <label :for="`settings-child-${ci}-${ci2}`" class="sr-only">子分类名称</label>
+              <input :id="`settings-child-${ci}-${ci2}`" v-model="cat.children[ci2]"
                 class="flex-1 text-sm bg-transparent border-none outline-none text-foreground placeholder-muted-foreground"
                 placeholder="如 A1.系统设计" />
               <AppTooltip text="删除子类">

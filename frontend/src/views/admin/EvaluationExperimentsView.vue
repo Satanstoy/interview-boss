@@ -10,12 +10,15 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationExperiment, createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
+import { useConfirm, useToast } from '@/composables/useNotification.js'
 import { evaluationTargetLabel, formatDate, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationStepCard from './EvaluationStepCard.vue'
 import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
 
 const router = useRouter()
 const route = useRoute()
+const { confirm: showConfirm } = useConfirm()
+const { success } = useToast()
 const releases = ref([])
 const capabilities = ref([])
 const benchmarks = ref([])
@@ -28,6 +31,8 @@ const experiments = ref([])
 const activeTab = ref(route.query.tab === 'create' ? 'create' : 'active')
 const selectedExperimentId = ref(null)
 const cancellingExperimentId = ref(null)
+const confirmingExperimentId = ref(null)
+const isMobileViewport = ref(false)
 const error = ref('')
 const form = ref({ target: '', evaluation: '', harness: '', replication: 5, seed: 1, environment: 'local-baseline', comparison: '' })
 const selectedTargetType = ref('interview')
@@ -35,6 +40,11 @@ const selectedExperimentTargets = ref([])
 let experimentPollTimer = null
 let experimentsRequestInFlight = false
 let componentActive = false
+let viewportQuery = null
+
+function syncViewport() {
+  isMobileViewport.value = viewportQuery?.matches || false
+}
 
 const activeExperiments = computed(() => experiments.value.filter(experiment => ['created', 'queued', 'running'].includes(experiment.status)))
 
@@ -144,14 +154,23 @@ function openExperiment(experiment) {
 }
 
 async function cancelExperiment(experiment) {
-  cancellingExperimentId.value = experiment.id
-  error.value = ''
+  if (confirmingExperimentId.value !== null || cancellingExperimentId.value !== null) return
+  confirmingExperimentId.value = experiment.id
   try {
+    const confirmed = await showConfirm(
+      '已开始的实验会被终止，尚未完成的 Case 不再继续。确定要取消这个评测实验吗？',
+      { title: '确认取消评测实验', variant: 'danger', confirmLabel: '确认取消' },
+    )
+    if (!confirmed) return
+    cancellingExperimentId.value = experiment.id
+    error.value = ''
     await cancelEvaluationExperiment(experiment.id)
     await loadExperiments()
+    success('评测实验已取消')
   } catch (err) {
     error.value = err.message || '取消测评失败'
   } finally {
+    confirmingExperimentId.value = null
     cancellingExperimentId.value = null
   }
 }
@@ -368,6 +387,9 @@ async function submit() {
 
 onMounted(() => {
   componentActive = true
+  viewportQuery = window.matchMedia('(max-width: 767px)')
+  syncViewport()
+  viewportQuery.addEventListener?.('change', syncViewport)
   load()
   experimentPollTimer = window.setInterval(() => {
     if (activeTab.value === 'active') loadExperiments()
@@ -377,6 +399,7 @@ onMounted(() => {
 onUnmounted(() => {
   componentActive = false
   if (experimentPollTimer) window.clearInterval(experimentPollTimer)
+  viewportQuery?.removeEventListener?.('change', syncViewport)
 })
 </script>
 
@@ -412,7 +435,44 @@ onUnmounted(() => {
             <p class="mt-1.5 max-w-md text-sm text-muted-foreground">创建一次测评后，这里会显示 Harness 版本、评测集版本和实时进度。</p>
             <Button class="mt-4" @click="selectTab('create')"><Play class="mr-1.5 size-4" />创建测评</Button>
           </div>
-          <div v-else class="mt-5 overflow-x-auto rounded-xl border border-border/70">
+          <div v-else-if="isMobileViewport" class="mt-5 space-y-3">
+            <article
+              v-for="experiment in activeExperiments"
+              :key="`mobile-${experiment.id}`"
+              :data-mobile-row-card="`active-experiment-${experiment.id}`"
+              :data-testid="`active-experiment-row-${experiment.id}`"
+              class="rounded-xl border border-border/70 bg-card p-4 shadow-sm"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <button type="button" class="min-w-0 text-left" @click="openExperiment(experiment)">
+                  <span class="block font-medium text-foreground hover:text-primary">实验编号 {{ experiment.id }}</span>
+                  <span class="mt-1 block truncate text-xs text-muted-foreground">{{ experiment.experiment_key || '未命名实验' }}</span>
+                </button>
+                <Badge class="shrink-0" :class="statusClass(experiment.status)">{{ statusLabel(experiment.status) }}</Badge>
+              </div>
+              <dl class="mt-4 grid gap-3 text-xs sm:grid-cols-2">
+                <div><dt class="text-muted-foreground">测评对象</dt><dd class="mt-1 font-medium">{{ experimentTargets(experiment) }}</dd></div>
+                <div><dt class="text-muted-foreground">Harness</dt><dd class="mt-1 break-all font-mono">{{ experimentHarness(experiment) }}</dd></div>
+                <div><dt class="text-muted-foreground">评测集</dt><dd class="mt-1 break-all font-mono">{{ experimentEvaluation(experiment) }}</dd></div>
+                <div><dt class="text-muted-foreground">创建时间</dt><dd class="mt-1 text-muted-foreground">{{ formatDate(experiment.created_at) }}</dd></div>
+              </dl>
+              <div class="mt-4 rounded-lg bg-muted/30 p-3">
+                <div class="flex items-center justify-between gap-2 text-xs">
+                  <span class="font-medium">{{ experimentProgress(experiment) }}% 已执行</span>
+                  <span class="text-muted-foreground">{{ experiment.completed_items || 0 }} / {{ experiment.total_items || 0 }} Cases</span>
+                </div>
+                <div class="mt-2 flex h-2 overflow-hidden rounded-full bg-muted" :aria-label="`Case 结果：${experimentDistribution(experiment).passed} 通过，${experimentDistribution(experiment).poor} 不佳，${experimentDistribution(experiment).failed} 失败，${experimentDistribution(experiment).pending} 未完成`">
+                  <div v-for="segment in experimentOutcomeSegments(experiment)" :key="segment.key" :class="['h-full', segment.color]" :style="{ width: `${segment.pct}%` }" />
+                </div>
+                <div class="mt-1.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground"><span class="text-emerald-600">{{ experimentDistribution(experiment).passed }} 通过</span><span class="text-amber-600">{{ experimentDistribution(experiment).poor }} 不佳</span><span class="text-destructive">{{ experimentDistribution(experiment).failed }} 失败</span><span>{{ experimentDistribution(experiment).pending }} 未完成</span></div>
+              </div>
+              <div class="mt-4 flex gap-2">
+                <Button class="flex-1" size="sm" variant="outline" @click="openExperiment(experiment)"><Eye class="mr-1.5 size-3.5" />详情</Button>
+                <Button data-testid="active-experiment-cancel" class="flex-1 text-destructive hover:text-destructive" size="sm" variant="ghost" :disabled="confirmingExperimentId !== null || cancellingExperimentId !== null" @click.stop="cancelExperiment(experiment)"><XCircle class="mr-1.5 size-3.5" />{{ confirmingExperimentId === experiment.id ? '确认中' : cancellingExperimentId === experiment.id ? '取消中' : '取消' }}</Button>
+              </div>
+            </article>
+          </div>
+          <div v-else-if="activeExperiments.length" class="mt-5 overflow-x-auto rounded-xl border border-border/70">
             <table class="w-full min-w-[960px] text-left text-sm">
               <thead class="bg-muted/35 text-xs text-muted-foreground">
                 <tr>
@@ -449,7 +509,7 @@ onUnmounted(() => {
                   <td class="px-4 py-4">
                     <div class="flex items-center gap-2">
                       <Button size="sm" variant="outline" @click="openExperiment(experiment)"><Eye class="mr-1.5 size-3.5" />详情</Button>
-                      <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" :disabled="cancellingExperimentId === experiment.id" @click.stop="cancelExperiment(experiment)"><XCircle class="mr-1.5 size-3.5" />{{ cancellingExperimentId === experiment.id ? '取消中' : '取消' }}</Button>
+                      <Button data-testid="active-experiment-cancel" size="sm" variant="ghost" class="text-destructive hover:text-destructive" :disabled="confirmingExperimentId !== null || cancellingExperimentId !== null" @click.stop="cancelExperiment(experiment)"><XCircle class="mr-1.5 size-3.5" />{{ confirmingExperimentId === experiment.id ? '确认中' : cancellingExperimentId === experiment.id ? '取消中' : '取消' }}</Button>
                     </div>
                   </td>
                 </tr>

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationRun, fetchEvaluationEvidence, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
 import { normalizeCaseEvidenceForLegacyPanel } from '@/services/evaluationSchemas.js'
+import { useConfirm, useToast } from '@/composables/useNotification.js'
 import { casePrioritySort, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
@@ -16,6 +17,8 @@ import { Badge } from '@/components/ui/badge'
 
 const route = useRoute()
 const router = useRouter()
+const { confirm: showConfirm } = useConfirm()
+const { success } = useToast()
 const run = ref(null)
 const loading = ref(true)
 const error = ref('')
@@ -25,6 +28,7 @@ const evidence = ref(null)
 const evidenceLoading = ref(false)
 const evidenceError = ref('')
 const retrying = ref(false)
+const cancelling = ref(false)
 let abortController = new AbortController()
 let stopped = false
 const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(run.value?.status))
@@ -117,11 +121,21 @@ function navigateCase(direction) {
 }
 
 async function cancel() {
+  cancelling.value = true
   try {
+    const confirmed = await showConfirm(
+      '取消后当前评测运行会停止，尚未完成的 Case 不再继续。确定要取消吗？',
+      { title: '确认取消评测', variant: 'danger', confirmLabel: '确认取消' },
+    )
+    if (!confirmed) return
+    error.value = ''
     await cancelEvaluationRun(route.params.runId)
     await load()
+    success('评测运行已取消')
   } catch (err) {
     error.value = err.message || '取消评测失败'
+  } finally {
+    cancelling.value = false
   }
 }
 
@@ -210,7 +224,7 @@ onUnmounted(() => {
           <template #actions>
             <Button variant="ghost" @click="router.push('/admin/evals/results')"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
             <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
-            <Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button>
+            <Button v-if="run && !terminal" variant="destructive" :disabled="cancelling" @click="cancel"><Ban class="mr-1.5 size-4" />{{ cancelling ? '正在取消...' : '取消评测' }}</Button>
           </template>
         </EvaluationPageHeader>
       </div>

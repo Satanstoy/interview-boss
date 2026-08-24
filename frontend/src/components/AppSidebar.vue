@@ -164,18 +164,19 @@ function handleShowSettings() { emit('show-settings') }
     <div class="flex-1"></div>
 
     <!-- User avatar -->
-    <UserMenu
-      v-if="displayUser"
-      :user="displayUser"
-      :pending-count="pendingReviewCount"
-      placement="top"
-      compact
-      button-class="rounded-lg hover:bg-sidebar-accent transition-colors p-0"
-      @logout="handleLogout"
-      @share-default-changed="handleShareDefaultChanged"
-      @show-review="handleShowReview"
-      @show-settings="handleShowSettings"
-    />
+    <AppTooltip v-if="displayUser" text="账户菜单" side="right">
+      <UserMenu
+        :user="displayUser"
+        :pending-count="pendingReviewCount"
+        placement="top"
+        compact
+        button-class="rounded-lg hover:bg-sidebar-accent transition-colors p-0"
+        @logout="handleLogout"
+        @share-default-changed="handleShareDefaultChanged"
+        @show-review="handleShowReview"
+        @show-settings="handleShowSettings"
+      />
+    </AppTooltip>
   </div>
 
   <!-- Expanded: full sidebar -->

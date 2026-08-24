@@ -20,7 +20,9 @@ import { ScatterChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, GraphicComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEChart } from '@/composables/useEChart.js'
+import { useTheme } from '@/composables/useTheme.js'
 import { mapToQuadrant, heatMedian, QUADRANTS } from '@/utils/quadrant.js'
+import { porcelain, porcelainTooltip } from '@/utils/chartTokens.js'
 
 echarts.use([ScatterChart, GridComponent, TooltipComponent, GraphicComponent, CanvasRenderer])
 
@@ -28,17 +30,22 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
 })
 
+const { isDark } = useTheme()
 const chartRef = ref(null)
 
 // 象限颜色（porcelain 蓝阶，明度即紧迫度：重点突破最深 → 不急最浅）
 function getQuadColors(dark) {
-  return dark
-    ? { breakthrough: '#EDEFF1', advantage: '#9EB3CD', maintain: '#6C93C7', lowPriority: '#4D82C6' }
-    : { breakthrough: '#081F5C', advantage: '#334EAC', maintain: '#7096D1', lowPriority: '#BAD6EB' }
+  const t = porcelain(dark)
+  return {
+    breakthrough: t.hero,
+    advantage: dark ? t.data2 : t.data,
+    maintain: dark ? t.faint : t.data2,
+    lowPriority: dark ? t.faint2 : t.faint,
+  }
 }
 
 const orderedQuadrants = computed(() => {
-  const colors = getQuadColors(false)
+  const colors = getQuadColors(isDark.value)
   return [
     { key: 'breakthrough', ...QUADRANTS.breakthrough, color: colors.breakthrough },
     { key: 'advantage', ...QUADRANTS.advantage, color: colors.advantage },
@@ -71,17 +78,14 @@ const buildOption = (dark) => {
   const median = heatMedian(props.items)
   const byQuad = scatterData(props.items, median)
   const colors = getQuadColors(dark)
-  const axisColor = dark ? '#9EB3CD' : 'rgba(8,31,92,.60)'
-  const splitColor = dark ? 'rgba(237,239,241,.14)' : 'rgba(8,31,92,.12)'
-  const labelColor = dark ? '#D5DBE2' : 'rgba(8,31,92,.72)'
+  const t = porcelain(dark)
+  const axisColor = t.muted
+  const splitColor = t.grid
+  const labelColor = t.label
 
   return {
     tooltip: {
-      trigger: 'item',
-      confine: true,
-      backgroundColor: dark ? 'rgba(8,31,92,.95)' : 'rgba(255,255,255,.95)',
-      borderColor: dark ? '#3472C2' : 'rgba(8,31,92,.20)',
-      textStyle: { color: dark ? '#D5DBE2' : '#081F5C', fontSize: 12 },
+      ...porcelainTooltip(dark),
       formatter: (params) => {
         const d = params.data
         if (!d) return ''
@@ -119,7 +123,7 @@ const buildOption = (dark) => {
         show: true,
         position: 'top',
         fontSize: 10,
-        color: dark ? '#D5DBE2' : '#081F5C',
+        color: labelColor,
         formatter: (p) => (p.data.name?.length > 8 ? p.data.name.slice(0, 8) + '…' : p.data.name),
       },
       emphasis: { scale: 1.2 },

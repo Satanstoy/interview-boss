@@ -23,6 +23,16 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const form = ref({ group: '', runA: '', runB: '', item: '', choice: '', comment: '', dimensions: '{}' })
+const EMPTY_SELECT_VALUE = '__none__'
+
+const selectValue = field => form.value[field] || EMPTY_SELECT_VALUE
+function setSelectValue(field, value) {
+  form.value[field] = value === EMPTY_SELECT_VALUE ? '' : value
+}
+function setRunValue(which, value) {
+  setSelectValue(which === 'a' ? 'runA' : 'runB', value)
+  loadRun(which, which === 'a' ? form.value.runA : form.value.runB)
+}
 
 const groups = computed(() => [...new Set(runs.value.map(run => run.comparison_group).filter(Boolean))])
 const groupRuns = computed(() => runs.value.filter(run => !form.value.group || run.comparison_group === form.value.group))
@@ -218,19 +228,42 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
         <template v-else>
           <!-- Config row -->
           <div class="grid gap-3 md:grid-cols-4 mb-4">
-            <Select v-model="form.group">
-  <SelectTrigger class="mt-1.5">
-    <SelectValue placeholder="请选择对比组" />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem v-for="group in groups" :key="group" :value="group">
-      {{ group }}
-    </SelectItem>
-  </SelectContent>
-</Select>
-            <label class="text-sm font-medium">版本 A<select v-model="form.runA" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" @change="loadRun('a', form.runA)"><option value="">请选择</option><option v-for="run in groupRuns" :key="run.id" :value="run.id">评测 #{{ run.id }} · {{ run.target_release_key }}</option></select></label>
-            <label class="text-sm font-medium">版本 B<select v-model="form.runB" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" @change="loadRun('b', form.runB)"><option value="">请选择</option><option v-for="run in groupRuns" :key="run.id" :value="run.id">评测 #{{ run.id }} · {{ run.target_release_key }}</option></select></label>
-            <label class="text-sm font-medium">Case<select v-model="form.item" class="mt-1.5 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">请选择</option><option v-for="key in itemKeys" :key="key" :value="key">{{ reviewedKeys.has(key) ? '✓ ' : '' }}{{ key }}</option></select></label>
+            <label class="text-sm font-medium">对比组
+              <Select :model-value="selectValue('group')" @update:model-value="setSelectValue('group', $event)">
+                <SelectTrigger class="mt-1.5 w-full"><SelectValue placeholder="请选择对比组" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="EMPTY_SELECT_VALUE" disabled>请选择对比组</SelectItem>
+                  <SelectItem v-for="group in groups" :key="group" :value="group">{{ group }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label class="text-sm font-medium">版本 A
+              <Select :model-value="selectValue('runA')" @update:model-value="setRunValue('a', $event)">
+                <SelectTrigger class="mt-1.5 w-full"><SelectValue placeholder="请选择版本 A" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="EMPTY_SELECT_VALUE" disabled>请选择版本 A</SelectItem>
+                  <SelectItem v-for="run in groupRuns" :key="run.id" :value="String(run.id)">评测 #{{ run.id }} · {{ run.target_release_key }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label class="text-sm font-medium">版本 B
+              <Select :model-value="selectValue('runB')" @update:model-value="setRunValue('b', $event)">
+                <SelectTrigger class="mt-1.5 w-full"><SelectValue placeholder="请选择版本 B" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="EMPTY_SELECT_VALUE" disabled>请选择版本 B</SelectItem>
+                  <SelectItem v-for="run in groupRuns" :key="run.id" :value="String(run.id)">评测 #{{ run.id }} · {{ run.target_release_key }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label class="text-sm font-medium">Case
+              <Select :model-value="selectValue('item')" @update:model-value="setSelectValue('item', $event)">
+                <SelectTrigger class="mt-1.5 w-full"><SelectValue placeholder="请选择 Case" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="EMPTY_SELECT_VALUE" disabled>请选择 Case</SelectItem>
+                  <SelectItem v-for="key in itemKeys" :key="key" :value="key">{{ reviewedKeys.has(key) ? '✓ ' : '' }}{{ key }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
           </div>
 
           <!-- Forced side-by-side comparison -->
