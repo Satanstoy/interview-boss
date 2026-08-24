@@ -3,3 +3,9 @@
 # 门禁逻辑:列在此处的文件行数不得超过「当前行数」(即不允许继续膨胀);
 # 未列的超过 1500 行即 FAIL。Stage B 拆分后逐条移除/缩短本清单并提交。
 # 2026-08-14: 5 个 god-file 全部拆分至 1500 行红线以下,本清单已清空。
+# 2026-08-24 结构审计发现 4 个文件在清空后重新越线(拆分欠账回归),回填冻结其当前行数,
+# 恢复门禁「红即异常」语义;Stage B 需再次拆分后移除条目。
+backend/app/services/llm.py 1950
+backend/app/routers/admin_evaluation.py 1919
+backend/app/worker.py 1915
+frontend/src/components/business/ChatView.vue 1503

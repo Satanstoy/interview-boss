@@ -86,3 +86,8 @@ Thumbs.db
 
 # 聚类实验报告（含生产数据抽样，不提交）
 backend/experiment_reports/
+
+# 本地设计稿 / 实验套件 / 审计报告（不提交）
+designs/
+evals/
+experiment_reports/

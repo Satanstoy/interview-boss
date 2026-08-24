@@ -1,7 +1,7 @@
 [project]
 name = "interview-boss"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chinese AI interview preparation platform (JD/interview-experience ingestion, question bank, mock interviews)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
