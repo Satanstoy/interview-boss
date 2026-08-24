@@ -39,6 +39,7 @@ x-app-service: &app-service
     - EMBEDDING_BACKEND=siliconflow
     - EMBEDDING_MODEL_DIR=/app/models/bge-small-zh-v1.5
     - EMBEDDING_OFFLINE=1
+    - ALLOW_RFC2544_BENCHMARK_RANGE=1
   volumes:
     - ./backend/data:/app/backend/data
     - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro

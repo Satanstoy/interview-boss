@@ -31,6 +31,15 @@ def _blocked_ip(value: str) -> bool:
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
         address = mapped
+
+    # Allow RFC 2544 benchmark range (198.18.0.0/15) if configured
+    # This is used by proxy tools like Clash, Surge, Mihomo in fake-IP mode
+    if address.version == 4 and address in ipaddress.ip_network("198.18.0.0/15"):
+        from app.core.config import ALLOW_RFC2544_BENCHMARK_RANGE
+
+        if ALLOW_RFC2544_BENCHMARK_RANGE:
+            return False
+
     return not address.is_global
 
 
