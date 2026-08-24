@@ -12,9 +12,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-vue': ['vue', '@vueuse/core'],
-          'vendor-echarts': ['echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
+        // vite 8 (rolldown) 仅支持函数形式；对象形式已移除
+        manualChunks(id) {
+          if (/[\\/]node_modules[\\/](echarts|zrender)[\\/]/.test(id)) {
+            return 'vendor-echarts'
+          }
+          if (/[\\/]node_modules[\\/](vue|@vue|@vueuse)[\\/]/.test(id)) {
+            return 'vendor-vue'
+          }
+          return undefined
         }
       }
     }
