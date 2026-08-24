@@ -161,6 +161,8 @@ async def _run_question_writer_with_fallback(
     context_anchor: str,
     llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
     question_validator: Callable[..., Awaitable[dict[str, Any]]],
+    validator_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
+    repair_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
 ) -> dict[str, Any]:
     """Run question_writer; on failure, swap to a fallback candidate once.
 
@@ -174,6 +176,8 @@ async def _run_question_writer_with_fallback(
         question_type=str(state.get("question_type") or "unknown"),
         llm_call=llm_call,
         validator=question_validator,
+        validator_llm_call=validator_llm_call,
+        repair_llm_call=repair_llm_call,
     )
     if result["status"] == "success":
         return {**result, "fallback_attempted": False}
@@ -194,6 +198,8 @@ async def _run_question_writer_with_fallback(
         question_type=str(state.get("question_type") or "unknown"),
         llm_call=llm_call,
         validator=question_validator,
+        validator_llm_call=validator_llm_call,
+        repair_llm_call=repair_llm_call,
     )
     if fallback_result["status"] == "success":
         return {**fallback_result, "fallback_attempted": True}
@@ -212,6 +218,8 @@ async def execute_turn_contract(
         ..., Awaitable[dict[str, Any]]
     ] = validate_question_adherence,
     summary_generator: Callable[..., Awaitable[str]] = generate_structured_summary,
+    validator_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
+    repair_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
 ) -> dict[str, Any]:
     """Return the only user-visible response permitted for *contract*."""
     context = _recent_context(state)
@@ -232,6 +240,8 @@ async def execute_turn_contract(
             context_anchor=question_context,
             llm_call=llm_call,
             question_validator=question_validator,
+            validator_llm_call=validator_llm_call,
+            repair_llm_call=repair_llm_call,
         )
         if result["status"] != "success":
             error = _error(result, "question_writer")

@@ -16,12 +16,50 @@ from app.worker_enqueue import (
     enqueue_generate_recitation_job,
     enqueue_interview_import_analysis_job,
     enqueue_interview_reprocess_job,
+    enqueue_interview_turn_job,
     enqueue_quality_review_scan_job,
     enqueue_recompute_embedding_job,
     enqueue_submit_import_job,
 )
 
 logger = logging.getLogger("interview-boss")
+
+
+async def scheduled_harness_turn_dispatch_task(ctx, limit: int = 20):
+    """Retry ARQ handoff for accepted Harness 2.0 TurnRuns.
+
+    A failed Redis handoff never changes the authoritative TurnRun. The
+    dispatcher only selects rows whose durable ``turn.started`` event carries
+    Harness 2.0 provenance and whose worker lease is absent or expired.
+    """
+    from app.db.connection import get_db_connection
+
+    def _pending_ids():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                "SELECT t.id FROM chat_turns t "
+                "WHERE t.status = 'running' AND t.latest_sequence > 0 "
+                "AND (t.lease_owner IS NULL OR t.lease_expires_at IS NULL "
+                "OR t.lease_expires_at <= CURRENT_TIMESTAMP) "
+                "AND EXISTS (SELECT 1 FROM interview_events e "
+                "WHERE e.turn_id = t.id AND e.event_type = 'turn.started' "
+                "AND json_extract(e.payload_json, '$.harness_version') = '2.0') "
+                "ORDER BY t.started_at ASC LIMIT ?",
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
+    turn_ids = await asyncio.to_thread(_pending_ids)
+    dispatched = 0
+    failed = 0
+    for turn_id in turn_ids:
+        try:
+            await enqueue_interview_turn_job(turn_id)
+            dispatched += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("[Harness] ARQ 投递失败 turn=%s: %s", turn_id, exc)
+    return {"candidates": len(turn_ids), "dispatched": dispatched, "failed": failed}
 
 
 def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
@@ -405,4 +443,3 @@ async def scheduled_wal_checkpoint_task(ctx):
     result["elapsed"] = round(time.time() - start, 3)
     logger.info("[定时任务] WAL checkpoint 完成: %s", result)
     return result
-

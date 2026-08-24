@@ -130,3 +130,19 @@ async def enqueue_cluster_review_task(task_id: str):
         await pool.close()
 
 
+async def enqueue_interview_turn_job(turn_id: str):
+    """Trigger one durable Harness 2.0 TurnRun worker.
+
+    The deterministic ARQ job id makes repeated dispatcher passes harmless;
+    the database TurnRun and event stream remain the source of truth.
+    """
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job(
+            "interview_turn_task",
+            str(turn_id),
+            _job_id=f"interview-turn-{turn_id}",
+        )
+    finally:
+        await pool.close()
+

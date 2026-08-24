@@ -8,15 +8,36 @@
         </div>
         <div class="text-[11px] text-muted-foreground mt-1 text-right">
           {{ formatTime(message.created_at) }}
+          <button
+            v-if="message.metadata?.turn_id"
+            type="button"
+            class="ml-2 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            data-testid="edit-turn"
+            @click="emit('edit', message.id)"
+          >编辑重发</button>
         </div>
+        <!-- Failed/cancelled TurnRuns have no assistant message. Keep their
+             durable run card attached to the user input so history can still
+             restore the complete trace. Completed runs render on the assistant
+             message below instead, avoiding duplicate cards. -->
+        <TurnRunCard
+          v-if="message.metadata?.turn_run"
+          :run="message.metadata.turn_run"
+          :is-live="false"
+        />
       </div>
     </div>
 
     <!-- Assistant message -->
     <div v-else>
       <!-- Reasoning timeline (unified: steps + thinking) -->
+      <TurnRunCard
+        v-if="message.metadata?.turn_run"
+        :run="message.metadata.turn_run"
+        :is-live="false"
+      />
       <ReasoningTimeline
-        v-if="timelineSteps.length || timelineToolSteps.length || timelineSkillSteps.length || thinkingContent"
+        v-else-if="timelineSteps.length || timelineToolSteps.length || timelineSkillSteps.length || thinkingContent"
         :is-streaming="false"
         :content="thinkingContent"
         :duration="timelineDuration"
@@ -197,6 +218,7 @@ import {
   Briefcase 
 } from '@lucide/vue'
 import ReasoningTimeline from './ReasoningTimeline.vue'
+import TurnRunCard from './TurnRunCard.vue'
 import InsightBlock from './InsightBlock.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
@@ -204,7 +226,7 @@ const props = defineProps({
   message: { type: Object, required: true },
 })
 
-const emit = defineEmits(['regenerate', 'like'])
+const emit = defineEmits(['regenerate', 'like', 'edit'])
 
 const isUser = computed(() => props.message.role === 'user')
 const showRetrieved = ref(false)

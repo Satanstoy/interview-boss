@@ -11,7 +11,8 @@
 | `CodeEditor.vue` | 轻量 LeetCode 风格代码编辑器封装（原生 textarea + 行号栏，避免 Monaco 的运行时开销） |
 | `CodingPractice.vue` | 手撕代码练习主页面（ChatView 式全屏工作台 + 可收起题目侧栏 + LeetCode 式题目列表/描述/编辑器分栏 + AI 评审）；题单选择器位于全局 `SiteHeader`，保留收藏、题单和 Prompt + Markdown 导入 |
 | `ChatMessage.vue` | Chat 消息气泡（Markdown 渲染）；从历史 metadata 恢复 reasoning_trace、tool_calls_trace、skill_trace、thinking、step、tool_steps、skill_name 和本轮采用题；`reasoning_trace.source === "model_reasoning"` 时优先展示 `thinking` chunks |
-| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间保留 step/tool_step/thinking，并在完成时合并后端 done.metadata；`chunk` 事件带 `replace=true` 时覆盖当前流式文本，用于后端完成后修正；regenerate 通过 assistant revision 重新加载消息，不删除或重复插入 user turn |
+| `TurnRunCard.vue` | Harness 2.0 双重折叠运行卡：外层按整轮运行状态/时长折叠，内层按 Action 展开；reasoning/CoT 和 Evidence 使用固定最大高度滚动，保留运行中、停止和完成态 |
+| `ChatView.vue` | Chat 主视图（SSE 流式）；新建面试支持 difficulty 和面经节奏来源，流式期间通过 canonical TurnRun reducer 合并 step/tool_step/thinking，完成后合并后端 done.metadata；历史消息按 `turn_id + after_sequence` 回放恢复完整运行卡；停止会话保留原轨迹，编辑用户回答通过 `revision_of_turn_id` 创建新 TurnRun，不覆盖旧回合；regenerate 仍通过 assistant revision 重新加载消息 |
 | `ReasoningTimeline.vue` | 面试官推理展示组件（可展开/折叠）；过滤 loading/context 等基础设施 step，把推理步骤、技能加载、工具调用串成左侧连线 timeline，连线需穿过圆点中心；展示 MiMo/DeepSeek reasoning_content、公开摘要 fallback、工具耗时、白名单参数和结果预览 |
 | `ThinkingBlock.vue` | 旧版 AI 思维链展示组件（可展开/折叠） |
 | `InsightBlock.vue` | 面试官思考过程展示组件（可折叠卡片，显示 insight 列表） |
@@ -68,6 +69,7 @@
 
 - 业务组件可以依赖 `common/` 组件，但 `common/` 不能依赖 `business/`
 - API 调用通过 `services/` 层或兼容层 `api/index.js`，禁止在组件中直接 `fetch`
+- TurnRun 事件是 append-only；UI reducer 必须按 `event_id` 去重并拒绝其他 TurnRun 的迟到事件，不能通过编辑历史消息覆盖旧轨迹。
 - 状态提升到 `App.vue` 或 composables，组件内不要维护全局状态
 - 业务 UI 贴近 shadcn-vue workspace：卡片使用细边框/低阴影，聊天页使用 AI copilot 信息架构，用户入口固定在左侧应用壳底部。
 - `CodingPractice.vue` 与 `/chat` 的 `ChatView.vue` 对齐外层工作台，同时遵循 LeetCode 题目页的信息架构：题单选择器放在应用全局 `SiteHeader`，当前题单区域只展示搜索、AI 导入和题目列表，侧栏支持收起/展开，右侧固定展示题目描述与编辑器；不再使用子页面顶栏、独立题库侧栏或难度筛选区。

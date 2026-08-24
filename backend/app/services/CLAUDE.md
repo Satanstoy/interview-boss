@@ -28,7 +28,8 @@
 | `chat_session_service.py` | session notes、刷盘触发、跨会话召回与格式化 | `chat_common`, `chat_memory_service` |
 | `chat_durable_service.py` | durable side-effect job、记忆抽取 job、CandidateSet、legacy interview event/generation read model | `chat_common` |
 | `chat_event_service.py` | Harness 2.0 append-only turn event、sequence replay、event idempotency 和 transactional outbox 写入 | `db/connection` |
-| `harness_state_service.py` | Harness 2.0 Ledger bootstrap、Action 幂等、Attempt 重试链和不可变 Artifact 写入 | `db/connection`, `chat_common` |
+| `harness_state_service.py` | Harness 2.0 Ledger bootstrap、Action 幂等、Attempt 重试链、不可变 Artifact、TurnRun lease/heartbeat、Ledger 乐观提交和事件 Outbox claim/ack | `db/connection`, `chat_common` |
+| `harness_turn_worker.py` | Harness 2.0 ARQ worker runtime：读取冻结 TurnRun、运行单一 interview-agent、将运行事件投影到 append-only SSE stream，并在 CommitTurn 边界完成 assistant 与 Ledger | `chat_service`, `agents/chat/graph` |
 | `worker.py`（`app/worker.py`） | ARQ worker：任务执行 + 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
@@ -68,6 +69,7 @@
 - 模拟面试会话必须写入并按 `job_position` 过滤，跨会话召回也只召回同岗位历史。
 - Chat 消息写入必须在 SQL 内校验会话归属与 `status = 'active'`；归档会话保留只读，不允许新增 user 或 assistant 消息。
 - Chat turn 必须先通过 `reserve_chat_turn()` 原子获取 conversation fence；assistant finalize、取消和 turn-owned 副作用必须校验 `turn_id + fence + user_id + status = 'running'`，不能只按 conversation 写入。
+- `finalize_chat_turn()` 必须在同一事务内以 `ledger_version_at_start` 乐观提交 InterviewLedger；版本冲突不得覆盖当前 Ledger。事件 Outbox 只负责可重试投递，`interview_events` 才是 SSE replay 的事实源。
 - Durable side effects 必须从 `chat_side_effect_jobs` claim；memory extraction 按 source turn/job 与 content hash 去重，metadata/session notes 更新必须支持 expected version conflict。
 - CandidateSet 只保存题目引用；消费后必须从权威 `question_bank` reload，不能信任客户端或候选集中的自然语言题面。
 - **题卡频率口径（唯一权威 = 动态来源数）**：展示 `frequency`、复习风险权重（`frequency × (5 - proficiency)`）、新题排序、排序 tiebreak 全部用动态来源数（活跃面经按 URL 去重、过滤 `deleted_at`，公共+本人 all 口径），与题库列表一致。`question_bank.frequency` 是聚类合并的原始问法条数（同一面经多个问法也计数），仅为聚类元数据，**禁止**参与展示/排序（历史教训：MAX 展示虚高 1 来源显示 6；风险权重用静态列导致显示高频却不靠前）。

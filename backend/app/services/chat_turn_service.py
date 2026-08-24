@@ -24,7 +24,11 @@ from app.services.chat_common import (
     _safe_json_loads,
     build_turn_request_fingerprint,
 )
-from app.services.harness_state_service import ensure_interview_ledger_conn
+from app.services.harness_state_service import (
+    commit_interview_ledger_conn,
+    ensure_interview_ledger_conn,
+)
+from app.services.chat_event_service import _append_turn_event_conn, TurnEventLeaseLost
 
 logger = logging.getLogger("interview-boss")
 
@@ -47,7 +51,9 @@ def get_chat_turn(
         row = conn.execute(
             "SELECT t.id, t.conversation_id, t.user_id, t.client_request_id, t.fence, t.status, "
             "t.user_message_id, t.assistant_message_id, t.cancel_reason, t.error_code, "
-            "t.request_fingerprint, t.revision_of_message_id, t.created_at, t.finished_at, "
+            "t.request_fingerprint, t.revision_of_message_id, t.revision_of_turn_id, "
+            "t.harness_status, t.context_pack_hash, t.stable_prefix_hash, t.latest_sequence, "
+            "t.created_at, t.finished_at, "
             "a.content AS assistant_content, a.metadata AS assistant_metadata "
             "FROM chat_turns t LEFT JOIN chat_messages a "
             "ON a.id = t.assistant_message_id WHERE " + " AND ".join(where),
@@ -69,6 +75,9 @@ def reserve_chat_turn(
     content: str,
     request_fingerprint: str | None = None,
     existing_user_message_id: int | None = None,
+    revision_of_turn_id: str | None = None,
+    harness_version: str | None = None,
+    model: str | None = None,
 ) -> ChatTurn:
     """Atomically claim one active turn and persist its user message.
 
@@ -81,13 +90,17 @@ def reserve_chat_turn(
     request_id = str(client_request_id or "").strip()
     if not request_id:
         raise ValueError("client_request_id is required")
-    fingerprint = request_fingerprint or build_turn_request_fingerprint(content)
+    fingerprint = request_fingerprint or build_turn_request_fingerprint(
+        content, revision_of_turn_id=revision_of_turn_id
+    )
 
     with get_db_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             conversation = conn.execute(
-                "SELECT user_id, status, session_version FROM chat_conversations WHERE id = ?",
+                "SELECT user_id, status, session_version, mode, jd_id, resume_text, "
+                "language, question_strategy, interview_config_json, provider_policy_json "
+                "FROM chat_conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
             if not conversation or int(conversation["user_id"]) != int(user_id):
@@ -103,11 +116,37 @@ def reserve_chat_turn(
             ).fetchone()
             session_version = int(conversation["session_version"] or 1)
             ledger_version = int(ledger["ledger_version"] if ledger else 1)
+            turn_base_snapshot = json.dumps(
+                {
+                    "mode": conversation["mode"],
+                    "jd_id": conversation["jd_id"],
+                    "resume_text": conversation["resume_text"],
+                    "language": conversation["language"],
+                    "question_strategy": conversation["question_strategy"],
+                    "interview_config": _safe_json_loads(
+                        conversation["interview_config_json"]
+                    ),
+                    "provider_policy": _safe_json_loads(
+                        conversation["provider_policy_json"]
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+
+            if revision_of_turn_id:
+                source = conn.execute(
+                    "SELECT id FROM chat_turns "
+                    "WHERE id = ? AND conversation_id = ? AND user_id = ?",
+                    (revision_of_turn_id, conversation_id, user_id),
+                ).fetchone()
+                if not source:
+                    raise TurnNotFound("revision source turn not found")
 
             existing = conn.execute(
                 "SELECT id, conversation_id, user_id, client_request_id, fence, status, "
                 "user_message_id, assistant_message_id, request_fingerprint, "
-                "revision_of_message_id FROM chat_turns "
+                "revision_of_message_id, revision_of_turn_id FROM chat_turns "
                 "WHERE conversation_id = ? AND client_request_id = ?",
                 (conversation_id, request_id),
             ).fetchone()
@@ -141,6 +180,11 @@ def reserve_chat_turn(
                         assistant_message_id=existing["assistant_message_id"],
                         request_fingerprint=fingerprint,
                         revision_of_message_id=existing["revision_of_message_id"],
+                        revision_of_turn_id=(
+                            existing["revision_of_turn_id"]
+                            if "revision_of_turn_id" in existing.keys()
+                            else None
+                        ),
                         created=False,
                     )
                 if stored_fingerprint and stored_fingerprint != fingerprint:
@@ -194,9 +238,9 @@ def reserve_chat_turn(
                 conn.execute(
                     "INSERT INTO chat_turns "
                     "(id, conversation_id, user_id, client_request_id, fence, status, "
-                    "request_fingerprint, harness_status, session_version, "
-                    "ledger_version_at_start, started_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
+                    "request_fingerprint, revision_of_turn_id, harness_status, session_version, "
+                    "ledger_version_at_start, turn_base_snapshot_json, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, 'running', ?, ?, ?, CURRENT_TIMESTAMP)",
                     (
                         turn_id,
                         conversation_id,
@@ -204,8 +248,10 @@ def reserve_chat_turn(
                         request_id,
                         fence,
                         fingerprint,
+                        revision_of_turn_id,
                         session_version,
                         ledger_version,
+                        turn_base_snapshot,
                     ),
                 )
                 message_cursor = conn.execute(
@@ -216,7 +262,16 @@ def reserve_chat_turn(
                         conversation_id,
                         content,
                         json.dumps(
-                            {"turn_id": turn_id, "turn_fence": fence},
+                            {
+                                "turn_id": turn_id,
+                                "turn_fence": fence,
+                                **({"model": model} if model else {}),
+                                **(
+                                    {"revision_of_turn_id": revision_of_turn_id}
+                                    if revision_of_turn_id
+                                    else {}
+                                ),
+                            },
                             ensure_ascii=False,
                         ),
                     ),
@@ -230,9 +285,10 @@ def reserve_chat_turn(
                 conn.execute(
                     "INSERT INTO chat_turns "
                     "(id, conversation_id, user_id, client_request_id, fence, status, "
-                    "user_message_id, request_fingerprint, harness_status, session_version, "
-                    "ledger_version_at_start, started_at) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
+                    "user_message_id, request_fingerprint, revision_of_turn_id, "
+                    "harness_status, session_version, "
+                    "ledger_version_at_start, turn_base_snapshot_json, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, 'running', ?, ?, ?, CURRENT_TIMESTAMP)",
                     (
                         turn_id,
                         conversation_id,
@@ -241,16 +297,47 @@ def reserve_chat_turn(
                         fence,
                         user_message_id,
                         fingerprint,
+                        revision_of_turn_id,
                         session_version,
                         ledger_version,
+                        turn_base_snapshot,
                     ),
                 )
                 precreated_metadata.update(
-                    {"turn_id": turn_id, "turn_fence": fence}
+                    {
+                        "turn_id": turn_id,
+                        "turn_fence": fence,
+                        **({"model": model} if model else {}),
+                        **(
+                            {"revision_of_turn_id": revision_of_turn_id}
+                            if revision_of_turn_id
+                            else {}
+                        ),
+                    }
                 )
+            if precreated_metadata is not None:
                 conn.execute(
                     "UPDATE chat_messages SET metadata = ? WHERE id = ?",
                     (json.dumps(precreated_metadata, ensure_ascii=False), user_message_id),
+                )
+            if harness_version == "2.0":
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:started",
+                    event_type="turn.started",
+                    action_id=None,
+                    phase="observe_propose",
+                    channel="system",
+                    payload={
+                        "client_request_id": request_id,
+                        "session_id": conversation_id,
+                        "harness_version": "2.0",
+                    },
+                    visibility="user",
+                    schema_version=1,
                 )
             conn.execute(
                 "UPDATE chat_conversations SET updated_at = CURRENT_TIMESTAMP "
@@ -267,16 +354,44 @@ def reserve_chat_turn(
                 status="running",
                 user_message_id=user_message_id,
                 request_fingerprint=fingerprint,
+                revision_of_turn_id=revision_of_turn_id,
             )
         except Exception:
             conn.rollback()
             raise
 
 
+def reserve_chat_edit_revision(
+    conversation_id: str,
+    user_id: int,
+    source_turn_id: str,
+    content: str,
+    client_request_id: str,
+    model: str | None = None,
+    harness_version: str | None = None,
+) -> ChatTurn:
+    """Create a new user TurnRun while preserving the source TurnRun."""
+    request_fingerprint = build_turn_request_fingerprint(
+        content,
+        model=model,
+        revision_of_turn_id=source_turn_id,
+    )
+    return reserve_chat_turn(
+        conversation_id,
+        user_id,
+        client_request_id,
+        content,
+        request_fingerprint=request_fingerprint,
+        revision_of_turn_id=source_turn_id,
+        harness_version=harness_version,
+        model=model,
+    )
+
+
 def _load_owned_turn(conn, turn_id: str, conversation_id: str, user_id: int):
     row = conn.execute(
         "SELECT id, conversation_id, user_id, client_request_id, fence, status, "
-        "user_message_id, assistant_message_id FROM chat_turns "
+        "user_message_id, assistant_message_id, lease_owner FROM chat_turns "
         "WHERE id = ? AND conversation_id = ? AND user_id = ?",
         (turn_id, conversation_id, user_id),
     ).fetchone()
@@ -291,6 +406,7 @@ def reserve_chat_revision(
     assistant_message_id: int,
     client_request_id: str,
     model: str | None = None,
+    harness_version: str | None = None,
 ) -> tuple[ChatTurn, str]:
     """Reserve a new assistant generation without inserting another user message."""
     request_id = str(client_request_id or "").strip()
@@ -301,7 +417,9 @@ def reserve_chat_revision(
         conn.execute("BEGIN IMMEDIATE")
         try:
             conversation = conn.execute(
-                "SELECT user_id, status, session_version FROM chat_conversations WHERE id = ?",
+                "SELECT user_id, status, session_version, mode, jd_id, resume_text, "
+                "language, question_strategy, interview_config_json, provider_policy_json "
+                "FROM chat_conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
             if not conversation or int(conversation["user_id"]) != int(user_id):
@@ -317,6 +435,23 @@ def reserve_chat_revision(
             ).fetchone()
             session_version = int(conversation["session_version"] or 1)
             ledger_version = int(ledger["ledger_version"] if ledger else 1)
+            turn_base_snapshot = json.dumps(
+                {
+                    "mode": conversation["mode"],
+                    "jd_id": conversation["jd_id"],
+                    "resume_text": conversation["resume_text"],
+                    "language": conversation["language"],
+                    "question_strategy": conversation["question_strategy"],
+                    "interview_config": _safe_json_loads(
+                        conversation["interview_config_json"]
+                    ),
+                    "provider_policy": _safe_json_loads(
+                        conversation["provider_policy_json"]
+                    ),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
 
             target = conn.execute(
                 "SELECT t.id AS source_turn_id, t.user_message_id, t.assistant_message_id, "
@@ -372,8 +507,8 @@ def reserve_chat_revision(
                 "(id, conversation_id, user_id, client_request_id, fence, status, "
                 "user_message_id, request_fingerprint, revision_of_message_id, "
                 "revision_of_turn_id, harness_status, session_version, "
-                "ledger_version_at_start, started_at) "
-                "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
+                "ledger_version_at_start, turn_base_snapshot_json, started_at) "
+                "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 'running', ?, ?, ?, CURRENT_TIMESTAMP)",
                 (
                     turn_id,
                     conversation_id,
@@ -386,8 +521,28 @@ def reserve_chat_revision(
                     target["source_turn_id"],
                     session_version,
                     ledger_version,
+                    turn_base_snapshot,
                 ),
             )
+            if harness_version == "2.0":
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:started",
+                    event_type="turn.started",
+                    action_id=None,
+                    phase="observe_propose",
+                    channel="system",
+                    payload={
+                        "client_request_id": request_id,
+                        "session_id": conversation_id,
+                        "harness_version": "2.0",
+                    },
+                    visibility="user",
+                    schema_version=1,
+                )
             conn.commit()
             return (
                 ChatTurn(
@@ -400,6 +555,7 @@ def reserve_chat_revision(
                     user_message_id=target["user_message_id"],
                     request_fingerprint=fingerprint,
                     revision_of_message_id=assistant_message_id,
+                    revision_of_turn_id=target["source_turn_id"],
                 ),
                 target["user_content"],
             )
@@ -413,19 +569,81 @@ def cancel_chat_turn(
     conversation_id: str,
     user_id: int,
     reason: str = "client_stop",
+    defer_terminal: bool = False,
+    lease_owner: str | None = None,
+    harness_events: bool = False,
 ) -> ChatTurn:
-    """Invalidate a running turn; repeated cancellation is idempotent."""
+    """Request or finalize cancellation; repeated cancellation is idempotent.
+
+    Harness 2.0 uses cooperative cancellation: the request event is durable,
+    while the worker wins the terminal transition after it observes the
+    request. Legacy inline SSE keeps its historical immediate transition.
+    """
     with get_db_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             row = _load_owned_turn(conn, turn_id, conversation_id, user_id)
+            if lease_owner is not None and row["lease_owner"] != str(lease_owner):
+                raise TurnEventLeaseLost(turn_id)
             if row["status"] == "running":
-                conn.execute(
-                    "UPDATE chat_turns SET status = 'cancelled', harness_status = 'cancelled', "
-                    "terminal_reason = ?, cancel_reason = ?, finished_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND status = 'running'",
-                    (reason[:120], reason[:120], turn_id),
-                )
+                if defer_terminal:
+                    updated = conn.execute(
+                        "UPDATE chat_turns SET cancel_reason = ?, "
+                        "heartbeat_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ? AND status = 'running' AND cancel_reason IS NULL",
+                        (reason[:120], turn_id),
+                    )
+                    if updated.rowcount:
+                        _append_turn_event_conn(
+                            conn,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            turn_id=turn_id,
+                            event_id=f"evt:{turn_id}:cancel-requested",
+                            event_type="turn.cancel_requested",
+                            action_id=None,
+                            phase="commit",
+                            channel="system",
+                            payload={"reason": reason[:120]},
+                            visibility="user",
+                            schema_version=1,
+                        )
+                else:
+                    conn.execute(
+                        "UPDATE chat_turns SET status = 'cancelled', harness_status = 'cancelled', "
+                        "terminal_reason = ?, cancel_reason = ?, finished_at = CURRENT_TIMESTAMP, "
+                        + ("heartbeat_at = CURRENT_TIMESTAMP " if lease_owner is not None else
+                           "lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = CURRENT_TIMESTAMP ")
+                        + "WHERE id = ? AND status = 'running' "
+                        + ("AND lease_owner = ?" if lease_owner is not None else ""),
+                        (
+                            reason[:120],
+                            reason[:120],
+                            turn_id,
+                            *((str(lease_owner),) if lease_owner is not None else ()),
+                        ),
+                    )
+                    if lease_owner is not None and harness_events:
+                        _append_turn_event_conn(
+                            conn,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            turn_id=turn_id,
+                            event_id=f"evt:{turn_id}:cancelled",
+                            event_type="turn.cancelled",
+                            action_id=None,
+                            phase="commit",
+                            channel="system",
+                            payload={"reason": reason[:120]},
+                            visibility="user",
+                            schema_version=1,
+                            lease_owner=lease_owner,
+                        )
+                        conn.execute(
+                            "UPDATE chat_turns SET lease_owner = NULL, lease_expires_at = NULL "
+                            "WHERE id = ? AND lease_owner = ?",
+                            (turn_id, str(lease_owner)),
+                        )
             conn.commit()
             return _chat_turn_from_row(
                 conn.execute(
@@ -445,11 +663,12 @@ def assert_chat_turn_active(
     fence: int,
     conversation_id: str,
     user_id: int,
+    lease_owner: str | None = None,
 ) -> None:
     """Reject stale workers before they perform turn-owned side effects."""
     with get_db_connection() as conn:
         row = conn.execute(
-            "SELECT t.status, c.status AS conversation_status "
+            "SELECT t.status, t.cancel_reason, t.lease_owner, c.status AS conversation_status "
             "FROM chat_turns t JOIN chat_conversations c ON c.id = t.conversation_id "
             "WHERE t.id = ? AND t.fence = ? AND t.conversation_id = ? AND t.user_id = ?",
             (turn_id, fence, conversation_id, user_id),
@@ -458,6 +677,10 @@ def assert_chat_turn_active(
         raise TurnNotFound("turn not found")
     if row["status"] != "running" or row["conversation_status"] != "active":
         raise TurnCancelled("turn is no longer active")
+    if row["cancel_reason"]:
+        raise TurnCancelled("turn cancellation requested")
+    if lease_owner is not None and row["lease_owner"] != str(lease_owner):
+        raise TurnEventLeaseLost(turn_id)
 
 
 def _enqueue_side_effect_job_conn(
@@ -484,8 +707,8 @@ def _enqueue_side_effect_job_conn(
             conversation_id,
             source_turn_id,
             json.dumps(payload or {}, ensure_ascii=False, sort_keys=True),
-        ),
-    )
+                ),
+            )
     if cursor.rowcount:
         return job_id
     row = conn.execute(
@@ -504,13 +727,22 @@ def finalize_chat_turn(
     user_id: int,
     content: str,
     metadata: Optional[dict] = None,
+    harness_events: bool = False,
+    lease_owner: str | None = None,
 ) -> Optional[int]:
-    """Persist assistant output only for the still-running turn fence."""
+    """Persist assistant output only for the still-running turn fence.
+
+    Harness 2.0 callers set ``harness_events`` so the assistant completion,
+    commit completion, and terminal event are written in this same database
+    transaction as the Ledger and formal assistant message.  The legacy
+    inline SSE path leaves it false and keeps its historical event behavior.
+    """
     with get_db_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             row = conn.execute(
-                "SELECT t.status, t.revision_of_message_id, t.request_fingerprint, "
+                "SELECT t.status, t.cancel_reason, t.lease_owner, t.revision_of_message_id, t.revision_of_turn_id, "
+                "t.request_fingerprint, "
                 "c.status AS conversation_status "
                 "FROM chat_turns t JOIN chat_conversations c ON c.id = t.conversation_id "
                 "WHERE t.id = ? AND t.fence = ? AND t.conversation_id = ? AND t.user_id = ?",
@@ -518,12 +750,40 @@ def finalize_chat_turn(
             ).fetchone()
             if not row:
                 raise TurnNotFound("turn not found")
-            if row["status"] != "running" or row["conversation_status"] != "active":
+            if (
+                row["status"] != "running"
+                or row["conversation_status"] != "active"
+                or row["cancel_reason"]
+                or (lease_owner is not None and row["lease_owner"] != str(lease_owner))
+            ):
+                if lease_owner is not None and row["lease_owner"] != str(lease_owner):
+                    raise TurnEventLeaseLost(turn_id)
                 raise TurnCancelled("turn is no longer active")
+
+            commit_interview_ledger_conn(
+                conn,
+                turn_id=turn_id,
+                fence=fence,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                metadata=metadata or {},
+            )
 
             persisted_metadata = dict(metadata or {})
             persisted_metadata.setdefault("turn_id", turn_id)
             persisted_metadata.setdefault("turn_fence", fence)
+            if harness_events and persisted_metadata.get("question_source") != "agent_internal":
+                selected_question = persisted_metadata.get("selected_question") or {}
+                question_id = selected_question.get("id") if isinstance(selected_question, dict) else None
+                try:
+                    if question_id is not None:
+                        conn.execute(
+                            "INSERT INTO interview_asked_questions "
+                            "(user_id, conversation_id, question_id) VALUES (?, ?, ?)",
+                            (user_id, conversation_id, int(question_id)),
+                        )
+                except (TypeError, ValueError):
+                    logger.warning("Ignoring invalid selected question id for turn %s", turn_id)
             if row["request_fingerprint"]:
                 persisted_metadata.setdefault(
                     "request_fingerprint", row["request_fingerprint"]
@@ -540,6 +800,10 @@ def finalize_chat_turn(
                 ).fetchone()["count"]
                 persisted_metadata.setdefault(
                     "revision_number", int(revision_count) + 1
+                )
+            if row["revision_of_turn_id"] is not None:
+                persisted_metadata.setdefault(
+                    "revision_of_turn_id", row["revision_of_turn_id"]
                 )
 
             assistant_id = None
@@ -626,16 +890,84 @@ def finalize_chat_turn(
                             json.dumps({"to": target_state}, ensure_ascii=False),
                         ),
                     )
+            if harness_events:
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:assistant-completed",
+                    event_type="assistant.completed",
+                    action_id=None,
+                    phase="write_response",
+                    channel="assistant",
+                    payload={"content": content or "", "provisional": False},
+                    visibility="user",
+                    schema_version=1,
+                    lease_owner=lease_owner,
+                )
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:commit-completed",
+                    event_type="commit.completed",
+                    action_id=None,
+                    phase="commit",
+                    channel="system",
+                    payload={"status": "committed"},
+                    visibility="user",
+                    schema_version=1,
+                    lease_owner=lease_owner,
+                )
             updated = conn.execute(
                 "UPDATE chat_turns SET status = 'completed', harness_status = 'completed', "
                 "terminal_reason = 'completed', assistant_message_id = ?, "
-                "finished_at = CURRENT_TIMESTAMP "
+                "finished_at = CURRENT_TIMESTAMP, "
+                + ("lease_owner = NULL, lease_expires_at = NULL, " if lease_owner is None else "")
+                + "heartbeat_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
-                "AND status = 'running'",
-                (assistant_id, turn_id, fence, conversation_id, user_id),
+                "AND status = 'running' "
+                + ("AND lease_owner = ?" if lease_owner is not None else ""),
+                (
+                    assistant_id,
+                    turn_id,
+                    fence,
+                    conversation_id,
+                    user_id,
+                    *((str(lease_owner),) if lease_owner is not None else ()),
+                ),
             )
             if updated.rowcount != 1:
                 raise TurnCancelled("turn is no longer active")
+            if harness_events:
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:completed",
+                    event_type="turn.completed",
+                    action_id=None,
+                    phase="commit",
+                    channel="system",
+                    payload={
+                        "status": "completed",
+                        "content": content or "",
+                        "metadata": metadata or {},
+                    },
+                    visibility="user",
+                    schema_version=1,
+                    lease_owner=lease_owner,
+                )
+
+            if lease_owner is not None:
+                conn.execute(
+                    "UPDATE chat_turns SET lease_owner = NULL, lease_expires_at = NULL "
+                    "WHERE id = ? AND fence = ? AND lease_owner = ?",
+                    (turn_id, fence, str(lease_owner)),
+                )
 
             user_row = conn.execute(
                 "SELECT content FROM chat_messages WHERE id = ?",
@@ -685,25 +1017,71 @@ def fail_chat_turn(
     conversation_id: str,
     user_id: int,
     error_code: str,
+    lease_owner: str | None = None,
+    harness_events: bool = False,
 ) -> None:
     """Mark a still-running turn failed without resurrecting old turns."""
     with get_db_connection() as conn:
-        conn.execute(
-            "UPDATE chat_turns SET status = 'failed', harness_status = 'failed', "
-            "terminal_reason = ?, error_code = ?, "
-            "finished_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
-            "AND status = 'running'",
-            (
-                str(error_code or "turn_failed")[:120],
-                str(error_code or "turn_failed")[:120],
-                turn_id,
-                fence,
-                conversation_id,
-                user_id,
-            ),
-        )
-        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT status, lease_owner FROM chat_turns "
+                "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ?",
+                (turn_id, fence, conversation_id, user_id),
+            ).fetchone()
+            if not row:
+                raise TurnNotFound("turn not found")
+            if lease_owner is not None and row["lease_owner"] != str(lease_owner):
+                raise TurnEventLeaseLost(turn_id)
+            if row["status"] != "running":
+                conn.commit()
+                return
+            safe_code = str(error_code or "turn_failed")[:120]
+            updated = conn.execute(
+                "UPDATE chat_turns SET status = 'failed', harness_status = 'failed', "
+                "terminal_reason = ?, error_code = ?, finished_at = CURRENT_TIMESTAMP, "
+                + ("heartbeat_at = CURRENT_TIMESTAMP " if harness_events else "lease_owner = NULL, "
+                   "lease_expires_at = NULL, heartbeat_at = CURRENT_TIMESTAMP ")
+                + "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
+                "AND status = 'running' "
+                + ("AND lease_owner = ?" if lease_owner is not None else ""),
+                (
+                    safe_code,
+                    safe_code,
+                    turn_id,
+                    fence,
+                    conversation_id,
+                    user_id,
+                            *((str(lease_owner),) if lease_owner is not None else ()),
+                ),
+            )
+            if updated.rowcount != 1:
+                raise TurnCancelled("turn is no longer active")
+            if harness_events:
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:failed",
+                    event_type="turn.failed",
+                    action_id=None,
+                    phase="commit",
+                    channel="system",
+                    payload={"code": safe_code, "message": safe_code},
+                    visibility="user",
+                    schema_version=1,
+                    lease_owner=lease_owner,
+                )
+                conn.execute(
+                    "UPDATE chat_turns SET lease_owner = NULL, lease_expires_at = NULL "
+                    "WHERE id = ? AND fence = ? AND lease_owner = ?",
+                    (turn_id, fence, str(lease_owner)),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 # ═══════════════════════════════════════════════════

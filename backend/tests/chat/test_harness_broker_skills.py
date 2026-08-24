@@ -46,6 +46,55 @@ def test_question_broker_rejects_untrusted_question_text():
         )
 
 
+def test_question_broker_normalizes_bank_tool_records_for_react_context():
+    from app.agents.chat.question_broker import normalize_question_candidate
+
+    candidate = normalize_question_candidate(
+        {"id": 17, "question": "Redis 缓存击穿怎么处理？", "cat2": "缓存"},
+        source="question_bank",
+    )
+    assert candidate["question_ref"] == "17"
+    assert candidate["canonical_text"] == "Redis 缓存击穿怎么处理？"
+    assert candidate["dimension"] == "缓存"
+    assert candidate["source"] == "question_bank"
+
+
+def test_harness_react_binds_selected_card_and_appends_context_suffix():
+    from app.agents.chat.harness_contract import build_harness_context_pack
+    from app.agents.chat.react_loop import _bind_question_card_to_react, _append_harness_call_suffix
+
+    state = {
+        "conversation_id": "conv-1",
+        "turn_id": "turn-1",
+        "user_message": "我做过 Redis 缓存优化",
+        "interview_config": {"difficulty": "mid"},
+        "interview_state": {"next_focus": "缓存"},
+        "recent_messages": [],
+        "resolved_skills": [],
+        "budget_snapshot": {"available_tokens": 1000},
+    }
+    state["context_pack"] = build_harness_context_pack(
+        state=state,
+        call_mode="observe_propose",
+        action_id="turn-1:observe",
+        call_suffix={"phase": "observe_propose"},
+    )
+    messages = []
+    _bind_question_card_to_react(
+        state,
+        messages,
+        tool_name="search_questions",
+        output='{"ok": true, "items": [{"id": 9, "question": "缓存击穿怎么处理？", "cat2": "缓存"}]}',
+    )
+
+    assert state["question_card"]["question_ref"] == "9"
+    assert "QuestionCard" in messages[-1]["content"]
+    stable_hash = state["context_pack"].stable_prefix_hash
+    suffix = _append_harness_call_suffix(state, {"question_card": state["question_card"]})
+    assert "question_card" in suffix
+    assert state["context_pack"].stable_prefix_hash == stable_hash
+
+
 def test_skill_resolver_adds_version_compatibility_and_content_hash():
     from app.agents.chat.skills.defaults import get_default_registry
     from app.agents.chat.skill_resolver import resolve_skills

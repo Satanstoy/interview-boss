@@ -31,6 +31,9 @@ from app.agents.chat.question_plan import (
     _build_repetition_protection_note,
     _maybe_create_question_plan,
 )
+from app.agents.chat.question_broker import QuestionBroker, normalize_question_candidate
+from app.agents.chat.harness_contract import ContextBlock, evaluate_policy_gate
+from app.agents.chat.harness_agent import run_harness_agent_call
 from app.agents.chat.state import ChatState
 from app.agents.chat.stop_policy import evaluate_interview_stop
 from app.agents.chat.tool_gateway import validate_tool_arguments
@@ -112,6 +115,72 @@ def _emit(event: dict) -> None:
     queue = _event_queue_var.get()
     if queue:
         queue.put_nowait(event)
+
+
+def _render_context_blocks(blocks: tuple[ContextBlock, ...] | list[ContextBlock]) -> str:
+    """Render ordered Harness blocks without changing their outer order."""
+    return "\n".join(
+        json.dumps(block.as_dict(), ensure_ascii=False, sort_keys=False)
+        for block in blocks
+    )
+
+
+def _append_harness_call_suffix(state: ChatState, payload: dict) -> str:
+    """Append one immutable observation and return only its prompt suffix."""
+    pack = state.get("context_pack")
+    if pack is None:
+        return ""
+    sequence = int(state.get("context_suffix_sequence") or 0) + 1
+    state["context_suffix_sequence"] = sequence
+    block = ContextBlock(
+        block_id=f"call-observation:{state.get('turn_id') or state.get('conversation_id')}:{sequence}",
+        block_type="observation",
+        source="harness",
+        content=payload,
+        visibility="model",
+        sequence=len(pack.call_suffix),
+    )
+    updated = pack.append_call_suffix(block)
+    state["context_pack"] = updated
+    return _render_context_blocks((block,))
+
+
+def _build_harness_react_messages(
+    state: ChatState,
+    prompt_parts: dict,
+    *,
+    asked_section: str,
+    tool_contract: str,
+    repetition_note: str,
+) -> list[dict]:
+    """Build the fixed three-segment prompt shape for a Harness turn."""
+    pack = state.get("context_pack")
+    if pack is None:
+        return []
+    initial_suffix = _append_harness_call_suffix(
+        state,
+        {
+            "phase": "observe_propose",
+            "asked_section": asked_section,
+            "tool_contract": tool_contract,
+            "repetition_note": repetition_note,
+        },
+    )
+    return [
+        {
+            "role": "system",
+            "content": prompt_parts["stable_system_prompt"]
+            + "\n\n[Harness Stable Agent Prefix]\n"
+            + _render_context_blocks(pack.stable_prefix),
+        },
+        {
+            "role": "system",
+            "content": prompt_parts["dynamic_context"]
+            + "\n\n[Harness Frozen Turn Base]\n"
+            + _render_context_blocks(pack.turn_base),
+        },
+        {"role": "user", "content": "[Harness Call Suffix]\n" + initial_suffix},
+    ]
 
 
 def _step(step: str, message: str, reason: str = "", insight: str = "") -> None:
@@ -411,6 +480,55 @@ def _build_closing_context(state: ChatState) -> str:
     return context
 
 
+def _apply_policy_gate(state: ChatState, contract) -> object:
+    """Apply the deterministic policy boundary before writer/commit work."""
+    action_map = {
+        "ask_selected_question": "ask_followup",
+        "continue_natural_followup": "ask_followup",
+        "clarify_candidate_answer": "clarify_answer",
+        "answer_counter_question": "answer_counter_question",
+        "close_with_summary": "finish_interview",
+    }
+    budget_snapshot = state.get("budget_snapshot") or {}
+    if not isinstance(budget_snapshot, dict):
+        budget_snapshot = {
+            "available_tokens": int(getattr(budget_snapshot, "available_tokens", 1) or 1)
+        }
+    elif "available_tokens" not in budget_snapshot:
+        budget_snapshot = {**budget_snapshot, "available_tokens": 1}
+    decision = evaluate_policy_gate(
+        session={"status": "active", "cancel_requested": False},
+        ledger=state.get("interview_state") or {},
+        proposal={"action": action_map.get(getattr(contract.action, "value", ""), "")},
+        question_broker={
+            "question_card": state.get("question_card") or state.get("selected_question")
+        },
+        budget=budget_snapshot,
+    )
+    state["policy_gate"] = {
+        "decision": decision.decision,
+        "next_call_mode": decision.next_call_mode,
+        "reason_code": decision.reason_code,
+        "constraints": list(decision.constraints),
+    }
+    # Legacy direct ``run_chat`` callers do not have a durable TurnRun to
+    # project into the canonical event stream. Keep the policy decision in
+    # state for those callers, while emitting the visible action only for the
+    # Harness 2.0 worker path.
+    if state.get("turn_id"):
+        _emit(
+            {
+                "type": "step",
+                "step": "policy_gate",
+                "message": f"策略校验：{decision.reason_code}",
+                "reason": decision.reason_code,
+                "phase": "observe_propose",
+                "action_id": "policy-gate",
+            }
+        )
+    return decision
+
+
 async def _generate_close_with_summary(
     state: ChatState,
     closing_reason: str,
@@ -474,6 +592,83 @@ def _record_retrieval_gap(state: ChatState, tool_names: list[str]) -> None:
     state.setdefault(
         "question_source_reason",
         "retrieval_recommended_but_skipped",
+    )
+
+
+def _bind_question_card_to_react(
+    state: ChatState,
+    messages: list[dict],
+    *,
+    tool_name: str,
+    output: str,
+) -> None:
+    """Bind an authoritative QuestionCard to the next ReAct context suffix."""
+    if state.get("context_pack") is None or state.get("question_card"):
+        return
+    try:
+        parsed = json.loads(output or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return
+    selected = parsed.get("selected_question") if isinstance(parsed, dict) else None
+    items = parsed.get("items") if isinstance(parsed, dict) else None
+    if isinstance(selected, dict):
+        candidates = [selected]
+    elif isinstance(items, list):
+        candidates = items
+    else:
+        candidates = state.get("retrieved_questions") or []
+    if not candidates:
+        return
+
+    private = tool_name in {"search_agent_private_questions", "draw_agent_private_questions", "select_agent_private_question"}
+    source = "private_question_bank" if private else "question_bank"
+    try:
+        normalized = [normalize_question_candidate(item, source=source) for item in candidates]
+        required_dimension = (
+            (state.get("interview_state") or {}).get("next_focus")
+            or state.get("question_type")
+        )
+        result = QuestionBroker().select(
+            candidates=normalized,
+            required_dimension=required_dimension,
+            forbidden_refs=set(state.get("question_card_forbidden_refs") or set()),
+        )
+    except (TypeError, ValueError):
+        logger.warning("QuestionBroker rejected tool output for %s", tool_name)
+        return
+
+    card = result.question_card.as_context()
+    state["question_card"] = card
+    state.setdefault("question_card_refs", []).append(card["question_ref"])
+    _emit(
+        {
+            "type": "step",
+            "step": "question_card",
+            "message": "已将权威题卡加入本轮 ReAct 上下文",
+            "reason": result.question_card.selection_reason,
+            "action_id": "question_card",
+        }
+    )
+    pack = state.get("context_pack")
+    if pack is not None:
+        selection_block = ContextBlock(
+            block_id=f"question-selection:{state.get('turn_id') or state.get('conversation_id')}",
+            block_type="question_selection",
+            source="question_broker",
+            content=card,
+            visibility="model",
+            sequence=len(pack.call_suffix),
+        )
+        state["context_pack"] = pack.append_call_suffix(selection_block)
+    messages.append(
+        {
+            "role": "user",
+            "content": "[Harness Call Suffix: QuestionSelectionContextBlock / QuestionCard]\n"
+            + _render_context_blocks((selection_block,))
+            if pack is not None
+            else "[Harness 2.0 QuestionCard]\n"
+            + json.dumps(card, ensure_ascii=False, sort_keys=True),
+        }
     )
 
 
@@ -615,11 +810,44 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         contract = plan_turn(state)
         state["turn_contract"] = contract.to_metadata_dict()
+        policy_decision = _apply_policy_gate(state, contract)
+        if policy_decision.decision in {"deny", "fail"}:
+            yield {
+                "type": "error",
+                "message": f"本轮未通过策略校验：{policy_decision.reason_code}",
+                "code": policy_decision.reason_code,
+            }
+            yield {"type": "done", "metadata": {"policy_gate": state["policy_gate"]}}
+            return
         result = await execute_turn_contract(
             state=state,
             contract=contract,
-            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                msgs, user_id=state.get("user_id")
+            llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="write_response",
+                action_key=f"writer:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            validator_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="validate_output",
+                action_key=f"validator:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            repair_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="repair_response",
+                action_key=f"repair:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
             ),
         )
         state["writer_trace"] = result.get("writer_trace") or {}
@@ -659,11 +887,44 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         contract = plan_turn(state)
         state["turn_contract"] = contract.to_metadata_dict()
+        policy_decision = _apply_policy_gate(state, contract)
+        if policy_decision.decision in {"deny", "fail"}:
+            yield {
+                "type": "error",
+                "message": f"本轮未通过策略校验：{policy_decision.reason_code}",
+                "code": policy_decision.reason_code,
+            }
+            yield {"type": "done", "metadata": {"policy_gate": state["policy_gate"]}}
+            return
         close_result = await execute_turn_contract(
             state=state,
             contract=contract,
-            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                msgs, user_id=state.get("user_id")
+            llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="write_response",
+                action_key=f"writer:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            validator_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="validate_output",
+                action_key=f"validator:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            repair_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="repair_response",
+                action_key=f"repair:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
             ),
         )
         state["writer_trace"] = close_result.get("writer_trace") or {}
@@ -706,33 +967,36 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
     if repetition_note:
         prompt_parts["dynamic_context"] += f"\n\n{repetition_note}"
 
-    # 2. Build messages
-    messages: list[dict] = [
-        {"role": "system", "content": prompt_parts["stable_system_prompt"]},
-        {"role": "system", "content": prompt_parts["dynamic_context"]},
-    ]
     tools = chat_tools.get_tools_for_state(state)
     cache_fingerprint = build_prompt_cache_fingerprint(
         prompt_parts["stable_system_prompt"], tools, state.get("model")
     )
 
-    # Recent messages
-    for msg in state.get("recent_messages", [])[-10:]:
-        role = msg.get("role", "user")
-        if role in ("user", "assistant"):
-            messages.append({"role": role, "content": msg.get("content", "")})
-
     # Inject PREVIOUSLY ASKED as dynamic user message (not in cached system prompt)
     asked_section = _build_previously_asked_section(state)
-    if asked_section:
-        messages.append({"role": "user", "content": asked_section})
-
     tool_contract = build_runtime_tool_contract_message(state)
-    if tool_contract:
-        messages.append({"role": "user", "content": tool_contract})
-
-    # Current user message
-    messages.append({"role": "user", "content": state["user_message"]})
+    if state.get("context_pack") is not None:
+        messages = _build_harness_react_messages(
+            state,
+            prompt_parts,
+            asked_section=asked_section or "",
+            tool_contract=tool_contract or "",
+            repetition_note=repetition_note or "",
+        )
+    else:
+        messages = [
+            {"role": "system", "content": prompt_parts["stable_system_prompt"]},
+            {"role": "system", "content": prompt_parts["dynamic_context"]},
+        ]
+        for msg in state.get("recent_messages", [])[-10:]:
+            role = msg.get("role", "user")
+            if role in ("user", "assistant"):
+                messages.append({"role": role, "content": msg.get("content", "")})
+        if asked_section:
+            messages.append({"role": "user", "content": asked_section})
+        if tool_contract:
+            messages.append({"role": "user", "content": tool_contract})
+        messages.append({"role": "user", "content": state["user_message"]})
 
     # 3. ReAct loop
     react_started = time.monotonic()
@@ -754,10 +1018,21 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         if time.monotonic() - react_started > REACT_BUDGET.max_seconds:
             stop_reason = "max_seconds"
             break
-        # A loaded skill changes only the dynamic suffix.  Keep the stable
-        # system prefix untouched so the next request can still reuse it when
-        # the provider supports prefix caching.
-        if step > 0 and state.get("active_skill_instructions"):
+        # New observations are appended as a Call Suffix.  The stable prefix
+        # and frozen Turn Base messages are never rebuilt for this TurnRun.
+        if step > 0 and state.get("context_pack") is not None:
+            suffix = _append_harness_call_suffix(
+                state,
+                {
+                    "phase": "observe_propose",
+                    "react_step": react_step,
+                    "active_skill_instructions": state.get("active_skill_instructions") or [],
+                    "question_card": state.get("question_card") or {},
+                },
+            )
+            messages.append({"role": "user", "content": "[Harness Call Suffix]\n" + suffix})
+            state["active_skill_instructions"] = []
+        elif step > 0 and state.get("active_skill_instructions"):
             prompt_parts = build_react_prompt_parts(state)
             if repetition_note:
                 prompt_parts["dynamic_context"] += f"\n\n{repetition_note}"
@@ -768,12 +1043,19 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             state["active_skill_instructions"] = []  # consumed
         llm_started = time.monotonic()
         try:
-            result = await llm_service.llm_with_tools(
-                messages,
-                tools,
-                user_id=state["user_id"],
-                model=state.get("model"),
+            result = await run_harness_agent_call(
+                state=state,
+                call_mode="observe_propose",
+                action_key=f"react:{react_step}",
+                request_payload={"messages": messages, "tools": tools},
                 prompt_cache_key=cache_fingerprint,
+                call=lambda: llm_service.llm_with_tools(
+                    messages,
+                    tools,
+                    user_id=state["user_id"],
+                    model=state.get("model"),
+                    prompt_cache_key=cache_fingerprint,
+                ),
             )
         except Exception as e:
             logger.error(f"ReAct step {step} LLM call failed: {e}")
@@ -1016,6 +1298,20 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
                 except (json.JSONDecodeError, TypeError):
                     pass
             messages.append(make_tool_result_message(tc["id"], msg_output))
+            if tool_name in (
+                "search_questions",
+                "draw_questions",
+                "select_question",
+                "search_agent_private_questions",
+                "draw_agent_private_questions",
+                "select_agent_private_question",
+            ):
+                _bind_question_card_to_react(
+                    state,
+                    messages,
+                    tool_name=tool_name,
+                    output=output,
+                )
             plan = state.get("next_question_plan")
             if (
                 tool_name in (
@@ -1087,12 +1383,18 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
         try:
             from app.services.llm import raw_llm_call
 
-            result_text = await raw_llm_call(
-                user_id=state["user_id"],
-                model=state.get("model"),
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1024,
+            result_text = await run_harness_agent_call(
+                state=state,
+                call_mode="write_response",
+                action_key="writer:react_synthesis",
+                request_payload={"messages": messages, "temperature": 0.7},
+                call=lambda: raw_llm_call(
+                    user_id=state["user_id"],
+                    model=state.get("model"),
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=1024,
+                ),
             )
             if result_text and result_text.strip():
                 final_answer_text = result_text.strip()
@@ -1138,11 +1440,44 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
 
         contract = plan_turn(state)
         state["turn_contract"] = contract.to_metadata_dict()
+        policy_decision = _apply_policy_gate(state, contract)
+        if policy_decision.decision in {"deny", "fail"}:
+            yield {
+                "type": "error",
+                "message": f"本轮未通过策略校验：{policy_decision.reason_code}",
+                "code": policy_decision.reason_code,
+            }
+            yield {"type": "done", "metadata": {"policy_gate": state["policy_gate"]}}
+            return
         result = await execute_turn_contract(
             state=state,
             contract=contract,
-            llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                msgs, user_id=state.get("user_id")
+            llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="write_response",
+                action_key=f"writer:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            validator_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="validate_output",
+                action_key=f"validator:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
+            ),
+            repair_llm_call=lambda msgs: run_harness_agent_call(
+                state=state,
+                call_mode="repair_response",
+                action_key=f"repair:{contract.action.value}",
+                request_payload={"messages": msgs},
+                call=lambda: llm_service._call_llm_with_retry_messages(
+                    msgs, user_id=state.get("user_id")
+                ),
             ),
         )
         state["writer_trace"] = result.get("writer_trace") or {}

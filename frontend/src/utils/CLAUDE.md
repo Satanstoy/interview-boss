@@ -14,6 +14,7 @@
 | `validate.js` | 表单验证工具 |
 | `chatFormat.js` | 聊天时间/ID 格式化纯函数（`formatGroupTime`/`formatRelativeTime`/`createClientRequestId`/`waitingStepText`），从 ChatView.vue 抽出 |
 | `quadrant.js` | 四象限决策图纯函数：`mapToQuadrant(item, heatMedian)` 把 readiness item 映射到重点突破/优势/可保持/不急象限，`heatMedian` 计算岗位热度中位数分界 |
+| `turnRunReducer.js` | Harness 2.0 append-only SSE/replay reducer：canonical envelope 去重、Action/Reasoning/Evidence/Assistant 聚合，以及旧 SSE 元数据兼容折叠 |
 
 ## 核心规则
 

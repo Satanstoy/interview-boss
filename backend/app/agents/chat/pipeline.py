@@ -16,6 +16,7 @@ from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
 from app.agents.chat.harness_contract import build_harness_context_pack
+from app.agents.chat.harness_agent import run_harness_agent_call
 from app.agents.chat.skill_resolver import resolve_skills
 from app.agents.chat.skills.defaults import get_default_registry
 from app.agents.chat.nodes import (
@@ -54,6 +55,7 @@ from app.agents.chat.react_loop import (  # noqa: F401
     _log_react_llm_step,
     _log_react_tool_call,
     _react_loop,
+    _apply_policy_gate,
     _sanitize_tool_args,
     _step,
     _summarize_tool_output,
@@ -138,6 +140,7 @@ def assert_chat_turn_active(state: ChatState) -> None:
         int(turn_fence),
         state["conversation_id"],
         state["user_id"],
+        lease_owner=state.get("turn_lease_owner"),
     )
 
 
@@ -154,6 +157,8 @@ def _initial_state(
     difficulty: str | None = None,
     turn_id: str | None = None,
     turn_fence: int | None = None,
+    turn_lease_owner: str | None = None,
+    turn_base_snapshot: dict | None = None,
 ) -> ChatState:
     return {
         "conversation_id": conversation_id,
@@ -162,9 +167,12 @@ def _initial_state(
         "user_message": user_message,
         "turn_id": turn_id,
         "turn_fence": turn_fence,
+        "turn_lease_owner": turn_lease_owner,
+        "turn_base_snapshot": turn_base_snapshot or {},
         "harness_version": "2.0",
         "context_pack": None,
         "context_pack_hash": "",
+        "stable_prefix_hash": "",
         "resolved_skills": [],
         "mode": mode,
         "jd_id": jd_id,
@@ -263,7 +271,10 @@ async def _step_load_context(state: ChatState) -> ChatState:
         state["conversation_id"],
         user_id=state["user_id"],
     )
-    if session:
+    frozen_config = (state.get("turn_base_snapshot") or {}).get("interview_config")
+    if isinstance(frozen_config, dict):
+        state["interview_config"] = frozen_config
+    elif session:
         state["harness_version"] = session.get("harness_version") or "2.0"
         explicit_config = session.get("interview_config")
         if isinstance(explicit_config, dict) and explicit_config:
@@ -284,7 +295,8 @@ async def _step_load_context(state: ChatState) -> ChatState:
         call_suffix={"phase": "observe_propose"},
     )
     state["context_pack"] = pack
-    state["context_pack_hash"] = pack.stable_prefix_hash
+    state["stable_prefix_hash"] = pack.stable_prefix_hash
+    state["context_pack_hash"] = pack.context_pack_hash
     if state.get("turn_id") and state.get("turn_fence") is not None:
         await asyncio.to_thread(
             chat_service.persist_turn_context_snapshot,
@@ -292,8 +304,10 @@ async def _step_load_context(state: ChatState) -> ChatState:
             int(state["turn_fence"]),
             state["conversation_id"],
             state["user_id"],
-            context_pack_hash=pack.stable_prefix_hash,
+            context_pack_hash=pack.context_pack_hash,
+            stable_prefix_hash=pack.stable_prefix_hash,
             budget_snapshot=state.get("budget_snapshot") or {},
+            lease_owner=state.get("turn_lease_owner"),
         )
 
     # An incomplete frozen distribution plan has its own finite question target
@@ -336,6 +350,26 @@ async def _step_classify(state: ChatState) -> ChatState:
     # The LLM semantic classifier owns the live routing decision on every
     # turn. Rule-based parsing is retained inside the classifier only for an
     # LLM-failure fallback, never as the normal first-turn path.
+    async def _classify_llm(prompt, **kwargs):
+        return await run_harness_agent_call(
+            state=state,
+            call_mode="observe_propose",
+            action_key="classify",
+            request_payload={"prompt": prompt, **kwargs},
+            call=lambda: llm_service._call_llm_with_retry(prompt, **kwargs),
+            prompt_cache_key="",
+        )
+
+    async def _control_facts_llm(prompt, **kwargs):
+        return await run_harness_agent_call(
+            state=state,
+            call_mode="observe_propose",
+            action_key="control_facts",
+            request_payload={"prompt": prompt, **kwargs},
+            call=lambda: llm_service._call_llm_with_retry(prompt, **kwargs),
+            prompt_cache_key="",
+        )
+
     (
         intent,
         memory_ids,
@@ -349,6 +383,8 @@ async def _step_classify(state: ChatState) -> ChatState:
         recent_context=recent_context,
         memory_summaries=state.get("memory_summaries", []),
         user_id=state["user_id"],
+        llm_call=_classify_llm,
+        control_facts_call=_control_facts_llm,
     )
 
     state["intent"] = intent
@@ -517,13 +553,17 @@ async def _load_interview_config(state: ChatState) -> None:
         state["conversation_id"],
         user_id=state["user_id"],
     )
-    if session and isinstance(session.get("interview_config"), dict):
+    frozen_config = (state.get("turn_base_snapshot") or {}).get("interview_config")
+    if isinstance(frozen_config, dict):
+        config = frozen_config
+        state["harness_version"] = "2.0"
+    elif session and isinstance(session.get("interview_config"), dict):
         config = session["interview_config"]
         state["harness_version"] = session.get("harness_version") or "2.0"
     else:
         config = {}
 
-    if not config:
+    if not config and not isinstance(frozen_config, dict):
         metadata = await asyncio.to_thread(
             chat_service.get_conversation_metadata,
             state["conversation_id"],
@@ -564,6 +604,8 @@ def _add_interview_observability_metadata(
         metadata["classify_result"] = dict(state["classify_result"])
     if isinstance(state.get("turn_intent"), dict):
         metadata["turn_intent"] = dict(state["turn_intent"])
+    if isinstance(state.get("policy_gate"), dict):
+        metadata["policy_gate"] = dict(state["policy_gate"])
     public_active_skills = [
         name for name in state.get("active_skills", []) if name != "agent-interview"
     ]
@@ -625,6 +667,11 @@ def _refresh_interview_state_snapshot(state: ChatState) -> None:
 def _record_asked_question_if_any(state: ChatState, metadata: dict) -> None:
     """Record asked question to DB for cross-conversation dedup."""
     assert_chat_turn_active(state)
+    # Durable Harness 2.0 commits this side effect with the Ledger and
+    # assistant message in ``finalize_chat_turn``.  Legacy inline SSE keeps
+    # the historical eager write for compatibility.
+    if state.get("turn_id"):
+        return
     if state.get("question_source") == "agent_internal":
         # Private catalog IDs are not question_bank IDs and should not be
         # written to the public interview history/dedup table.
@@ -702,6 +749,8 @@ async def run_chat(
     difficulty: str = None,
     turn_id: str | None = None,
     turn_fence: int | None = None,
+    turn_lease_owner: str | None = None,
+    turn_base_snapshot: dict | None = None,
 ) -> AsyncGenerator[dict, None]:
     """面试对话 pipeline — SSE 兼容的 async generator。
 
@@ -724,6 +773,8 @@ async def run_chat(
         difficulty,
         turn_id,
         turn_fence,
+        turn_lease_owner,
+        turn_base_snapshot,
     )
     assert_chat_turn_active(state)
 
@@ -771,13 +822,47 @@ async def run_chat(
 
                 contract = plan_turn(state)
                 state["turn_contract"] = contract.to_metadata_dict()
-                close_result = await execute_turn_contract(
-                    state=state,
-                    contract=contract,
-                    llm_call=lambda msgs: llm_service._call_llm_with_retry_messages(
-                        msgs, user_id=state.get("user_id")
-                    ),
-                )
+                policy_decision = _apply_policy_gate(state, contract)
+                if policy_decision.decision in {"deny", "fail"}:
+                    close_result = {
+                        "status": "error",
+                        "error_code": policy_decision.reason_code,
+                        "message": f"本轮未通过策略校验：{policy_decision.reason_code}",
+                        "writer_trace": {"writer": "policy_gate", "result": "error"},
+                        "validator_trace": [],
+                    }
+                else:
+                    close_result = await execute_turn_contract(
+                        state=state,
+                        contract=contract,
+                        llm_call=lambda msgs: run_harness_agent_call(
+                            state=state,
+                            call_mode="write_response",
+                            action_key=f"writer:{contract.action.value}",
+                            request_payload={"messages": msgs},
+                            call=lambda: llm_service._call_llm_with_retry_messages(
+                                msgs, user_id=state.get("user_id")
+                            ),
+                        ),
+                        validator_llm_call=lambda msgs: run_harness_agent_call(
+                            state=state,
+                            call_mode="validate_output",
+                            action_key=f"validator:{contract.action.value}",
+                            request_payload={"messages": msgs},
+                            call=lambda: llm_service._call_llm_with_retry_messages(
+                                msgs, user_id=state.get("user_id")
+                            ),
+                        ),
+                        repair_llm_call=lambda msgs: run_harness_agent_call(
+                            state=state,
+                            call_mode="repair_response",
+                            action_key=f"repair:{contract.action.value}",
+                            request_payload={"messages": msgs},
+                            call=lambda: llm_service._call_llm_with_retry_messages(
+                                msgs, user_id=state.get("user_id")
+                            ),
+                        ),
+                    )
                 state["writer_trace"] = close_result.get("writer_trace") or {}
                 state["validator_trace"] = close_result.get("validator_trace") or []
                 if close_result["status"] != "success":

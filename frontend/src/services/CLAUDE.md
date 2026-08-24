@@ -9,7 +9,7 @@
 |------|------|---------|
 | `http.js` | HTTP 客户端（get/post/put/del/upload、SSE helpers、401 自动刷新、重试、GET TTL cache） | — |
 | `authApi.js` | 登录/注册/刷新/登出、忘记密码、修改密码 | `/api/auth/*` |
-| `chatApi.js` | 对话 CRUD + 带 request ID 的 SSE 消息、assistant regenerate | `/api/chat/*` |
+| `chatApi.js` | 对话 CRUD + Harness 2.0 `POST 202 → GET TurnRun events?follow=true` 恢复流、旧 SSE 兼容、assistant regenerate 和 revision edit | `/api/chat/*` |
 | `dataApi.js` | JD/面经提交、数据管理；当前页面主路径使用后台 Job | `/api/submit-jobs*`, `/api/submit-stream-v2`, `/api/data/*` |
 | `masterBankApi.js` | 题库 CRUD | `/api/master-bank/*` |
 | `practiceApi.js` | 刷题题单、题单题目关联、闪卡复习/答案生成 | `/api/practice/*`, `/api/answers/*` |
@@ -32,6 +32,8 @@
 - 新增 API 在此目录创建对应文件，并在 `api/index.js` re-export
 - SSE helper 内部用 `fetch` + `ReadableStream`，不要用 `EventSource`
 - Chat SSE 重试必须复用同一个 `client_request_id`；regenerate 调用 assistant revision endpoint，不在前端伪造或追加 user message
+- TurnRun replay 使用 `after_sequence`/`Last-Event-ID`，事件只追加到 reducer；编辑发送 `revision_of_turn_id`，后端创建新用户消息和新 TurnRun，不能覆盖旧消息、事件或 CoT。
+- Harness 2.0 发送必须先接收 `turn_run_id`，再订阅 durable event stream；canonical event 只在 `chatApi` 边界转换为旧 UI event，组件状态仍以 `harness_event` 的 sequence 为准。
 
 ## 修改后必做
 

@@ -148,3 +148,69 @@ def test_revision_points_to_original_turn_without_overwriting_it(test_db):
     assert original_row["revision_of_turn_id"] is None
     assert revision_row["harness_status"] == "running"
     assert revision_row["revision_of_turn_id"] == original.id
+
+
+def test_edit_creates_new_user_message_and_preserves_source_turn(test_db):
+    conversation = _conversation()
+    original = chat_service.reserve_chat_turn(
+        conversation["id"], 1, "harness-edit-original", "原始候选人回答"
+    )
+    chat_service.finalize_chat_turn(
+        original.id,
+        original.fence,
+        conversation["id"],
+        1,
+        "原始面试官追问",
+        {},
+    )
+
+    edited = chat_service.reserve_chat_edit_revision(
+        conversation["id"],
+        1,
+        original.id,
+        "修订后的候选人回答",
+        "harness-edit-new",
+    )
+
+    assert edited.id != original.id
+    assert edited.user_message_id != original.user_message_id
+    assert edited.revision_of_turn_id == original.id
+    messages = chat_service.get_messages(conversation["id"])
+    assert [message["content"] for message in messages] == [
+        "原始候选人回答",
+        "原始面试官追问",
+        "修订后的候选人回答",
+    ]
+
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT revision_of_turn_id, harness_status FROM chat_turns WHERE id = ?",
+            (edited.id,),
+        ).fetchone()
+    assert row["revision_of_turn_id"] == original.id
+    assert row["harness_status"] == "running"
+
+
+def test_finalize_optimistically_commits_authoritative_ledger(test_db):
+    conversation = _conversation()
+    turn = chat_service.reserve_chat_turn(
+        conversation["id"], 1, "harness-ledger-commit", "我负责 Redis 缓存优化"
+    )
+    chat_service.finalize_chat_turn(
+        turn.id,
+        turn.fence,
+        conversation["id"],
+        1,
+        "继续说说缓存击穿的处理。",
+        {
+            "selected_question": {"id": 42, "question": "缓存击穿怎么处理？", "cat1": "中间件", "cat2": "缓存"},
+            "coverage_events": [{"question_id": 42, "phase": "knowledge_probe"}],
+            "interview_state": {"current_phase": "knowledge_probe", "coverage": {"knowledge_probe": {"current_count": 1}}},
+        },
+    )
+
+    ledger = chat_service.get_interview_ledger(conversation["id"], user_id=1)
+    assert ledger["ledger_version"] == 2
+    assert ledger["asked_question_refs"][0]["id"] == 42
+    assert ledger["coverage_events"][0]["question_id"] == 42
+    assert ledger["current_phase"] == "knowledge_probe"

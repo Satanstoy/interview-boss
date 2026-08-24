@@ -106,3 +106,42 @@ def test_append_turn_event_is_idempotent_and_replays_after_sequence(test_db):
     assert len(events) == 1
     assert events[0]["event_id"] == "evt-idempotent"
     assert events[0]["payload"] == payload
+
+
+def test_event_outbox_claim_and_ack_are_retryable_without_mutating_event(test_db):
+    conversation = _conversation()
+    turn = _turn(conversation["id"])
+    event = chat_service.append_turn_event(
+        user_id=1,
+        conversation_id=conversation["id"],
+        turn_id=turn.id,
+        event_id="evt-outbox",
+        event_type="turn.completed",
+        action_id=None,
+        phase="commit",
+        channel="system",
+        payload={"status": "completed"},
+    )
+
+    claimed = chat_service.claim_turn_event_outbox(limit=10, lease_seconds=10)
+    assert [item["event_id"] for item in claimed] == [event["event_id"]]
+    assert claimed[0]["attempts"] == 1
+    assert chat_service.mark_turn_event_outbox_published(
+        event["event_id"],
+        success=False,
+        error="temporary broker outage",
+        retry_delay_seconds=1,
+    )
+    assert chat_service.mark_turn_event_outbox_published(event["event_id"], success=True)
+
+    replay = chat_service.get_turn_events(
+        turn.id, user_id=1, conversation_id=conversation["id"]
+    )
+    assert replay[0]["type"] == "turn.completed"
+    row = test_db.execute(
+        "SELECT status, attempts, published_at FROM interview_event_outbox WHERE event_id = ?",
+        (event["event_id"],),
+    ).fetchone()
+    assert row["status"] == "published"
+    assert row["attempts"] == 1
+    assert row["published_at"] is not None

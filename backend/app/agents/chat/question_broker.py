@@ -9,6 +9,26 @@ from typing import Any
 _AUTHORIZED_SOURCES = {"question_bank", "private_question_bank", "conversation"}
 
 
+def normalize_question_candidate(
+    candidate: dict[str, Any],
+    *,
+    source: str,
+) -> dict[str, Any]:
+    """Map legacy bank-tool records into the Broker's authority contract."""
+    if not isinstance(candidate, dict):
+        raise ValueError("question broker candidate must be an object")
+    ref = candidate.get("question_ref") or candidate.get("id")
+    text = candidate.get("canonical_text") or candidate.get("question")
+    normalized = {
+        **candidate,
+        "question_ref": str(ref or "").strip(),
+        "canonical_text": str(text or "").strip(),
+        "source": candidate.get("source") or source,
+        "dimension": candidate.get("dimension") or candidate.get("cat2") or candidate.get("cat1"),
+    }
+    return normalized
+
+
 @dataclass(frozen=True)
 class QuestionCard:
     question_ref: str
@@ -100,8 +120,13 @@ class QuestionBroker:
             question_card=card,
             candidates_considered=len(normalized),
             candidate_refs=tuple(str(item["question_ref"]) for item in ranked),
-            constraints_hit=("required_dimension" if matched_dimension else "",),
+            constraints_hit=("required_dimension",) if matched_dimension else (),
         )
 
 
-__all__ = ["QuestionBroker", "QuestionBrokerResult", "QuestionCard"]
+__all__ = [
+    "QuestionBroker",
+    "QuestionBrokerResult",
+    "QuestionCard",
+    "normalize_question_candidate",
+]

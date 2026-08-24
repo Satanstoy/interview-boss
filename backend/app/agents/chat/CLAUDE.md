@@ -44,6 +44,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
 | `harness_contract.py` | Harness 2.0 的固定调用模式、Action/Attempt/Turn 终态常量，以及 `ContextBlock`/`ContextPack` 的三段式确定性序列化合同 |
+| `harness_agent.py` | 固定 call mode 的 provider adapter；为生产 TurnRun 创建 Action/Attempt，追加 provider request/response/error Artifact，并在结束时关闭 Attempt |
 | `question_broker.py` | 模型外的权威 QuestionCard 选择：候选集过滤、维度约束、确定性排序和 authority check |
 | `skill_resolver.py` | 模型外的 Harness 兼容 SkillResolver：版本、兼容范围和 content hash 固定后再注入 Turn Base |
 | `budget.py` | Token 预算管理（控制上下文长度） |
@@ -113,6 +114,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - Chat 用户消息必须通过 `save_user_message_if_writable()` 的原子 active 检查；assistant finalize 通过 `save_assistant_message_if_active()`，归档期间不新增消息。归档会话仍可读，但不应恢复普通 `save_message()` 作为新用户输入写入口
 - Thinking chunks 上限 50，避免 metadata 膨胀
 - Harness 2.0 上下文合同：`ContextPack` 固定按 `stable_prefix → turn_base → call_suffix` 序列化；stable prefix 禁止放入候选人输入、ledger snapshot、时间戳等每轮变化内容，调用差异只能追加到 call suffix
+- Harness 2.0 ReAct：有 durable TurnRun 时 ReAct 请求使用三段 ContextPack；题库工具结果必须先经 QuestionBroker 归一成 authoritative QuestionCard，再作为 Call Suffix 追加给后续模型调用。模型不能直接提交自造题干替代 QuestionCard。
 
 ## 模块依赖图
 

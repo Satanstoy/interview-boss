@@ -108,6 +108,8 @@ from app.db.migrations.chat import (
     _migration_046_structured_turns,
     _migration_110_harness_event_stream,
     _migration_111_harness_core_state,
+    _migration_112_harness_context_hashes,
+    _migration_113_harness_turn_base_snapshot,
 )
 from app.db.migrations.coding import (
     _migration_029_user_resumes,
@@ -315,6 +317,8 @@ _MIGRATIONS = [
     (109, "question_detail_scope_guard", _migration_109_question_detail_scope_guard),
     (110, "harness_event_stream", _migration_110_harness_event_stream),
     (111, "harness_core_state", _migration_111_harness_core_state),
+    (112, "harness_context_hashes", _migration_112_harness_context_hashes),
+    (113, "harness_turn_base_snapshot", _migration_113_harness_turn_base_snapshot),
 ]
 
 

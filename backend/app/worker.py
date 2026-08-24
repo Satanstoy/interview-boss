@@ -1002,7 +1002,15 @@ async def build_master_bank_task(ctx, job_id: int):
     async with _WORKER_DB_SEMAPHORE:
         result = await _build_master_bank_job(ctx, job_id)
         _WORKER_DB_SEMAPHORE.record_success()
-        return result
+    return result
+
+
+async def interview_turn_task(ctx, turn_id: str):
+    """Execute one Harness 2.0 TurnRun outside the HTTP process."""
+    from app.services.harness_turn_worker import run_harness_turn
+
+    worker_id = str(ctx.get("job_id") or ctx.get("worker_id") or "arq-interview-turn")
+    return await run_harness_turn(str(turn_id), worker_id=worker_id)
 
 
 async def _build_master_bank_job(ctx, job_id: int):
@@ -1837,6 +1845,7 @@ from app.worker_scheduled import (
     scheduled_compaction_task,
     scheduled_quality_audit_task,
     scheduled_submit_job_dispatch_task,
+    scheduled_harness_turn_dispatch_task,
     scheduled_cluster_review_dispatch_task,
     scheduled_source_health_task,
     run_db_retention,
@@ -1859,6 +1868,7 @@ scheduled_worker_heartbeat_task = observed_cron_task(scheduled_worker_heartbeat_
 scheduled_compaction_task = observed_cron_task(scheduled_compaction_task)
 scheduled_quality_audit_task = observed_cron_task(scheduled_quality_audit_task)
 scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dispatch_task)
+scheduled_harness_turn_dispatch_task = observed_cron_task(scheduled_harness_turn_dispatch_task)
 scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
 scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
 scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
@@ -1868,6 +1878,7 @@ process_chat_side_effects_task = observed_cron_task(process_chat_side_effects_ta
 
 class WorkerSettings:
     functions = [
+        interview_turn_task,
         cluster_batch_task,
         cluster_rebuild_task,
         interview_reprocess_task,
@@ -1904,6 +1915,7 @@ class WorkerSettings:
         # 降频(spec R1 / ADR 0046):派发/兜底调度不需要分钟级,降低对 SQLite
         # 单写锁的获取(原每分钟/每5分钟 → 每5分钟/每30分钟)。
         cron(scheduled_submit_job_dispatch_task, minute=set(range(0, 60, 5))),
+        cron(scheduled_harness_turn_dispatch_task, minute=set(range(0, 60, 5))),
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),

@@ -765,3 +765,25 @@ def _migration_111_harness_core_state(conn):
         "CREATE INDEX IF NOT EXISTS idx_interview_artifacts_turn "
         "ON interview_artifacts(turn_id, created_at)"
     )
+
+
+def _migration_112_harness_context_hashes(conn):
+    """Keep the full ContextPack hash separate from its stable cache prefix."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('chat_turns')").fetchall()
+    }
+    if "stable_prefix_hash" not in columns:
+        conn.execute(
+            "ALTER TABLE chat_turns ADD COLUMN stable_prefix_hash TEXT NOT NULL DEFAULT ''"
+        )
+
+
+def _migration_113_harness_turn_base_snapshot(conn):
+    """Persist the immutable Session/Turn Base captured at reservation time."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('chat_turns')").fetchall()
+    }
+    if "turn_base_snapshot_json" not in columns:
+        conn.execute(
+            "ALTER TABLE chat_turns ADD COLUMN turn_base_snapshot_json TEXT NOT NULL DEFAULT '{}'"
+        )

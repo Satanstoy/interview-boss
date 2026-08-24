@@ -12,6 +12,14 @@ class TurnEventConflict(ValueError):
     """The same event identity was reused with different event data."""
 
 
+class TurnEventLeaseLost(RuntimeError):
+    """A stale worker attempted to append to a TurnRun it no longer owns."""
+
+    def __init__(self, turn_id: str):
+        super().__init__(f"lease lost for turn {turn_id}")
+        self.turn_id = turn_id
+
+
 def _event_dict(row) -> dict[str, Any]:
     result = dict(row)
     try:
@@ -48,6 +56,7 @@ def append_turn_event(
     payload: dict[str, Any] | None,
     visibility: str = "user",
     schema_version: int = 1,
+    lease_owner: str | None = None,
 ) -> dict[str, Any]:
     """Append one immutable event and its outbox record atomically."""
     normalized_event_id = str(event_id or "").strip()
@@ -72,6 +81,7 @@ def append_turn_event(
                 payload=payload,
                 visibility=visibility,
                 schema_version=schema_version,
+                lease_owner=lease_owner,
             )
             conn.commit()
             return result
@@ -94,6 +104,7 @@ def _append_turn_event_conn(
     payload: dict[str, Any],
     visibility: str,
     schema_version: int,
+    lease_owner: str | None = None,
 ) -> dict[str, Any]:
     """Append an event while the caller owns the surrounding transaction."""
     encoded_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -118,7 +129,7 @@ def _append_turn_event_conn(
         return _event_dict(existing)
 
     turn = conn.execute(
-        "SELECT user_id, conversation_id FROM chat_turns WHERE id = ?",
+        "SELECT user_id, conversation_id, lease_owner FROM chat_turns WHERE id = ?",
         (turn_id,),
     ).fetchone()
     if (
@@ -127,6 +138,8 @@ def _append_turn_event_conn(
         or turn["conversation_id"] != conversation_id
     ):
         raise LookupError("turn not found or not owned")
+    if lease_owner is not None and turn["lease_owner"] != str(lease_owner):
+        raise TurnEventLeaseLost(turn_id)
 
     sequence = int(
         conn.execute(
@@ -192,7 +205,8 @@ def get_turn_events(
             "e.payload_json, e.created_at "
             "FROM interview_events e "
             "WHERE e.turn_id = ? AND e.user_id = ? AND e.conversation_id = ? "
-            "AND e.sequence > ? ORDER BY e.sequence ASC LIMIT ?",
+            "AND e.sequence > ? AND e.visibility = 'user' "
+            "ORDER BY e.sequence ASC LIMIT ?",
             (turn_id, user_id, conversation_id, max(0, int(after_sequence)), safe_limit),
         ).fetchall()
     return [_event_dict(row) for row in rows]

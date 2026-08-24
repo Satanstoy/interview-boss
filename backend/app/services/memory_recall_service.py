@@ -41,7 +41,7 @@ _TURN_CONTROL_FACTS_PROMPT = """你是模拟面试系统的语义控制事实解
 
 
 async def _interpret_turn_control_facts(
-    *, user_message: str, recent_context: str, user_id: int
+    *, user_message: str, recent_context: str, user_id: int, llm_call=None
 ) -> dict:
     """Independently interpret high-priority candidate control facts with an LLM.
 
@@ -50,7 +50,8 @@ async def _interpret_turn_control_facts(
     fields produced by a multi-task call.  It is semantic, not text matching.
     """
     try:
-        raw = await _call_llm_with_retry(
+        call = llm_call or _call_llm_with_retry
+        raw = await call(
             _TURN_CONTROL_FACTS_PROMPT.format(
                 user_message=user_message,
                 recent_context=recent_context,
@@ -838,6 +839,8 @@ async def classify_and_recall(
     recent_context: str,
     memory_summaries: list[dict],
     user_id: int,
+    llm_call=None,
+    control_facts_call=None,
 ) -> tuple[str, list[int], list[str], str, bool, dict, dict]:
     """合并意图分类 + 记忆召回 + 检索查询生成 + 回答完整性判断（单次 LLM 调用）
 
@@ -857,7 +860,8 @@ async def classify_and_recall(
             rule_hint="",
         )
         # 并行执行两次LLM调用：意图分类 + 控制事实解析
-        classify_task = _call_llm_with_retry(
+        classify_call = llm_call or _call_llm_with_retry
+        classify_task = classify_call(
             prompt,
             user_id=user_id,
             response_format={"type": "json_object"},
@@ -866,6 +870,7 @@ async def classify_and_recall(
             user_message=user_message,
             recent_context=recent_context,
             user_id=user_id,
+            llm_call=control_facts_call,
         )
         result, control_facts = await asyncio.gather(classify_task, control_facts_task)
         parsed = _extract_json(result)

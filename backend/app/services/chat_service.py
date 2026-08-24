@@ -37,6 +37,7 @@ from app.services.chat_turn_service import (
     get_chat_turn,
     reserve_chat_turn,
     reserve_chat_revision,
+    reserve_chat_edit_revision,
     cancel_chat_turn,
     assert_chat_turn_active,
     finalize_chat_turn,
@@ -104,14 +105,24 @@ from app.services.chat_durable_service import (
 )
 from app.services.chat_event_service import (
     TurnEventConflict,
+    TurnEventLeaseLost,
     append_turn_event,
     get_turn_events,
+    get_turn_event_sequence,
+    claim_turn_event_outbox,
+    mark_turn_event_outbox_published,
 )
 from app.services.harness_state_service import (
     get_harness_session,
     get_interview_ledger,
     persist_turn_context_snapshot,
+    claim_harness_turn,
+    heartbeat_harness_turn,
+    release_harness_turn_lease,
     create_harness_action,
     start_harness_attempt,
+    get_completed_harness_attempt,
+    finish_harness_attempt,
     append_harness_artifact,
+    commit_interview_ledger,
 )

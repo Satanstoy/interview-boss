@@ -186,3 +186,21 @@ def test_harness_context_builder_keeps_prefix_fixed_and_appends_call_suffix():
     assert first.stable_prefix_hash == second.stable_prefix_hash
     assert first.turn_base != second.turn_base
     assert first.call_suffix[-1].block_type == "action"
+
+
+def test_harness_context_builder_serializes_budget_snapshot_dataclass():
+    from app.agents.chat.budget import BudgetSnapshot
+    from app.agents.chat.harness_contract import build_harness_context_pack
+
+    pack = build_harness_context_pack(
+        state={
+            "user_message": "回答缓存问题",
+            "interview_config": {},
+            "interview_state": {},
+            "budget_snapshot": BudgetSnapshot(available_tokens=1200),
+        },
+        call_mode="observe_propose",
+        action_id="action-budget",
+    )
+
+    assert "available_tokens" in pack.serialized()

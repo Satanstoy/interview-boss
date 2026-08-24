@@ -71,6 +71,7 @@ class ChatTurn:
     assistant_message_id: Optional[int] = None
     request_fingerprint: str = ""
     revision_of_message_id: Optional[int] = None
+    revision_of_turn_id: Optional[str] = None
     created: bool = True
 
 
@@ -86,6 +87,11 @@ def _chat_turn_from_row(row, *, created: bool = True) -> ChatTurn:
         assistant_message_id=row["assistant_message_id"],
         request_fingerprint=row["request_fingerprint"] or "",
         revision_of_message_id=row["revision_of_message_id"],
+        revision_of_turn_id=(
+            row["revision_of_turn_id"]
+            if "revision_of_turn_id" in row.keys()
+            else None
+        ),
         created=created,
     )
 
@@ -105,12 +111,14 @@ def build_turn_request_fingerprint(
     content: str,
     model: str | None = None,
     revision_of_message_id: int | None = None,
+    revision_of_turn_id: str | None = None,
 ) -> str:
     """Build a stable identity for one logical turn request."""
     payload = {
         "content": str(content or "").strip(),
         "model": str(model or ""),
         "revision_of_message_id": revision_of_message_id,
+        "revision_of_turn_id": revision_of_turn_id,
     }
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")

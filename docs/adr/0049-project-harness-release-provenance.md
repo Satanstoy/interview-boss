@@ -24,6 +24,7 @@
    - Target、Evaluation Release、Case 快照、评测协议、候选模拟人、随机种子和环境必须相同；
    - A/B 人工复核必须确认两条 Run 的 Harness 身份确实不同。
 6. 前端默认展示项目 Harness 版本；历史 Run 如果没有可信的项目 Harness 快照，展示“历史数据未记录”，不从 Eval Manifest 猜版本。
+7. 新模拟面试 Harness 的发布身份确定为 `interview-harness@2.0`。它对应本次 redesign 的四层状态模型、可恢复 TurnRun 事件流、SSE 订阅和双层运行轨迹 UI；正式 Eval Run 必须冻结该 Release 的 Git SHA、镜像摘要、配置摘要和 Manifest digest。
 
 ## 版本变更流程
 

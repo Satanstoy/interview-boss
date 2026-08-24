@@ -202,11 +202,14 @@
               :message="msg"
               @regenerate="handleRegenerate"
               @like="handleLike"
+              @edit="handleEdit"
             />
           </template>
 
           <!-- Streaming message -->
           <div v-if="isSending" class="mb-6">
+            <TurnRunCard v-if="activeTurnRun" :run="activeTurnRun" :is-live="true" />
+            <div v-else>
             <!-- Thinking block -->
             <ReasoningTimeline
               v-if="isThinking || thinkingContent"
@@ -284,6 +287,7 @@
               <div v-html="renderStreamingContent"></div>
               <span class="inline-block w-1.5 h-4 bg-primary animate-pulse ml-0.5 align-middle rounded-sm"></span>
             </div>
+            </div>
           </div>
         </div>
       </div>
@@ -293,6 +297,10 @@
         <div class="mx-auto max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
           <form @submit.prevent>
             <div class="chat-input-area flex flex-col gap-2 p-2 bg-muted rounded-xl">
+              <div v-if="editingTurnId" class="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                <span>正在编辑本轮回答，发送后会创建新的 TurnRun，原记录会保留。</span>
+                <button type="button" class="ml-2 text-foreground hover:underline" @click="cancelEdit">取消编辑</button>
+              </div>
               <!-- Textarea -->
               <textarea
                 ref="inputRef"
@@ -437,10 +445,18 @@ import {
 } from '@/components/ui/dropdown-menu'
 import ChatMessage from './ChatMessage.vue'
 import ReasoningTimeline from './ReasoningTimeline.vue'
+import TurnRunCard from './TurnRunCard.vue'
 import NewChatModal from './NewChatModal.vue'
 import ModelSelector from './ModelSelector.vue'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 import * as chatApi from '@/services/chatApi.js'
+import {
+  createTurnRun,
+  legacyEventToEnvelope,
+  mergeTurnRunMetadata,
+  reduceTurnRun,
+  serializeTurnRun,
+} from '@/utils/turnRunReducer.js'
 import { fetchMyLLMConfig, updateMyLLMConfig } from '@/services/profileApi.js'
 
 const props = defineProps({
@@ -510,6 +526,8 @@ const thinkingDuration = ref(0)
 const liveThinkingSeconds = ref(0)
 let thinkingTimer = null
 let activeRequestContext = null
+const activeTurnRun = ref(null)
+const editingTurnId = ref(null)
 
 const STORAGE_KEY_ACTIVE_ID = 'chatview_active_conversation_id'
 
@@ -672,6 +690,7 @@ async function selectConversation(id) {
   try {
     const res = await chatApi.getMessages(id)
     messages.value = res.data || []
+    await hydrateTurnRuns(id, messages.value)
     await scrollToBottom()
   } catch (e) {
     console.error('加载消息失败:', e)
@@ -684,11 +703,45 @@ async function reloadMessages(conversationId) {
     const res = await chatApi.getMessages(conversationId)
     if (activeConversationId.value === conversationId) {
       messages.value = res.data || []
+      await hydrateTurnRuns(conversationId, messages.value)
       await scrollToBottom(true)
     }
   } catch (e) {
     console.error('刷新消息失败:', e)
   }
+}
+
+async function hydrateTurnRuns(conversationId, loadedMessages) {
+  const assistantTurnIds = new Set(
+    (loadedMessages || [])
+      .filter(message => message.role === 'assistant' && message.metadata?.turn_id)
+      .map(message => String(message.metadata.turn_id)),
+  )
+  const candidates = (loadedMessages || []).filter((message) => {
+    const turnId = message.metadata?.turn_id
+    if (!turnId) return false
+    return message.role === 'assistant' || !assistantTurnIds.has(String(turnId))
+  })
+  await Promise.all(candidates.map(async (message) => {
+    try {
+      const events = await chatApi.replayTurnEvents(
+        conversationId,
+        message.metadata.turn_id,
+        0,
+      )
+      const run = createTurnRun(message.metadata.turn_id)
+      events.forEach(event => reduceTurnRun(run, event))
+      mergeTurnRunMetadata(run, message.metadata)
+      message.metadata = {
+        ...(message.metadata || {}),
+        turn_run: serializeTurnRun(run),
+      }
+    } catch (error) {
+      // Historical messages remain readable if an old turn has no Harness
+      // events (for example, before migration 110).
+      console.debug('恢复 TurnRun 轨迹失败:', error)
+    }
+  }))
 }
 
 // Create conversation
@@ -751,7 +804,7 @@ async function startWithSuggestion(suggestion) {
 }
 
 // Send message
-async function handleSend({ regenerateMessageId = null } = {}) {
+async function handleSend({ regenerateMessageId = null, revisionOfTurnId = editingTurnId.value } = {}) {
   let text = inputText.value.trim()
   if (regenerateMessageId) {
     const targetIndex = messages.value.findIndex(m => m.id === regenerateMessageId)
@@ -865,11 +918,14 @@ async function handleSend({ regenerateMessageId = null } = {}) {
     conversationId,
     clientRequestId,
     turnId: null,
+    eventSequence: 0,
     controller: null,
     stopped: false,
     serverCancelled: false,
   }
   activeRequestContext = context
+  activeTurnRun.value = createTurnRun(null)
+  editingTurnId.value = null
 
   inputText.value = ''
   resetInputHeight()
@@ -897,7 +953,13 @@ async function handleSend({ regenerateMessageId = null } = {}) {
   startThinkingTimer()
 
   if (!regenerateMessageId) {
-    const userMsg = { id: Date.now(), role: 'user', content: text, created_at: new Date().toISOString() }
+    const userMsg = {
+      id: Date.now(),
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+      metadata: revisionOfTurnId ? { revision_of_turn_id: revisionOfTurnId } : {},
+    }
     messages.value.push(userMsg)
   }
   await scrollToBottom()
@@ -909,6 +971,25 @@ async function handleSend({ regenerateMessageId = null } = {}) {
       (event) => {
         if (activeRequestContext !== context || activeConversationId.value !== conversationId) return
         if (context.stopped && event.type !== 'cancelled') return
+
+        const canonicalEvent = event.harness_event || legacyEventToEnvelope(
+          event,
+          context.turnId,
+          ++context.eventSequence,
+        )
+        if (event.type === 'turn_started' && event.turn_id) {
+          context.turnId = event.turn_id
+          canonicalEvent.turn_run_id = event.turn_id
+          const latestUserMessage = [...messages.value].reverse().find(message => message.role === 'user' && message.content === text)
+          if (latestUserMessage) {
+            latestUserMessage.metadata = {
+              ...(latestUserMessage.metadata || {}),
+              turn_id: event.turn_id,
+              turn_fence: event.fence,
+            }
+          }
+        }
+        if (activeTurnRun.value) reduceTurnRun(activeTurnRun.value, canonicalEvent)
 
         if (event.type === 'turn_started') {
           context.turnId = event.turn_id || null
@@ -992,6 +1073,7 @@ async function handleSend({ regenerateMessageId = null } = {}) {
         clientRequestId,
         regenerateMessageId,
         existingUserMessageId,
+        revisionOfTurnId,
         onController: (controller) => {
           if (activeRequestContext === context) context.controller = controller
         },
@@ -1074,6 +1156,10 @@ async function handleSend({ regenerateMessageId = null } = {}) {
           metadata.selected_basis_questions ||= pendingSelectedBasisQuestions.value
         }
       }
+      if (activeTurnRun.value) {
+        mergeTurnRunMetadata(activeTurnRun.value, metadata)
+        metadata.turn_run = serializeTurnRun(activeTurnRun.value)
+      }
       if (regenerateMessageId) {
         await reloadMessages(conversationId)
       } else {
@@ -1144,7 +1230,26 @@ async function handleRegenerate(messageId) {
   await handleSend({ regenerateMessageId: messageId })
 }
 
+function handleEdit(messageId) {
+  const message = messages.value.find(item => item.id === messageId)
+  const turnId = message?.metadata?.turn_id
+  if (!message || !turnId || isSending.value || sendInFlight.value) return
+  editingTurnId.value = turnId
+  inputText.value = String(message.content || '')
+  nextTick(() => {
+    autoResize()
+    inputRef.value?.focus()
+  })
+}
+
+function cancelEdit() {
+  editingTurnId.value = null
+  inputText.value = ''
+  resetInputHeight()
+}
+
 function resetTransientStreamState() {
+  activeTurnRun.value = null
   streamingContent.value = ''
   isThinking.value = false
   stopThinkingTimer()
@@ -1372,6 +1477,7 @@ onMounted(async () => {
       try {
         const res = await chatApi.getMessages(targetId)
         messages.value = res.data || []
+        await hydrateTurnRuns(targetId, messages.value)
         await scrollToBottom(true)
       } catch (e) {
         console.error('加载消息失败:', e)

@@ -61,6 +61,8 @@ async def generate_question_with_validation(
     question_type: str,
     llm_call: Callable[[list[dict[str, str]]], Awaitable[str]],
     validator: Callable[..., Awaitable[dict[str, Any]]],
+    validator_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
+    repair_llm_call: Callable[[list[dict[str, str]]], Awaitable[str]] | None = None,
     max_retries: int = 1,
 ) -> dict[str, Any]:
     """生成自然面试问题并验证语义一致性。
@@ -103,7 +105,7 @@ async def generate_question_with_validation(
     for attempt in range(max_retries + 1):
         # 生成
         try:
-            raw = await llm_call(messages)
+            raw = await (repair_llm_call if attempt > 0 and repair_llm_call else llm_call)(messages)
         except Exception as exc:
             logger.warning("Question writer LLM call failed (attempt %d): %s", attempt + 1, exc)
             return {
@@ -148,7 +150,7 @@ async def generate_question_with_validation(
         validator_result = await validator(
             generated_text=text,
             selected_question=selected_question,
-            llm_call=llm_call,
+            llm_call=validator_llm_call or llm_call,
         )
         last_validator_result = validator_result
 

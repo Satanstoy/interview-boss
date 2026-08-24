@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Mapping
 
 
@@ -53,6 +53,8 @@ _FORBIDDEN_STABLE_PREFIX_BLOCK_TYPES = {
 
 
 def _canonicalize(value: Any) -> Any:
+    if is_dataclass(value):
+        return _canonicalize(asdict(value))
     if isinstance(value, dict):
         return {str(key): _canonicalize(value[key]) for key in sorted(value)}
     if isinstance(value, (list, tuple)):
@@ -117,6 +119,11 @@ class ContextPack:
                 "utf-8"
             )
         ).hexdigest()
+
+    @property
+    def context_pack_hash(self) -> str:
+        """Hash the complete ordered pack, including the current call suffix."""
+        return hashlib.sha256(self.serialized().encode("utf-8")).hexdigest()
 
     def serialized(self) -> str:
         # Keep the outer segment order explicit.  Nested dictionaries remain
@@ -254,6 +261,7 @@ def evaluate_policy_gate(
         "ask_followup",
         "move_topic",
         "clarify_answer",
+        "answer_counter_question",
         "retrieve_question",
         "skip_question",
         "finish_interview",
@@ -266,7 +274,7 @@ def evaluate_policy_gate(
         if not question_broker.get("question_card") and action != "finish_interview":
             return PolicyGateDecision("repair", "observe_propose", "QUESTION_CARD_REQUIRED")
         return PolicyGateDecision("allow", "write_response", "PROPOSAL_ALLOWED")
-    if action == "clarify_answer":
+    if action in {"clarify_answer", "answer_counter_question"}:
         return PolicyGateDecision("allow", "write_response", "CLARIFICATION_ALLOWED")
     if action == "await_user_input":
         return PolicyGateDecision("allow", None, "WAITING_FOR_USER")
