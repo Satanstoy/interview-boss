@@ -9,3 +9,6 @@ backend/app/services/llm.py 1950
 backend/app/routers/admin_evaluation.py 1919
 backend/app/worker.py 1915
 frontend/src/components/business/ChatView.vue 1503
+# 测试文件纳入红线扫描时的存量冻结（2026-08-24）
+backend/tests/chat/test_react_loop.py 3782
+backend/tests/chat/test_chat.py 2038

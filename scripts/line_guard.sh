@@ -47,6 +47,12 @@ while IFS= read -r f; do
   check_one "$f"
 done < <(find "$PROJECT_DIR/backend/app" -name '*.py' -type f)
 
+# 测试代码同样受红线约束（audit 2026-08-24 P3：test_react_loop.py 曾达 3782 行无约束）
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  check_one "$f"
+done < <(find "$PROJECT_DIR/backend/tests" -name '*.py' -type f)
+
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   check_one "$f"
