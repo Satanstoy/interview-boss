@@ -18,7 +18,9 @@ npm run audit:prod   # 生产依赖 audit 报告
 
 ## 技术栈
 
-Vue 3 (Composition API) / Vue Router 4 / Vite / Tailwind CSS / shadcn-vue (reka-ui) / ECharts / Marked + DOMPurify / vue-sonner / vue-virtual-scroller
+Vue 3 (Composition API) / Vue Router 4 / Vite 8（rolldown 内核：`manualChunks` 仅支持函数形式，对象形式已移除）/ Tailwind CSS / shadcn-vue (reka-ui) / ECharts / Marked + DOMPurify / vue-sonner / vue-virtual-scroller
+
+- `npm run audit:prod` 已固定走官方 registry（npmmirror 不支持 audit 接口，直接跑 `npm audit` 会静默失败）
 
 ## UI 方向
 

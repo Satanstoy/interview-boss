@@ -149,11 +149,13 @@ backend/scripts/       ← 后端运维脚本（fix_/verify_/check_ 前缀，详
 - **后端**：通过 Docker `test-runtime` 跑 pytest；`backend/tests/conftest.py` 提供 `test_db`（内存 SQLite）、`mock_llm`、`mock_redis`、`client` fixtures
 - **前端**：Playwright 测试必须 mock API，禁止截图断言，禁止使用真实密码
 - **日常门禁**：`./deploy/docker-deploy.sh check` 汇总后端 collect/compile/结构测试、前端 build/smoke test 和 audit WARN。
-- **行数红线**：任何后端 `app/**/*.py` 与前端 `src/**/*.{vue,js}` 源文件不得超过 1500 行；`check.sh lineguard` 为 blocking 门禁，超线即 FAIL。拆分 god-file 时保持红线（详见 `docs/specs/2026-08-14-stability-debt-cleanup.md`）。
-- **静态检查（audit WARN，仅报告不拦截）**：根 `pyproject.toml` 的 `[tool.ruff]`（`E4,E7,E9,F`）跑后端 `ruff check backend/app`；前端 `eslint src`（`eslint.config.js`，flat config）。两者经 `check.sh audit` 报告，暂不阻断；随债务清偿逐步收紧为 blocking。
+- **行数红线**：任何后端 `app/**/*.py`、`tests/**/*.py` 与前端 `src/**/*.{vue,js}` 源文件不得超过 1500 行；`check.sh lineguard` 为 blocking 门禁，超线即 FAIL（测试目录 2026-08-24 起纳入扫描）。拆分 god-file 时保持红线（详见 `docs/specs/2026-08-14-stability-debt-cleanup.md`）。
+- **静态检查（ruff 已阻断，mypy/eslint WARN）**：根 `pyproject.toml` 的 `[tool.ruff]`（`E4,E7,E9,F`）跑后端 `ruff check backend/app`——2026-08-24 基线清零后由 `check.sh` 升级为 blocking，新增违例即 FAIL；前端 `eslint src` 与 mypy 仍经 `check.sh audit` 报告不拦截。CI 侧 gitleaks（全历史 secret 扫描）与 Trivy 镜像/fs 扫描已接入 `.github/workflows/ci.yml`。
 - **详细规则**：`.claude/rules/test-files.md`（编辑测试文件时自动加载）
 
 ## Gotchas
+
+- 备份恢复：`./deploy/docker-deploy.sh restore` 会停 backend 覆盖生产库（恢复前自动再备份）；**演练用 `restore --verify`**（临时副本校验，不碰生产库），runbook 见 `docs/runbooks/backup-restore.md`。SQLite WAL 下禁止裸 cp 库文件。
 
 - Python 依赖管理用根目录 uv（`uv add`），测试必须通过 Docker `test-runtime` 执行，禁止宿主机直接 `uv run pytest`
 - SQLite 迁移后必须重启 backend 容器
