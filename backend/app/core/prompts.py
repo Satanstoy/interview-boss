@@ -134,6 +134,14 @@ DEFAULT_TAXONOMY = {
         },
         {"cat1": "E.算法与数据结构", "children": ["E1.数据结构", "E2.算法手撕"]},
     ],
+    "tags": [
+        "Agent架构设计", "多智能体协作", "MCP协议", "A2A协议", "工具调用", "函数调用",
+        "RAG设计", "Agentic RAG", "向量数据库", "混合检索", "知识图谱", "记忆管理",
+        "上下文管理", "KV Cache", "Prompt工程", "提示词优化", "ReAct/推理范式", "规划与分解",
+        "模型评估", "Agent评估", "幻觉应对", "安全防护", "微调/SFT", "AI Coding", "代码沙箱",
+        "模型选型", "Agent框架对比", "Java并发", "Redis", "Spring/AOP", "分布式事务",
+        "高并发限流", "MySQL", "Linux/网络", "算法手撕", "系统设计",
+    ],
 }
 
 _TAGGING_TEMPLATE = """你是一名面试题结构化分类专家。请将下列每道面试题精确分配到分类体系中，并按要求输出JSON。
@@ -143,7 +151,7 @@ _TAGGING_TEMPLATE = """你是一名面试题结构化分类专家。请将下列
 - **其他** (仅当确实无法归入以上任何一类时使用)
 
 ## 考点标签（可多选，从下方选择，用逗号分隔）
-Agent架构设计, 多智能体协作, MCP协议, A2A协议, 工具调用, 函数调用, RAG设计, Agentic RAG, 向量数据库, 混合检索, 知识图谱, 记忆管理, 上下文管理, KV Cache, Prompt工程, 提示词优化, ReAct/推理范式, 规划与分解, 模型评估, Agent评估, 幻觉应对, 安全防护, 微调/SFT, AI Coding, 代码沙箱, 模型选型, Agent框架对比, Java并发, Redis, Spring/AOP, 分布式事务, 高并发限流, MySQL, Linux/网络, 算法手撕, 系统设计
+{tags}
 
 ## 难度标签（单选）
 - L1-基础：考察基础知识、八股文，无需复杂推理
@@ -196,13 +204,16 @@ def _build_examples(categories: list) -> str:
 
 
 def build_tagging_prompt(taxonomy_config: dict | None = None) -> str:
-    """根据用户自定义分类体系构建 TAGGING_PROMPT，fallback 到默认分类"""
+    """根据系统岗位分类体系构建标签提示词，fallback 到默认分类。"""
     config = taxonomy_config or DEFAULT_TAXONOMY
     categories = config.get("categories") or DEFAULT_TAXONOMY["categories"]
+    tags = config.get("tags") or DEFAULT_TAXONOMY["tags"]
     taxonomy_text = _format_taxonomy_text(categories)
     examples_text = _build_examples(categories)
-    return _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text).replace(
-        "{examples}", examples_text
+    return (
+        _TAGGING_TEMPLATE.replace("{taxonomy}", taxonomy_text)
+        .replace("{tags}", ", ".join(tags))
+        .replace("{examples}", examples_text)
     )
 
 

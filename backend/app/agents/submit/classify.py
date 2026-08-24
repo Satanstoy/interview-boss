@@ -87,10 +87,15 @@ async def classify_node(state: SubmitState) -> dict:
         data = state.get("extracted_data", {})
         q_list = data.get("具体题目清单", [])
 
-        # 加载分类体系
-        taxonomy_config = state.get("taxonomy_config")
-        if not taxonomy_config:
-            taxonomy_config = await run_db(lambda: get_taxonomy_for_position(user_id=state.get("user_id")))
+        # 分类体系是岗位级系统主数据。即使状态中携带了旧版个人
+        # taxonomy_config，也必须重新从系统 taxonomy 读取，避免个人分类
+        # 进入公共/个人上传、聚类和审核流程。
+        position = state.get("job_position")
+        taxonomy_config = await run_db(
+            lambda: get_taxonomy_for_position(position=position)
+        )
+        if not taxonomy_config.get("configured", True):
+            raise ValueError(f"岗位“{position or '未指定'}”尚未配置系统分类，无法进行题目标注")
 
         tagging_kwargs = {
             "url": state.get("saved_url", ""),

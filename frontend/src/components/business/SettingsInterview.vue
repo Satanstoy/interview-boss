@@ -1,14 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
 import { CalendarClock } from '@lucide/vue'
-import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { switchMyPosition, deletePosition, createPosition, generateTaxonomy, confirmTaxonomy, fetchPositions, fetchRecruitmentPref, updateRecruitmentPref } from '@/services/profileApi.js'
+import { useToast } from '@/composables/useNotification.js'
+import { switchMyPosition, fetchPositions, fetchRecruitmentPref, updateRecruitmentPref } from '@/services/profileApi.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import AppTooltip from '@/components/common/AppTooltip.vue'
 import InterviewDistributionSettings from '@/components/business/InterviewDistributionSettings.vue'
 
 const props = defineProps({
@@ -16,8 +14,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['go-to-question', 'profile-updated'])
-const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
-const { confirm: showConfirm } = useConfirm()
+const { success: toastSuccess, error: toastError } = useToast()
 
 const { displayUser, currentUser } = inject('appData')
 
@@ -91,7 +88,7 @@ const savePref = async () => {
     const data = await updateRecruitmentPref(payload)
     timeline.value = data.windows || []
     toastSuccess('面试时间偏好已保存')
-  } catch (e) {
+  } catch {
     toastError('保存失败，请稍后重试')
   } finally {
     savingPref.value = false
@@ -101,12 +98,7 @@ const savePref = async () => {
 // ── Position management ──
 const positions = ref([])
 const currentPosition = ref('')
-const newPositionInput = ref('')
 const switching = ref(false)
-
-const setCurrentPosition = (pos) => {
-  currentPosition.value = pos
-}
 
 const handleSwitchPosition = async (pos) => {
   if (pos === currentPosition.value) return
@@ -128,85 +120,6 @@ const handleSwitchPosition = async (pos) => {
   } finally {
     switching.value = false
   }
-}
-
-const handleAddPosition = async () => {
-  const name = newPositionInput.value.trim()
-  if (!name) return
-  if (name.length > 30) {
-    toastWarning('岗位名称不能超过 30 个字符')
-    return
-  }
-  if (positions.value.some(p => p.name === name)) {
-    toastWarning('该岗位已存在')
-    return
-  }
-  try {
-    await createPosition(name)
-    // 添加到本地列表
-    positions.value.push({ name })
-    newPositionInput.value = ''
-    toastSuccess(`岗位「${name}」已添加`)
-    emit('profile-updated')
-  } catch (e) {
-    toastError(`添加失败: ${e.message}`)
-  }
-}
-
-const handleDeletePosition = async (pos) => {
-  if (!await showConfirm(`确定要删除岗位"${pos}"吗？`)) return
-  try {
-    await deletePosition(pos)
-    // 从本地列表中移除（positions 是对象数组，按 name 匹配）
-    positions.value = positions.value.filter(p => p.name !== pos)
-    if (currentPosition.value === pos) {
-      currentPosition.value = ''
-    }
-    toastSuccess(`岗位"${pos}"已删除`)
-    emit('profile-updated')
-  } catch (e) {
-    toastError(`删除失败: ${e.message}`)
-  }
-}
-
-// ── AI Taxonomy suggestion ──
-const taxonomyLoading = ref(false)
-const taxonomyPreview = ref(null) // { position, categories }
-const taxonomyOpen = ref(false)
-
-const handleGenerateTaxonomy = async () => {
-  if (!currentPosition.value) {
-    toastWarning('请先选择目标岗位')
-    return
-  }
-  taxonomyLoading.value = true
-  try {
-    const data = await generateTaxonomy()
-    taxonomyPreview.value = data
-    taxonomyOpen.value = true
-  } catch (e) {
-    toastError(`AI生成失败: ${e.message}`)
-  } finally {
-    taxonomyLoading.value = false
-  }
-}
-
-const handleConfirmTaxonomy = async () => {
-  if (!taxonomyPreview.value) return
-  try {
-    await confirmTaxonomy(taxonomyPreview.value.categories)
-    taxonomyOpen.value = false
-    taxonomyPreview.value = null
-    toastSuccess('分类体系已更新')
-    emit('profile-updated')
-  } catch (e) {
-    toastError(`保存失败: ${e.message}`)
-  }
-}
-
-const handleCancelTaxonomy = () => {
-  taxonomyOpen.value = false
-  taxonomyPreview.value = null
 }
 
 // ── Favorites ──
@@ -234,7 +147,7 @@ const handleGoToQuestion = (question) => {
 
       <!-- Position button group -->
       <div class="flex gap-2 flex-wrap">
-        <div v-for="pos in positions" :key="pos.id || pos.name" class="flex items-center gap-1">
+        <div v-for="pos in positions" :key="pos.id || pos.name">
           <Button
             :variant="currentPosition === pos.name ? 'default' : 'outline'"
             size="sm"
@@ -246,55 +159,12 @@ const handleGoToQuestion = (question) => {
           >
             {{ pos.name }}
           </Button>
-          <AppTooltip text="删除岗位">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="删除岗位"
-              @click="handleDeletePosition(pos.name)"
-              class="text-muted-foreground/50 hover:text-destructive transition-colors"
-            >
-              <svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </Button>
-          </AppTooltip>
         </div>
       </div>
 
-      <!-- Add new position -->
-      <div class="flex gap-2">
-        <Input
-          v-model="newPositionInput"
-          placeholder="新增岗位（最多30字）"
-          class="flex-1 text-sm"
-          @keyup.enter="handleAddPosition"
-        />
-        <Button variant="outline" size="sm" @click="handleAddPosition" class="whitespace-nowrap">
-          添加
-        </Button>
-      </div>
-      <div v-if="newPositionInput.length > 20" class="text-xs" :class="newPositionInput.length > 30 ? 'text-destructive' : 'text-muted-foreground'">
-        {{ newPositionInput.length }} / 30
-      </div>
-
-      <!-- AI Taxonomy button -->
-      <Button
-        @click="handleGenerateTaxonomy"
-        :disabled="taxonomyLoading || !currentPosition"
-        variant="outline"
-        size="sm"
-        class="w-full"
-      >
-        <svg v-if="taxonomyLoading" class="size-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
-        <svg v-else class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-        </svg>
-        {{ taxonomyLoading ? 'AI 生成中...' : 'AI 推荐分类体系' }}
-      </Button>
+      <p class="text-xs text-muted-foreground">
+        岗位分类由系统统一维护，用于个人题库、公共题库、JD 和面经的统一聚类；你可以在题库中使用个人标签和练习分组进行个性化整理。
+      </p>
     </div>
 
     <InterviewDistributionSettings :job-position="currentPosition" @saved="() => toastSuccess('面试分布已保存')" />
@@ -400,30 +270,5 @@ const handleGoToQuestion = (question) => {
       </div>
     </div>
 
-    <!-- AI Taxonomy Preview Dialog -->
-    <Dialog :open="taxonomyOpen" @update:open="handleCancelTaxonomy">
-      <DialogContent class="sm:max-w-2xl max-h-[80vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>AI 推荐分类体系</DialogTitle>
-          <DialogDescription>岗位：{{ taxonomyPreview?.position }}</DialogDescription>
-        </DialogHeader>
-        <div class="flex-1 overflow-y-auto flex flex-col gap-3">
-          <div v-for="(cat, i) in (taxonomyPreview?.categories || [])" :key="i" class="rounded-xl border border-border overflow-hidden">
-            <div class="px-4 py-2.5 bg-primary/10 dark:bg-primary/20 font-semibold text-sm text-primary">
-              {{ cat.cat1 }}
-            </div>
-            <div class="px-4 py-2 flex flex-col gap-1">
-              <div v-for="(child, j) in cat.children" :key="j" class="text-sm text-muted-foreground pl-4">
-                {{ child }}
-              </div>
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="handleCancelTaxonomy">取消</Button>
-          <Button @click="handleConfirmTaxonomy">采纳此分类</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>

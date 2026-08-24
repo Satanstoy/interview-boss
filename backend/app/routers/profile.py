@@ -10,7 +10,6 @@ from app.core.prompts import DEFAULT_TAXONOMY
 from app.db.connection import (
     get_db_connection,
     run_db,
-    get_current_job_position,
     get_taxonomy_for_position,
 )
 from app.core.config import _reload_from_db, _sync_env_file
@@ -58,32 +57,38 @@ _DEFAULT_SEASONS = [
 
 
 def _get_available_positions() -> list:
-    """从 taxonomy + job_positions 合并读取所有岗位列表"""
+    """只返回管理员登记且未下线的岗位。"""
     with get_db_connection() as conn:
-        tax_rows = conn.execute(
-            "SELECT position_name FROM taxonomy ORDER BY position_name"
-        ).fetchall()
-        try:
-            pos_rows = conn.execute(
-                "SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name"
-            ).fetchall()
-        except Exception:
-            pos_rows = conn.execute(
-                "SELECT name FROM job_positions ORDER BY name"
-            ).fetchall()
-        seen = set()
-        result = []
-        for r in tax_rows:
-            name = r["position_name"]
-            if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
-                seen.add(name)
-                result.append(name)
-        for r in pos_rows:
-            name = r["name"]
-            if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
-                seen.add(name)
-                result.append(name)
-        return result if result else [DEFAULT_TAXONOMY["job_position"]]
+        return _active_position_names(conn)
+
+
+def _active_position_names(conn, configured_only: bool = True) -> list:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+    deleted_filter = "WHERE is_deleted = 0 OR is_deleted IS NULL" if "is_deleted" in columns else ""
+    rows = conn.execute(
+        f"SELECT name FROM job_positions {deleted_filter} ORDER BY name"
+    ).fetchall()
+    names = [row["name"] for row in rows if row["name"] and len(row["name"]) <= _MAX_POSITION_LEN]
+    if configured_only:
+        taxonomy_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'taxonomy'"
+        ).fetchone()
+        if taxonomy_exists:
+            taxonomy_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('taxonomy')").fetchall()
+            }
+            tags_filter = "AND tags_json IS NOT NULL AND tags_json != '[]'" if "tags_json" in taxonomy_columns else ""
+            configured = {
+                row["position_name"]
+                for row in conn.execute(
+                    "SELECT position_name FROM taxonomy "
+                    "WHERE source = 'system' AND owner_id IS NULL "
+                    "AND categories_json IS NOT NULL AND categories_json != '[]' "
+                    f"{tags_filter}"
+                ).fetchall()
+            }
+            names = [name for name in names if name in configured]
+    return names or [DEFAULT_TAXONOMY["job_position"]]
 
 
 def _mask_key(value: str) -> str:
@@ -113,50 +118,18 @@ async def get_public_profile(user: dict = Depends(get_current_user)):
                 if s not in season_list:
                     season_list.append(s)
             season_list.sort()
-            tax_rows = conn.execute(
-                "SELECT position_name FROM taxonomy ORDER BY position_name"
-            ).fetchall()
-            try:
-                pos_rows = conn.execute(
-                    "SELECT name FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL ORDER BY name"
-                ).fetchall()
-            except Exception:
-                pos_rows = conn.execute(
-                    "SELECT name FROM job_positions ORDER BY name"
-                ).fetchall()
-            seen = set()
-            positions = []
-            for r in tax_rows:
-                name = r["position_name"]
-                if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
-                    seen.add(name)
-                    positions.append(name)
-            for r in pos_rows:
-                name = r["name"]
-                if name and len(name) <= _MAX_POSITION_LEN and name not in seen:
-                    seen.add(name)
-                    positions.append(name)
-            if not positions:
-                positions = [DEFAULT_TAXONOMY["job_position"]]
+            positions = _active_position_names(conn)
             user_row = conn.execute(
-                "SELECT u.personal_position, jp.name as position_name FROM users u "
-                "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+                "SELECT jp.name as position_name FROM users u "
+                "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
+                "AND (jp.is_deleted = 0 OR jp.is_deleted IS NULL) WHERE u.id = ?",
                 (user["id"],),
             ).fetchone()
         return settings_map, season_list, positions, user_row
 
     settings, used_seasons, available_positions, user_row = await run_db(_query)
     current_pos = (
-        (
-            user_row["personal_position"]
-            if user_row and user_row["personal_position"]
-            else None
-        )
-        or (
-            user_row["position_name"]
-            if user_row and user_row["position_name"]
-            else None
-        )
+        (user_row["position_name"] if user_row and user_row["position_name"] else None)
         or settings.get("current_job_position")
         or DEFAULT_TAXONOMY["job_position"]
     )
@@ -228,21 +201,13 @@ async def get_profile(admin: dict = Depends(get_admin_user)):
     available_positions = _get_available_positions()
     with get_db_connection() as conn:
         user_row = conn.execute(
-            "SELECT u.personal_position, jp.name as position_name FROM users u "
-            "LEFT JOIN job_positions jp ON u.current_position_id = jp.id WHERE u.id = ?",
+            "SELECT jp.name as position_name FROM users u "
+            "LEFT JOIN job_positions jp ON u.current_position_id = jp.id "
+            "AND (jp.is_deleted = 0 OR jp.is_deleted IS NULL) WHERE u.id = ?",
             (admin["id"],),
         ).fetchone()
     current_pos = (
-        (
-            user_row["personal_position"]
-            if user_row and user_row["personal_position"]
-            else None
-        )
-        or (
-            user_row["position_name"]
-            if user_row and user_row["position_name"]
-            else None
-        )
+        (user_row["position_name"] if user_row and user_row["position_name"] else None)
         or settings.get("current_job_position")
         or DEFAULT_TAXONOMY["job_position"]
     )
@@ -281,27 +246,10 @@ async def update_profile(
         raise HTTPException(status_code=400, detail=f"{names} 不能为空")
 
     if "taxonomy_config" in filtered:
-        try:
-            tc = (
-                json.loads(filtered["taxonomy_config"])
-                if isinstance(filtered["taxonomy_config"], str)
-                else filtered["taxonomy_config"]
-            )
-            if not isinstance(tc.get("categories"), list):
-                raise ValueError("categories 字段必须是数组")
-            position = tc.get("job_position", get_current_job_position())
-            from app.db.connection import save_taxonomy_for_position
-
-            await run_db(
-                lambda: save_taxonomy_for_position(
-                    position, tc["categories"], source="user", owner_id=admin["id"]
-                )
-            )
-            del filtered["taxonomy_config"]
-        except (json.JSONDecodeError, ValueError, AttributeError) as e:
-            raise HTTPException(
-                status_code=400, detail=f"taxonomy_config 格式无效: {e}"
-            )
+        raise HTTPException(
+            status_code=410,
+            detail="个人分类体系已停用，岗位分类由系统和管理员统一维护",
+        )
 
     _URL_RE = re.compile(r'^https?://[^\s<>"\']+$', re.IGNORECASE)
     for k, v in filtered.items():

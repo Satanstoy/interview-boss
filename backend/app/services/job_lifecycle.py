@@ -196,6 +196,8 @@ def create_interview_import_analysis_job(
         ),
     )
     return job_id, str(row["status"])
+
+
 DISPATCH_LEASE_SECONDS = 300
 WORKER_LEASE_SECONDS = 1800
 MAX_JOB_ATTEMPTS = 3
@@ -226,8 +228,7 @@ def create_answer_generation_jobs(
         ).fetchone()
         if not row:
             raise RuntimeError(
-                f"答案任务创建失败: parent_job_id={parent_job_id}, "
-                f"question_id={question_id}"
+                f"答案任务创建失败: parent_job_id={parent_job_id}, question_id={question_id}"
             )
         answer_job_id = int(row["id"])
         conn.execute(
@@ -253,9 +254,7 @@ def create_answer_generation_jobs(
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def default_worker_id() -> str:
@@ -358,12 +357,12 @@ def touch_job(
     progress_current: int | None = None,
     progress_total: int | None = None,
     progress_message: str | None = None,
+    progress_phase: str | None = None,
     lease_seconds: int = WORKER_LEASE_SECONDS,
 ) -> bool:
     """Refresh the worker lease and optionally persist visible progress."""
     fields = [
-        "locked_until = "
-        f"datetime('now', '+{int(lease_seconds)} seconds')",
+        f"locked_until = datetime('now', '+{int(lease_seconds)} seconds')",
         "updated_at = CURRENT_TIMESTAMP",
     ]
     params: list[Any] = []
@@ -376,10 +375,14 @@ def touch_job(
     if progress_message is not None:
         fields.append("progress_message = ?")
         params.append(progress_message)
+    if progress_phase is not None:
+        fields.append("progress_phase = ?")
+        params.append(progress_phase)
     params.extend([job_id, worker_id])
     cur = conn.execute(
-        "UPDATE jobs SET status = 'running', " + ", ".join(fields) +
-        " WHERE id = ? AND worker_id = ? AND status = 'running'",
+        "UPDATE jobs SET status = 'running', "
+        + ", ".join(fields)
+        + " WHERE id = ? AND worker_id = ? AND status = 'running'",
         params,
     )
     return bool(cur.rowcount)

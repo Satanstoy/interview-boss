@@ -23,6 +23,8 @@ export const createPosition = async (name, description = '') => {
 }
 
 // ── Taxonomy AI Suggestion ──
+export const updateSystemTaxonomy = (payload) => put(`${API}/profile/taxonomy/system`, payload)
+export const fetchSystemTaxonomy = (position) => get(`${API}/profile/taxonomy/system?position=${encodeURIComponent(position)}`, { noCache: true })
 export const generateTaxonomy = () => post(`${API}/profile/taxonomy/generate`, null, { timeout: 180_000 })
 export const confirmTaxonomy = (categories) => post(`${API}/profile/taxonomy/confirm`, { categories })
 export const savePersonalTaxonomy = (categories) => post(`${API}/profile/taxonomy/save-personal`, { categories })

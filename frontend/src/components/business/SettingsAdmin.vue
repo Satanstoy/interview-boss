@@ -1,8 +1,8 @@
 <script setup>
 import { ref, reactive, watch, onMounted } from 'vue'
-import { useToast, useConfirm } from '@/composables/useNotification.js'
-import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, Share2, Globe, ClipboardCheck } from '@lucide/vue'
-import { savePersonalTaxonomy, shareTaxonomy, fetchPublicTaxonomies, deletePublicTaxonomy, fetchProfile } from '@/services/profileApi.js'
+import { useToast } from '@/composables/useNotification.js'
+import { FolderTree, AlertTriangle, ChevronRight, Plus, Trash2, Save, ClipboardCheck } from '@lucide/vue'
+import { fetchProfile, fetchPositions, fetchSystemTaxonomy, updateSystemTaxonomy } from '@/services/profileApi.js'
 import SettingsQuality from './SettingsQuality.vue'
 import SettingsQualityAssistant from './SettingsQualityAssistant.vue'
 import SettingsSourceHealth from './SettingsSourceHealth.vue'
@@ -11,7 +11,6 @@ import SettingsPublicSearch from './SettingsPublicSearch.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import AppTooltip from '@/components/common/AppTooltip.vue'
 
 const adminTabs = [
@@ -31,28 +30,54 @@ const props = defineProps({
 
 const emit = defineEmits(['build-master-bank', 'taxonomy-updated'])
 const { success: toastSuccess, error: toastError, warning: toastWarning } = useToast()
-const { confirm: showConfirm } = useConfirm()
 
 // Deep-copy taxonomy to avoid prop mutation
 const localTaxonomy = reactive({
-  categories: JSON.parse(JSON.stringify(props.taxonomy.categories || []))
+  job_position: props.taxonomy.job_position || '',
+  categories: JSON.parse(JSON.stringify(props.taxonomy.categories || [])),
+  tags: JSON.parse(JSON.stringify(props.taxonomy.tags || [])),
+})
+const positions = ref([])
+const selectedPosition = ref('')
+
+const syncTaxonomy = (taxonomy) => {
+  localTaxonomy.job_position = taxonomy?.job_position || ''
+  localTaxonomy.categories = JSON.parse(JSON.stringify(taxonomy?.categories || []))
+  localTaxonomy.tags = JSON.parse(JSON.stringify(taxonomy?.tags || []))
+}
+
+const loadSystemTaxonomy = async (position) => {
+  if (!position) return
+  try {
+    syncTaxonomy(await fetchSystemTaxonomy(position))
+  } catch (e) {
+    toastError(`读取岗位分类失败: ${e.message}`)
+  }
+}
+
+watch(() => props.taxonomy, syncTaxonomy, { deep: true })
+watch(selectedPosition, (position) => {
+  loadSystemTaxonomy(position)
 })
 
 onMounted(async () => {
   try {
     const profile = await fetchProfile()
-    if (profile?.taxonomy_config?.categories) {
-      localTaxonomy.categories = JSON.parse(JSON.stringify(profile.taxonomy_config.categories))
+    const rawTaxonomy = profile?.settings?.taxonomy_config ?? profile?.taxonomy_config
+    if (rawTaxonomy) {
+      const taxonomy = typeof rawTaxonomy === 'string' ? JSON.parse(rawTaxonomy) : rawTaxonomy
+      syncTaxonomy(taxonomy)
     }
+    const positionData = await fetchPositions()
+    positions.value = positionData.positions || []
+    selectedPosition.value = profile?.settings?.current_job_position || localTaxonomy.job_position || positions.value[0]?.name || ''
+    if (selectedPosition.value) await loadSystemTaxonomy(selectedPosition.value)
   } catch (e) {
     console.error('Failed to load taxonomy', e)
   }
 })
 
-// ── Card 1: 分类体系管理 ──
-const publicTaxonomies = ref([])
-const publicTaxonomiesLoading = ref(false)
-const showPublicTaxonomies = ref(false)
+// ── Card 1: 系统分类体系管理 ──
 
 const addCat1 = () => {
   localTaxonomy.categories.push({ cat1: '', children: [''], _open: true })
@@ -70,81 +95,32 @@ const removeChild = (cat, childIndex) => {
   cat.children.splice(childIndex, 1)
 }
 
-const onSavePersonal = async () => {
+const addTag = () => {
+  localTaxonomy.tags.push('')
+}
+
+const removeTag = (index) => {
+  localTaxonomy.tags.splice(index, 1)
+}
+
+const onSaveSystem = async () => {
   const valid = getValidCategories()
-  if (!valid.length) {
-    toastWarning('没有可保存的分类')
+  const tags = (localTaxonomy.tags || []).map(tag => tag.trim()).filter(Boolean)
+  if (!localTaxonomy.job_position || !valid.length || !tags.length) {
+    toastWarning('岗位、分类和标签均不能为空')
     return
   }
   try {
-    await savePersonalTaxonomy(valid)
-    toastSuccess('已保存为个人分类')
+    await updateSystemTaxonomy({
+      position: localTaxonomy.job_position,
+      categories: valid,
+      tags,
+    })
+    localTaxonomy.tags = tags
+    toastSuccess('系统分类已保存')
+    emit('taxonomy-updated')
   } catch (e) {
     toastError(`保存失败: ${e.message}`)
-  }
-}
-
-const onShare = async () => {
-  const valid = getValidCategories()
-  if (!valid.length) {
-    toastWarning('没有可分享的分类')
-    return
-  }
-  try {
-    const result = await savePersonalTaxonomy(valid)
-    if (result.taxonomy?.id) {
-      await shareTaxonomy(result.taxonomy.id)
-      toastSuccess('分类已分享')
-    }
-  } catch (e) {
-    toastError(`分享失败: ${e.message}`)
-  }
-}
-
-const onShowPublic = async () => {
-  showPublicTaxonomies.value = true
-  publicTaxonomiesLoading.value = true
-  try {
-    const data = await fetchPublicTaxonomies()
-    publicTaxonomies.value = data.taxonomies || []
-  } catch (e) {
-    toastError(`获取公开分类失败: ${e.message}`)
-  } finally {
-    publicTaxonomiesLoading.value = false
-  }
-}
-
-const onUsePublic = async (tax) => {
-  const categories = tax.categories.map(c => ({ ...c, _open: false }))
-  localTaxonomy.categories = categories
-  const valid = categories
-    .filter(c => c.cat1?.trim())
-    .map(c => ({
-      cat1: c.cat1.trim(),
-      children: (c.children || []).filter(Boolean),
-    }))
-  showPublicTaxonomies.value = false
-  if (!valid.length) {
-    toastWarning('该公开分类没有有效分类，无法使用')
-    return
-  }
-  try {
-    await savePersonalTaxonomy(valid)
-    emit('taxonomy-updated')
-    toastSuccess(`已加载并保存"${tax.position_name}"的分类`)
-  } catch (e) {
-    toastError(`加载分类失败: ${e.message}`)
-  }
-}
-
-const onDeletePublic = async (tax) => {
-  if (!await showConfirm(`确定要删除"${tax.position_name}"的公开分类吗？`)) return
-  try {
-    await deletePublicTaxonomy(tax.id)
-    publicTaxonomies.value = publicTaxonomies.value.filter(t => t.id !== tax.id)
-    toastSuccess('已删除公开分类')
-  } catch (e) {
-    toastError(`删除失败: ${e.message}`)
   }
 }
 
@@ -189,8 +165,14 @@ const onRebuild = () => {
       <div class="flex items-center justify-between">
         <h3 class="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-2">
           <FolderTree class="size-4" />
-          分类体系管理
+          系统分类体系管理
         </h3>
+        <label class="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>岗位</span>
+          <select v-model="selectedPosition" class="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground">
+            <option v-for="position in positions" :key="position.id" :value="position.name">{{ position.name }}</option>
+          </select>
+        </label>
         <Button variant="link" size="sm" @click="addCat1" class="text-xs text-primary h-auto p-0 no-underline hover:no-underline">
           <Plus class="size-3.5 mr-1" />
           添加大类
@@ -248,75 +230,29 @@ const onRebuild = () => {
         暂无分类，点击「添加大类」开始构建
       </p>
 
+      <div class="space-y-2">
+        <Label class="text-xs font-semibold text-foreground">考点标签</Label>
+        <div v-for="(_, ti) in localTaxonomy.tags" :key="ti" class="flex items-center gap-2">
+          <Input v-model="localTaxonomy.tags[ti]" class="text-sm" placeholder="如 接口测试、Redis、系统设计" />
+          <Button variant="ghost" size="icon-sm" aria-label="删除标签" @click="removeTag(ti)" class="text-muted-foreground/50 hover:text-red-500">
+            <Trash2 class="size-3.5" />
+          </Button>
+        </div>
+        <Button variant="link" size="sm" @click="addTag" class="text-xs text-primary h-auto p-0 no-underline hover:no-underline">
+          <Plus class="size-3 mr-1" />
+          添加标签
+        </Button>
+      </div>
+
       <!-- Action buttons -->
       <div class="flex gap-2 pt-2">
-        <Button variant="outline" size="sm" @click="onSavePersonal"
+        <Button variant="outline" size="sm" @click="onSaveSystem"
           class="flex-1 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400">
           <Save class="size-3.5 mr-1.5" />
-          保存为个人分类
-        </Button>
-        <Button variant="outline" size="sm" @click="onShare"
-          class="flex-1 border-primary-200 dark:border-primary-800 text-primary-700 dark:text-primary-400">
-          <Share2 class="size-3.5 mr-1.5" />
-          分享分类
-        </Button>
-        <Button variant="outline" size="sm" @click="onShowPublic" class="flex-1">
-          <Globe class="size-3.5 mr-1.5" />
-          使用公开分类
+          保存系统分类
         </Button>
       </div>
     </div>
-
-    <!-- Public taxonomy dialog -->
-    <Teleport to="body">
-      <div v-if="showPublicTaxonomies" class="fixed inset-0 z-50 flex items-center justify-center">
-        <!-- Backdrop -->
-        <div class="fixed inset-0 bg-black/50" @click="showPublicTaxonomies = false" />
-        <!-- Content -->
-        <div class="relative z-50 w-full max-w-2xl max-h-[80vh] bg-card rounded-xl border shadow-lg flex flex-col mx-4">
-          <div class="px-6 py-4 border-b">
-            <h3 class="text-lg font-semibold text-foreground">公开分类体系</h3>
-            <p class="text-sm text-muted-foreground mt-1">选择一个分类体系应用到当前岗位</p>
-          </div>
-          <div class="flex-1 overflow-y-auto p-6">
-            <div v-if="publicTaxonomiesLoading" class="flex items-center justify-center py-8">
-              <div class="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            </div>
-            <div v-else-if="!publicTaxonomies.length" class="text-center py-8 text-muted-foreground text-sm">
-              暂无公开分类
-            </div>
-            <div v-else class="flex flex-col gap-3">
-              <div v-for="tax in publicTaxonomies" :key="tax.id"
-                class="rounded-xl border border-border p-4 hover:border-primary/40 dark:hover:border-primary/50 transition cursor-pointer"
-                @click="onUsePublic(tax)">
-                <div class="flex items-center justify-between mb-2">
-                  <h4 class="text-sm font-semibold text-foreground">{{ tax.position_name }}</h4>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-muted-foreground">分享者: {{ tax.owner_name || '匿名' }}</span>
-                    <AppTooltip v-if="isAdmin" text="删除此公开分类">
-                      <Button variant="ghost" size="icon-sm" aria-label="删除此公开分类"
-                        @click.stop="onDeletePublic(tax)"
-                        class="text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200">
-                        <Trash2 class="size-4" />
-                      </Button>
-                    </AppTooltip>
-                  </div>
-                </div>
-                <div class="flex flex-wrap gap-1.5">
-                  <span v-for="(c, i) in (tax.categories || [])" :key="i"
-                    class="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">
-                    {{ c.cat1 }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="px-6 py-4 border-t flex justify-end">
-            <Button variant="outline" size="sm" @click="showPublicTaxonomies = false">关闭</Button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- Card 3: 题库操作 (Danger Zone) -->
     <div v-if="adminTab === 'taxonomy'" class="rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50/50 dark:bg-red-900/10 p-6 space-y-4">

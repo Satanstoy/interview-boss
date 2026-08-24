@@ -5,13 +5,9 @@
 这些 bug 是纯前端逻辑问题（Vue 组件中的事件处理和 HTTP 缓存），
 后端 API 本身行为正确。测试聚焦于验证后端数据层契约：
 1. 岗位切换正确更新 users 表
-2. taxonomy_config 中的 job_position 正确保存
+2. 系统 taxonomy 在岗位切换后可稳定读取
 3. 连续读取返回一致数据（不存在竞态）
 """
-import pytest
-import json
-
-
 class TestPositionSwitchDBContract:
     """验证岗位切换的数据库契约"""
 
@@ -92,7 +88,7 @@ class TestPositionSwitchDBContract:
 
 
 class TestTaxonomySaveContract:
-    """验证 taxonomy_config 保存的数据流契约"""
+    """验证系统 taxonomy 保存的数据流契约"""
 
     def _get_admin_id(self, conn):
         row = conn.execute("SELECT id FROM users WHERE is_admin=1 LIMIT 1").fetchone()
@@ -100,32 +96,28 @@ class TestTaxonomySaveContract:
 
     def test_save_taxonomy_for_position(self, test_db):
         """
-        BUG-003 验证：taxonomy_config 通过 save_taxonomy_for_position 正确保存
+            BUG-003 验证：系统 taxonomy 通过 save_taxonomy_for_position 正确保存
         """
         from app.db.connection import save_taxonomy_for_position, get_taxonomy_for_position
-        admin_id = self._get_admin_id(test_db)
-
         categories = [{"cat1": "系统设计", "children": ["分布式", "缓存"]}]
 
-        # 保存分类
-        save_taxonomy_for_position("后端开发", categories, source='user', owner_id=admin_id)
+        # 管理员系统维护路径
+        save_taxonomy_for_position("后端开发", categories)
 
         # 读取并验证
         result = get_taxonomy_for_position("后端开发")
         assert result is not None
         cats = result if isinstance(result, list) else result.get("categories", result)
-        # save_taxonomy_for_position 保存的分类应可被读取
         assert cats is not None
+        assert cats == categories
 
     def test_taxonomy_consistent_across_reads(self, test_db):
         """
         BUG-002 验证：连续读取 taxonomy 返回一致数据
         """
         from app.db.connection import save_taxonomy_for_position, get_taxonomy_for_position
-        admin_id = self._get_admin_id(test_db)
-
         categories = [{"cat1": "基础", "children": ["算法"]}]
-        save_taxonomy_for_position("后端开发", categories, source='user', owner_id=admin_id)
+        save_taxonomy_for_position("后端开发", categories)
 
         # 连续两次读取应返回一致数据
         result1 = get_taxonomy_for_position("后端开发")

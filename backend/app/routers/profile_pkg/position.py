@@ -1,6 +1,5 @@
 """岗位管理端点"""
 import re
-import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
@@ -15,7 +14,7 @@ _MAX_POSITION_LEN = 30
 
 @router.put("/api/profile/my-position")
 async def switch_my_position(req: dict, user: dict = Depends(get_current_user)):
-    """普通用户切换个人岗位（仅对自己生效，不写入公共 job_positions 表）"""
+    """普通用户只能切换到管理员登记的 active 岗位。"""
     position_name = req.get("position", "").strip()
     if not position_name:
         raise HTTPException(status_code=400, detail="需要提供 position")
@@ -26,18 +25,44 @@ async def switch_my_position(req: dict, user: dict = Depends(get_current_user)):
 
     def _switch():
         with get_db_connection() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+            deleted_filter = "AND (is_deleted = 0 OR is_deleted IS NULL)" if "is_deleted" in columns else ""
+            position_row = conn.execute(
+                f"SELECT id, name FROM job_positions WHERE name = ? {deleted_filter}",
+                (position_name,),
+            ).fetchone()
+            if not position_row:
+                raise HTTPException(status_code=404, detail="岗位不存在或已下线，请选择系统提供的岗位")
+            taxonomy_row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'taxonomy'"
+            ).fetchone()
+            if taxonomy_row:
+                taxonomy_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info('taxonomy')").fetchall()
+                }
+                tags_filter = "AND tags_json IS NOT NULL AND tags_json != '[]'" if "tags_json" in taxonomy_columns else ""
+                configured = conn.execute(
+                    "SELECT 1 FROM taxonomy WHERE position_name = ? "
+                    "AND source = 'system' AND owner_id IS NULL "
+                    "AND categories_json IS NOT NULL AND categories_json != '[]' "
+                    f"{tags_filter} LIMIT 1",
+                    (position_name,),
+                ).fetchone()
+                if not configured:
+                    raise HTTPException(status_code=409, detail="该岗位尚未配置系统分类，请联系管理员")
             conn.execute(
-                "UPDATE users SET personal_position = ?, current_position_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (position_name, user['id'])
+                "UPDATE users SET personal_position = NULL, current_position_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (position_row["id"], user['id'])
             )
             conn.commit()
+            return position_row["name"], position_row["id"]
 
-    await run_db(_switch)
+    position_name, position_id = await run_db(_switch)
     return {
         "status": "success",
         "current_job_position": position_name,
         "current_position": position_name,
-        "current_position_id": None,
+        "current_position_id": position_id,
     }
 
 
@@ -55,29 +80,25 @@ async def switch_position(req: dict, admin: dict = Depends(get_admin_user)):
 
     def _switch():
         with get_db_connection() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
+            deleted_filter = "AND (is_deleted = 0 OR is_deleted IS NULL)" if "is_deleted" in columns else ""
             if position_id:
-                row = conn.execute("SELECT id, name FROM job_positions WHERE id = ?", (position_id,)).fetchone()
+                row = conn.execute(
+                    f"SELECT id, name FROM job_positions WHERE id = ? {deleted_filter}",
+                    (position_id,),
+                ).fetchone()
                 if not row:
-                    raise HTTPException(status_code=404, detail="岗位不存在")
+                    raise HTTPException(status_code=404, detail="岗位不存在或已下线")
                 conn.execute("UPDATE users SET current_position_id = ?, personal_position = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 conn.commit()
                 return row['name']
             elif position_name:
-                row = conn.execute("SELECT id, name FROM job_positions WHERE name = ?", (position_name,)).fetchone()
+                row = conn.execute(
+                    f"SELECT id, name FROM job_positions WHERE name = ? {deleted_filter}",
+                    (position_name,),
+                ).fetchone()
                 if not row:
-                    conn.execute("INSERT INTO job_positions (name) VALUES (?)", (position_name,))
-                    pos_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                    row = {'id': pos_id, 'name': position_name}
-                    conn.execute(
-                        "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, updated_at) "
-                        "VALUES (?, ?, 'system', NULL, CURRENT_TIMESTAMP) "
-                        "ON CONFLICT(position_name, source, owner_id) DO NOTHING",
-                        (position_name, json.dumps([], ensure_ascii=False))
-                    )
-                else:
-                    cols = {r[1] for r in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
-                    if 'is_deleted' in cols:
-                        conn.execute("UPDATE job_positions SET is_deleted = 0 WHERE id = ? AND is_deleted = 1", (row['id'],))
+                    raise HTTPException(status_code=404, detail="岗位不存在或已下线")
                 conn.execute("UPDATE users SET current_position_id = ?, personal_position = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (row['id'], admin['id']))
                 conn.commit()
                 return row['name']
@@ -101,6 +122,24 @@ async def list_positions(user: dict = Depends(get_current_user)):
                 ).fetchall()
             else:
                 rows = conn.execute("SELECT id, name, description FROM job_positions ORDER BY name").fetchall()
+            taxonomy_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'taxonomy'"
+            ).fetchone()
+            if taxonomy_exists and not user.get("is_admin"):
+                taxonomy_columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info('taxonomy')").fetchall()
+                }
+                tags_filter = "AND tags_json IS NOT NULL AND tags_json != '[]'" if "tags_json" in taxonomy_columns else ""
+                configured = {
+                    row["position_name"]
+                    for row in conn.execute(
+                        "SELECT position_name FROM taxonomy "
+                        "WHERE source = 'system' AND owner_id IS NULL "
+                        "AND categories_json IS NOT NULL AND categories_json != '[]' "
+                        f"{tags_filter}"
+                    ).fetchall()
+                }
+                rows = [row for row in rows if row["name"] in configured]
             return [dict(r) for r in rows]
     positions = await run_db(_query)
     return {"positions": positions}
@@ -134,20 +173,31 @@ async def create_position(req: dict, admin: dict = Depends(get_admin_user)):
 
 @router.delete("/api/profile/position/{position_name}")
 async def delete_position(position_name: str, admin: dict = Depends(get_admin_user)):
-    """软删除岗位（仅管理员）"""
+    """下线岗位（仅管理员）；保留岗位、题目和 taxonomy 历史数据。"""
     def _delete():
         with get_db_connection() as conn:
             row = conn.execute("SELECT id FROM job_positions WHERE name = ?", (position_name,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="岗位不存在")
 
-            cols = {r[1] for r in conn.execute("PRAGMA table_info('job_positions')").fetchall()}
-            if 'is_deleted' not in cols:
-                conn.execute("ALTER TABLE job_positions ADD COLUMN is_deleted INTEGER DEFAULT 0")
+            active_count = conn.execute(
+                "SELECT COUNT(*) FROM job_positions WHERE is_deleted = 0 OR is_deleted IS NULL"
+            ).fetchone()[0]
+            already_retired = conn.execute(
+                "SELECT is_deleted FROM job_positions WHERE name = ?", (position_name,)
+            ).fetchone()[0]
+            if already_retired:
+                return False
+            if active_count <= 1:
+                raise HTTPException(status_code=409, detail="不能下线最后一个 active 岗位")
 
-            conn.execute("UPDATE job_positions SET is_deleted = 1 WHERE name = ?", (position_name,))
+            conn.execute(
+                "UPDATE job_positions SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (row["id"],),
+            )
             conn.commit()
             return True
 
-    await run_db(_delete)
-    return {"status": "success", "message": f"岗位 '{position_name}' 已删除"}
+    changed = await run_db(_delete)
+    message = f"岗位 '{position_name}' 已下线" if changed else f"岗位 '{position_name}' 已经是下线状态"
+    return {"status": "success", "message": message}
