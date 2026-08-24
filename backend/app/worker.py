@@ -1846,6 +1846,7 @@ from app.worker_scheduled import (
     scheduled_quality_audit_task,
     scheduled_submit_job_dispatch_task,
     scheduled_harness_turn_dispatch_task,
+    scheduled_harness_event_publisher_task,
     scheduled_cluster_review_dispatch_task,
     scheduled_source_health_task,
     run_db_retention,
@@ -1869,6 +1870,7 @@ scheduled_compaction_task = observed_cron_task(scheduled_compaction_task)
 scheduled_quality_audit_task = observed_cron_task(scheduled_quality_audit_task)
 scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dispatch_task)
 scheduled_harness_turn_dispatch_task = observed_cron_task(scheduled_harness_turn_dispatch_task)
+scheduled_harness_event_publisher_task = observed_cron_task(scheduled_harness_event_publisher_task)
 scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
 scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
 scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
@@ -1893,6 +1895,7 @@ class WorkerSettings:
         scheduled_compaction_task,
         scheduled_quality_audit_task,
         scheduled_submit_job_dispatch_task,
+        scheduled_harness_event_publisher_task,
         scheduled_cluster_review_dispatch_task,
         cluster_review_task,
         scheduled_source_health_task,
@@ -1916,6 +1919,7 @@ class WorkerSettings:
         # 单写锁的获取(原每分钟/每5分钟 → 每5分钟/每30分钟)。
         cron(scheduled_submit_job_dispatch_task, minute=set(range(0, 60, 5))),
         cron(scheduled_harness_turn_dispatch_task, minute=set(range(0, 60, 5))),
+        cron(scheduled_harness_event_publisher_task, minute=set(range(0, 60))),
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),

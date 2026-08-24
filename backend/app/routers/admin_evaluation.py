@@ -74,6 +74,11 @@ class CreateHumanReviewRequest(BaseModel):
     comment: str = Field(default="", max_length=4000)
 
 
+class RecordedReplayRequest(BaseModel):
+    expected_manifest: dict[str, Any] = Field(default_factory=dict)
+    contract: dict[str, Any] = Field(default_factory=dict)
+
+
 def _capability_release(row, harness=None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -1385,6 +1390,44 @@ async def create_run(body: CreateEvalRunRequest, admin: dict = Depends(get_admin
         "total_items": result["total_items"],
         "dispatch_error": dispatch_error,
     }
+
+
+@router.post("/turn-runs/{turn_id}/recorded-replay")
+async def recorded_replay_turn(
+    turn_id: str,
+    body: RecordedReplayRequest,
+    admin: dict = Depends(get_admin_user),
+):
+    """Replay a saved Harness turn without invoking a provider."""
+
+    def _replay():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT user_id, conversation_id FROM chat_turns WHERE id = ?",
+                (turn_id,),
+            ).fetchone()
+        if not row:
+            raise ValueError("TURN_NOT_FOUND")
+        from app.services.harness_replay_service import (
+            recorded_replay,
+            validate_golden_trace,
+        )
+
+        replay = recorded_replay(
+            turn_id=turn_id,
+            user_id=int(row["user_id"]),
+            conversation_id=row["conversation_id"],
+            expected_manifest=body.expected_manifest,
+        )
+        replay["golden_trace"] = validate_golden_trace(replay, body.contract)
+        return replay
+
+    try:
+        return {"status": "success", "data": await run_db(_replay)}
+    except ValueError as exc:
+        if str(exc) == "TURN_NOT_FOUND":
+            raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/runs")

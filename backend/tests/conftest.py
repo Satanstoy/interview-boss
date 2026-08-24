@@ -15,6 +15,10 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
+# Harness audit artifacts are encrypted in production.  Offline tests opt in
+# explicitly to the plaintext fallback because they do not provision JWT keys.
+os.environ.setdefault("HARNESS_ALLOW_PLAINTEXT_ARTIFACTS", "1")
+
 
 # ── 代理清理（防止 socks5h 代理导致 httpx 初始化失败）────────────
 

@@ -215,43 +215,38 @@ class InterviewE2EAdapter:
             request_id,
             user_message,
             fingerprint,
+            harness_version="2.0",
+            model=model or None,
         )
-        events: list[dict[str, Any]] = []
-        assistant_parts: list[str] = []
-        metadata: dict[str, Any] = {}
-        terminal_error = None
         try:
-            async for event in run_chat(
-                conversation_id=conversation_id,
-                user_id=user_id,
-                user_message=user_message,
-                mode=mode,
-                resume_text=str(candidate_view.get("profile") or ""),
-                difficulty=str(candidate_view.get("difficulty") or "mid"),
-                model=model or None,
-                turn_id=turn.id,
-                turn_fence=turn.fence,
-            ):
-                events.append(event)
-                if event.get("type") == "chunk":
-                    assistant_parts.append(str(event.get("content") or ""))
-                elif event.get("type") == "done":
-                    metadata = event.get("metadata") or {}
-                elif event.get("type") == "error":
-                    terminal_error = str(event.get("message") or "pipeline error")
-            assistant = "".join(assistant_parts).strip()
-            if terminal_error:
-                chat_service.fail_chat_turn(turn.id, turn.fence, conversation_id, user_id, "EVAL_PIPELINE_ERROR")
-            else:
-                chat_service.finalize_chat_turn(
-                    turn.id,
-                    turn.fence,
-                    conversation_id,
-                    user_id,
-                    assistant,
-                    metadata,
-                )
-            return {"assistant": assistant, "events": events, "metadata": metadata, "terminal_error": terminal_error}
+            # Eval must exercise the same durable Harness boundary as the
+            # product.  The ARQ trigger is intentionally bypassed here, but
+            # DB lease, Action/Attempt/Artifact, CommitTurn and event replay
+            # remain identical to production.
+            from app.services.harness_turn_worker import run_harness_turn
+
+            worker_result = await run_harness_turn(
+                turn.id, worker_id=f"eval-worker:{request_id}"
+            )
+            snapshot = chat_service.get_chat_turn(
+                turn.id, conversation_id=conversation_id, user_id=user_id
+            ) or {}
+            events = chat_service.get_turn_events(
+                turn.id, user_id=user_id, conversation_id=conversation_id
+            )
+            assistant = str(snapshot.get("assistant_content") or "").strip()
+            metadata = snapshot.get("assistant_metadata") or {}
+            terminal_error = (
+                None
+                if worker_result.get("status") == "completed"
+                else str(snapshot.get("error_code") or worker_result.get("status") or "pipeline error")
+            )
+            return {
+                "assistant": assistant,
+                "events": events,
+                "metadata": metadata,
+                "terminal_error": terminal_error,
+            }
         except Exception:
             try:
                 chat_service.fail_chat_turn(turn.id, turn.fence, conversation_id, user_id, "EVAL_PIPELINE_ERROR")

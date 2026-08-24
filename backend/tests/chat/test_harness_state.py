@@ -116,6 +116,54 @@ def test_turn_context_snapshot_is_updated_without_rebuilding_the_turn(test_db):
     assert row["turn_run_version"] == 2
 
 
+def test_turn_base_context_snapshot_is_frozen_and_recoverable(test_db):
+    from app.agents.chat.harness_contract import ContextBlock, build_context_pack
+
+    conversation = _conversation()
+    turn = chat_service.reserve_chat_turn(
+        conversation["id"], 1, "harness-frozen-base", "本轮固定输入"
+    )
+    pack = build_context_pack(
+        stable_prefix=[
+            ContextBlock("stable", "system_rules", "harness", {"v": 1}, "model", 0)
+        ],
+        turn_base=[
+            ContextBlock("input", "candidate_input", "user", {"text": "本轮固定输入"}, "model", 0)
+        ],
+        call_suffix=[],
+    )
+    first = chat_service.persist_turn_context_snapshot(
+        turn.id,
+        turn.fence,
+        conversation["id"],
+        1,
+        context_pack_hash=pack.context_pack_hash,
+        stable_prefix_hash=pack.stable_prefix_hash,
+        budget_snapshot={"available_tokens": 900},
+        context_base_snapshot={
+            "stable_prefix": [item.as_dict() for item in pack.stable_prefix],
+            "turn_base": [item.as_dict() for item in pack.turn_base],
+        },
+    )
+    second = chat_service.persist_turn_context_snapshot(
+        turn.id,
+        turn.fence,
+        conversation["id"],
+        1,
+        context_pack_hash=pack.context_pack_hash,
+        stable_prefix_hash=pack.stable_prefix_hash,
+        budget_snapshot={"available_tokens": 1},
+        context_base_snapshot={"turn_base": [{"content": "不能覆盖"}]},
+    )
+    frozen = chat_service.get_frozen_turn_context_base(
+        turn.id, user_id=1, conversation_id=conversation["id"]
+    )
+
+    assert first["context_base_snapshot"]["turn_base"][0]["content"]["text"] == "本轮固定输入"
+    assert second["context_base_snapshot"] == first["context_base_snapshot"]
+    assert frozen == first["context_base_snapshot"]
+
+
 def test_revision_points_to_original_turn_without_overwriting_it(test_db):
     conversation = _conversation()
     original = chat_service.reserve_chat_turn(

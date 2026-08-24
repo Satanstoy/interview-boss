@@ -10,6 +10,7 @@ import json
 import hashlib
 import uuid
 import logging
+import os
 
 from app.db.connection import get_db_connection
 from app.services.chat_common import SideEffectConflict
@@ -272,6 +273,7 @@ def persist_turn_context_snapshot(
     context_pack_hash: str,
     stable_prefix_hash: str = "",
     budget_snapshot: dict,
+    context_base_snapshot: dict | None = None,
     lease_owner: str | None = None,
 ) -> dict:
     """Freeze the Turn Base hash and budget exactly once per active turn."""
@@ -283,12 +285,13 @@ def persist_turn_context_snapshot(
     encoded_budget = json.dumps(
         budget_snapshot or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
+    encoded_base = context_base_snapshot if isinstance(context_base_snapshot, dict) else {}
     with get_db_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
         try:
             existing = conn.execute(
                 "SELECT context_pack_hash, stable_prefix_hash, budget_snapshot_json, "
-                "turn_run_version, lease_owner FROM chat_turns "
+                "turn_base_snapshot_json, turn_run_version, lease_owner FROM chat_turns "
                 "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
                 "AND status = 'running'",
                 (turn_id, fence, conversation_id, user_id),
@@ -303,16 +306,36 @@ def persist_turn_context_snapshot(
                     or existing["stable_prefix_hash"] != str(stable_prefix_hash or "")
                 ):
                     raise ValueError("Turn Base ContextPack is already frozen")
+                stored_snapshot = _json_value(existing["turn_base_snapshot_json"], {})
+                stored_base = (
+                    stored_snapshot.get("context_base_snapshot")
+                    if isinstance(stored_snapshot, dict)
+                    else {}
+                )
+                if not stored_base and encoded_base:
+                    stored_snapshot = dict(stored_snapshot or {})
+                    stored_snapshot["context_base_snapshot"] = encoded_base
+                    conn.execute(
+                        "UPDATE chat_turns SET turn_base_snapshot_json = ? WHERE id = ?",
+                        (json.dumps(stored_snapshot, ensure_ascii=False, sort_keys=True), turn_id),
+                    )
+                    stored_base = encoded_base
                 conn.commit()
                 return {
                     "context_pack_hash": existing["context_pack_hash"],
                     "stable_prefix_hash": existing["stable_prefix_hash"],
                     "budget_snapshot": json.loads(existing["budget_snapshot_json"] or "{}"),
+                    "context_base_snapshot": stored_base or {},
                     "turn_run_version": int(existing["turn_run_version"]),
                 }
+            stored_snapshot = _json_value(existing["turn_base_snapshot_json"], {})
+            if not isinstance(stored_snapshot, dict):
+                stored_snapshot = {}
+            if encoded_base:
+                stored_snapshot["context_base_snapshot"] = encoded_base
             updated = conn.execute(
                 "UPDATE chat_turns SET context_pack_hash = ?, stable_prefix_hash = ?, "
-                "budget_snapshot_json = ?, "
+                "budget_snapshot_json = ?, turn_base_snapshot_json = ?, "
                 "turn_run_version = turn_run_version + 1 "
                 "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
                 "AND status = 'running' "
@@ -321,6 +344,7 @@ def persist_turn_context_snapshot(
                     str(context_pack_hash or ""),
                     str(stable_prefix_hash or ""),
                     encoded_budget,
+                    json.dumps(stored_snapshot, ensure_ascii=False, sort_keys=True),
                     turn_id,
                     fence,
                     conversation_id,
@@ -331,7 +355,8 @@ def persist_turn_context_snapshot(
             if updated.rowcount != 1:
                 raise ValueError("turn is not active or does not belong to the caller")
             row = conn.execute(
-                "SELECT context_pack_hash, stable_prefix_hash, budget_snapshot_json, turn_run_version "
+                "SELECT context_pack_hash, stable_prefix_hash, budget_snapshot_json, "
+                "turn_base_snapshot_json, turn_run_version "
                 "FROM chat_turns WHERE id = ?",
                 (turn_id,),
             ).fetchone()
@@ -343,8 +368,66 @@ def persist_turn_context_snapshot(
         "context_pack_hash": row["context_pack_hash"],
         "stable_prefix_hash": row["stable_prefix_hash"],
         "budget_snapshot": json.loads(row["budget_snapshot_json"] or "{}"),
+        "context_base_snapshot": (
+            _json_value(row["turn_base_snapshot_json"], {}).get("context_base_snapshot", {})
+            if isinstance(_json_value(row["turn_base_snapshot_json"], {}), dict)
+            else {}
+        ),
         "turn_run_version": int(row["turn_run_version"]),
     }
+
+
+def get_frozen_turn_context_base(
+    turn_id: str,
+    *,
+    user_id: int,
+    conversation_id: str,
+) -> dict:
+    """Return the immutable ContextPack prefix/base captured for a TurnRun."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT turn_base_snapshot_json FROM chat_turns "
+            "WHERE id = ? AND user_id = ? AND conversation_id = ?",
+            (turn_id, int(user_id), conversation_id),
+        ).fetchone()
+    if not row:
+        raise LookupError("turn not found or not owned")
+    snapshot = _json_value(row["turn_base_snapshot_json"], {})
+    if not isinstance(snapshot, dict):
+        return {}
+    base = snapshot.get("context_base_snapshot")
+    return base if isinstance(base, dict) else {}
+
+
+def get_latest_harness_context_pack(
+    turn_id: str,
+    *,
+    user_id: int,
+    conversation_id: str,
+) -> dict:
+    """Read the last immutable ContextPack snapshot for worker recovery."""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT content_json FROM interview_artifacts "
+            "WHERE turn_id = ? AND user_id = ? AND conversation_id = ? "
+            "AND artifact_type = 'context_pack' ORDER BY rowid DESC LIMIT 1",
+            (turn_id, int(user_id), conversation_id),
+        ).fetchone()
+    if not row:
+        return {}
+    raw = row["content_json"] or "{}"
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if isinstance(stored, dict) and stored.get("encoding") == "fernet":
+        from app.services.encryption import decrypt_value
+
+        try:
+            stored = json.loads(decrypt_value(stored.get("ciphertext") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return stored if isinstance(stored, dict) else {}
 
 
 def claim_harness_turn(
@@ -494,6 +577,10 @@ def start_harness_attempt(
     context_pack_hash: str = "",
     prompt_cache_key: str = "",
     request_hash: str = "",
+    harness_version: str = "2.0",
+    prompt_schema: str = "agent-result-v1",
+    sampling_hash: str = "",
+    skill_hashes: list[str] | tuple[str, ...] | None = None,
     lease_owner: str | None = None,
 ) -> dict:
     """Start a new provider attempt; retry never overwrites the old attempt."""
@@ -524,9 +611,10 @@ def start_harness_attempt(
                 """
                 INSERT INTO interview_attempts
                     (id, user_id, conversation_id, turn_id, action_id, attempt_no,
-                     call_mode, provider, model, context_pack_hash, prompt_cache_key,
-                     request_hash, started_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    call_mode, provider, model, context_pack_hash, prompt_cache_key,
+                     request_hash, harness_version, prompt_schema, sampling_hash,
+                     skill_hashes_json, started_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
                     attempt_id,
@@ -541,6 +629,10 @@ def start_harness_attempt(
                     context_pack_hash,
                     prompt_cache_key,
                     request_hash,
+                    str(harness_version or "2.0"),
+                    str(prompt_schema or "agent-result-v1"),
+                    str(sampling_hash or ""),
+                    json.dumps(sorted(str(item) for item in (skill_hashes or [])), ensure_ascii=False),
                 ),
             )
             conn.execute(
@@ -573,6 +665,9 @@ def get_completed_harness_attempt(
     model: str | None = None,
     context_pack_hash: str | None = None,
     request_hash: str | None = None,
+    harness_version: str | None = None,
+    prompt_schema: str | None = None,
+    sampling_hash: str | None = None,
 ) -> dict | None:
     """Return a succeeded provider result so a recovered worker can skip it."""
     with get_db_connection() as conn:
@@ -587,6 +682,9 @@ def get_completed_harness_attempt(
             + ("AND a.model = ? " if model is not None else "")
             + ("AND a.context_pack_hash = ? " if context_pack_hash is not None else "")
             + ("AND a.request_hash = ? " if request_hash is not None else "")
+            + ("AND a.harness_version = ? " if harness_version is not None else "")
+            + ("AND a.prompt_schema = ? " if prompt_schema is not None else "")
+            + ("AND a.sampling_hash = ? " if sampling_hash is not None else "")
             + "AND ar.artifact_type = 'provider_response' "
             + "ORDER BY a.attempt_no DESC LIMIT 1",
             (
@@ -598,6 +696,9 @@ def get_completed_harness_attempt(
                 *((model,) if model is not None else ()),
                 *((context_pack_hash,) if context_pack_hash is not None else ()),
                 *((request_hash,) if request_hash is not None else ()),
+                *((harness_version,) if harness_version is not None else ()),
+                *((prompt_schema,) if prompt_schema is not None else ()),
+                *((sampling_hash,) if sampling_hash is not None else ()),
             ),
         ).fetchone()
     if not row:
@@ -685,6 +786,19 @@ def append_harness_artifact(
     """Append one immutable prompt/reasoning/tool/output artifact."""
     if visibility not in {"user", "audit", "model"}:
         raise ValueError("invalid artifact visibility")
+    required_visibility = {
+        "provider_request": {"audit", "model"},
+        "provider_response": {"audit"},
+        "raw_provider_response": {"audit"},
+        "provider_error": {"audit"},
+        "context_pack": {"audit"},
+        "context_manifest": {"audit"},
+    }
+    allowed = required_visibility.get(artifact_type)
+    if allowed is not None and visibility not in allowed:
+        raise ValueError(
+            f"artifact type {artifact_type!r} cannot use visibility {visibility!r}"
+        )
     canonical = json.dumps(
         content,
         ensure_ascii=False,
@@ -693,7 +807,14 @@ def append_harness_artifact(
         default=str,
     )
     stored_content = canonical
-    if artifact_type in {"provider_request", "provider_response", "provider_error", "raw_provider_response"}:
+    if artifact_type in {
+        "provider_request",
+        "provider_response",
+        "provider_error",
+        "raw_provider_response",
+        "context_pack",
+        "context_manifest",
+    }:
         try:
             from app.services.encryption import encrypt_value
 
@@ -702,10 +823,19 @@ def append_harness_artifact(
                 ensure_ascii=False,
                 sort_keys=True,
             )
-        except RuntimeError:
-            # Local/offline test environments may intentionally omit the key;
-            # production startup validation requires JWT_SECRET.
-            logger.warning("Harness artifact encryption key is unavailable; storing audit artifact plaintext")
+        except RuntimeError as exc:
+            allow_plaintext = (
+                os.environ.get("HARNESS_ALLOW_PLAINTEXT_ARTIFACTS", "").lower()
+                in {"1", "true", "yes"}
+                and os.environ.get("ENV", "").lower() not in {"production", "prod"}
+            )
+            if not allow_plaintext:
+                raise RuntimeError(
+                    "Harness sensitive artifacts require encryption; configure JWT_SECRET"
+                ) from exc
+            logger.warning(
+                "Harness artifact encryption key is unavailable; storing audit artifact plaintext"
+            )
     content_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     artifact_id = str(uuid.uuid4())
     with get_db_connection() as conn:

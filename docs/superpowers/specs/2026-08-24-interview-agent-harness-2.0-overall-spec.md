@@ -1,7 +1,7 @@
 # 模拟面试 Agent Harness 2.0 整体 Spec
 
 日期：2026-08-24
-状态：设计冻结，Harness 2.0 P0 已落地；Eval/完整审计回放仍待实施
+状态：设计冻结，Harness 2.0 P0 与 Replay/Outbox 基线已落地；生产灰度与真实 Provider 门禁仍待实施
 Harness 版本：`interview-harness@2.0`
 适用范围：模拟面试实时对话、运行轨迹、SSE 恢复、Reasoning 展示、编辑重发和 Eval
 
@@ -191,8 +191,8 @@ Action 状态固定为 `pending`、`started`、`streaming`、`waiting`、`comple
 2. 服务端校验 Session 所有权和当前是否允许创建回合。
 3. 创建 UserMessage 和 TurnRun。
 4. 读取当前 Session/Ledger 快照，生成 Turn Base 和预算快照。
-5. 在同一事务中写入 TurnRun 初始状态、`turn.started` 事件和 Outbox。
-6. 投递确定性 `turn_run_id` 到 ARQ 的 `interview-turn` queue。
+5. 在同一事务中写入 TurnRun 初始状态、`turn.started`、`turn.queued(pending_dispatch)` 事件和 Outbox。
+6. 投递确定性 `turn_run_id` 到 ARQ 的 `interview-turn` queue；队列投递失败只追加失败事件，不覆盖已落库的 TurnRun。
 7. 返回 `202` 和 `turn_run_id`，HTTP 请求不等待模型完成。
 
 ### 5.2 Worker 执行
@@ -721,50 +721,52 @@ ARQ 只触发和重试 Worker；数据库保存权威状态、事件、Action �
 | Action / Attempt / Artifact / Event / Outbox | P0 已落地 | 事件和 Artifact 追加式保存；Provider 请求/响应在具备生产密钥时加密保存 |
 | SSE 重放与前端双层运行卡片 | P0 已落地 | 支持 `after_sequence`、标准 `Last-Event-ID`、断线 follow、Reasoning/Assistant 双通道、停止和 revision |
 | 事务性 CommitTurn | P0 已落地 | Harness 2.0 的正式消息、Ledger、assistant/commit/turn 完成事件同事务提交 |
-| Recorded Replay / Golden Trace / Shadow Eval | 未完成 | 现有 Eval 可以驱动生产 pipeline，但尚未形成按 Context/Provider Artifact 校验 hash 的 Harness replay runner |
-| 完整 Worker 安全边界恢复 | 部分完成 | 已完成租约、Attempt 复用和终态幂等；“从最近已完成 Action 跳过并重建全部临时投影”的端到端故障矩阵仍需补测 |
-| Outbox 外部发布与细粒度权限投影 | 部分完成 | Outbox 已事务落库，SSE 当前直接读取授权事件表；独立 publisher、Artifact 读取 API 和更细的审计授权仍需补齐 |
+| Recorded Replay / Golden Trace / Shadow Eval | 基线已落地 | `harness_replay_service` 直接读取加密 Artifact、Attempt、Event，校验 Harness/Prompt/Skill/Context/Provider/model/sampling/request provenance；`evals/golden-traces/interview-harness-2.0.json` 覆盖 13 类场景，Admin replay API 和只读 Shadow Judge 已接入；真实 Provider fixture、CI 门禁和灰度前全量重测仍需补齐 |
+| 完整 Worker 安全边界恢复 | 核心路径已完成 | 已完成数据库租约、心跳、Attempt 复用、事件续写、终态幂等和 ARQ 重新投递；生产故障注入矩阵以及“从最近已完成 Action 跳过并重建全部临时投影”的长期运行验证仍需补测 |
+| Outbox 外部发布与细粒度权限投影 | 基线已落地 | Outbox 与业务事件事务落库；独立 publisher 将用户事件投影到 Redis，SSE 只把 Redis 当唤醒信号并始终从 DB 重放；用户 Artifact API 只返回 `visibility=user`，审计/模型 Artifact 仅供内部 Replay；生产 IAM、保留策略和审计日志仍需补齐 |
+| Harness 2.0 API 兼容切换 | 迁移中 | 新客户端显式发送 `harness_version=2.0` 后走 HTTP 202 + ARQ + Durable SSE；省略版本的旧消息接口继续保留 1.0 inline SSE 和旧 provenance，供历史会话与兼容客户端使用 |
 
-因此，当前版本可以作为 Harness 2.0 P0 的开发基线和本地集成基线；在 Eval/Replay、完整故障矩阵和生产审计权限完成前，不应宣称已经满足全部发布门槛。
+因此，当前版本可以作为 Harness 2.0 P0、Replay/Outbox 和本地集成的开发基线；在真实 Provider Golden Trace 门禁、故障注入矩阵、生产 IAM/保留策略和灰度验证完成前，不应宣称已经满足全部发布门槛。
 
 ## 15. 验收清单
 
 ### Agent
 
-- [ ] 只有一个生产 `interview-agent`。
-- [ ] 调用模式和 payload Schema 固定。
-- [ ] 模型不能控制下一模式、阶段或 Ledger。
-- [ ] PolicyGate、Validator、CommitTurn 边界可审计。
-- [ ] provisional 输出不会冒充正式 Transcript。
+- [x] 只有一个生产 `interview-agent`。
+- [x] 调用模式和 payload Schema 固定。
+- [x] 模型不能控制下一模式、阶段或 Ledger。
+- [x] PolicyGate、Validator、CommitTurn 边界可审计。
+- [x] provisional 输出不会冒充正式 Transcript。
 
 ### Context 与 Cache
 
-- [ ] Stable Prefix、Frozen Turn Base、Call Suffix 三段顺序稳定。
-- [ ] 同一 TurnRun 内旧 ContextBlock 不重排或覆盖。
-- [ ] `stable_prefix_hash` 和 `provider_prompt_cache_key` 身份分离。
-- [ ] Provider fallback 创建新 Attempt。
+- [x] Stable Prefix、Frozen Turn Base、Call Suffix 三段顺序稳定。
+- [x] 同一 TurnRun 内旧 ContextBlock 不重排或覆盖。
+- [x] `stable_prefix_hash` 和 `provider_prompt_cache_key` 身份分离。
+- [x] Provider fallback 创建新 Attempt。
 
 ### 持久化与恢复
 
-- [ ] Event、Action、Attempt、Artifact 追加式保存。
-- [ ] DB、Event、Ledger/Transcript 和 Outbox 事务一致。
-- [ ] Worker 崩溃、ARQ 重试、取消和提交竞态可恢复。
-- [ ] 编辑创建新 revision，不覆盖旧 TurnRun。
+- [x] Event、Action、Attempt、Artifact 追加式保存。
+- [x] DB、Event、Ledger/Transcript 和 Outbox 事务一致。
+- [ ] Worker 崩溃、ARQ 重试、取消和提交竞态已完成生产故障注入矩阵验证。
+- [x] 编辑创建新 revision，不覆盖旧 TurnRun。
 
 ### SSE 与前端
 
-- [ ] SSE 支持 Last-Event-ID、after_sequence 和历史回放。
-- [ ] delta 可去重，乱序可恢复，旧回合不会污染新回合。
-- [ ] 双层运行卡片、Reasoning/Assistant 通道和 CoT 高度限制完成。
-- [ ] 停止、编辑、重连和失败入口符合状态机。
+- [x] SSE 支持 Last-Event-ID、after_sequence 和历史回放。
+- [x] delta 可去重，乱序可恢复，旧回合不会污染新回合。
+- [x] 双层运行卡片、Reasoning/Assistant 通道和 CoT 高度限制完成。
+- [x] 停止、编辑、重连和失败入口符合状态机。
 
 ### Security 与 Eval
 
-- [ ] 不可信输入和 Evidence 来源隔离。
-- [ ] 租户私有上下文不进入全局 Cache。
+- [x] 不可信输入和 Evidence 来源隔离。
+- [x] 租户私有上下文不进入全局 Cache。
 - [ ] Prompt Injection Golden Trace 通过。
-- [ ] 原始响应加密、SSE 前置脱敏和权限隔离完成。
-- [ ] 关键环境变化可触发 Replay 和 Golden Trace 重测。
+- [x] 原始响应加密、SSE 前置脱敏和权限隔离完成（生产密钥、IAM 与保留策略仍需环境验证）。
+- [x] 关键运行身份变化可由 recorded replay 检测（Harness、Prompt/Schema、Skill、Context、Provider/model、sampling、request hash）。
+- [ ] 关键环境变化已接入 CI/发布门禁并完成真实 Provider Golden Trace 重测。
 
 ## 16. 设计冻结规则
 

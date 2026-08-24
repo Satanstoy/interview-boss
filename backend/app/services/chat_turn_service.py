@@ -339,6 +339,23 @@ def reserve_chat_turn(
                     visibility="user",
                     schema_version=1,
                 )
+                _append_turn_event_conn(
+                    conn,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    turn_id=turn_id,
+                    event_id=f"evt:{turn_id}:queued",
+                    event_type="turn.queued",
+                    action_id=None,
+                    phase="observe_propose",
+                    channel="system",
+                    payload={
+                        "queue": "interview-turn",
+                        "dispatch_state": "pending_dispatch",
+                    },
+                    visibility="user",
+                    schema_version=1,
+                )
             conn.execute(
                 "UPDATE chat_conversations SET updated_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND user_id = ? AND status = 'active'",

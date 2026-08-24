@@ -15,7 +15,10 @@ import time
 from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
-from app.agents.chat.harness_contract import build_harness_context_pack
+from app.agents.chat.harness_contract import (
+    build_harness_context_pack,
+    build_harness_context_pack_from_frozen_base,
+)
 from app.agents.chat.harness_agent import run_harness_agent_call
 from app.agents.chat.skill_resolver import resolve_skills
 from app.agents.chat.skills.defaults import get_default_registry
@@ -261,16 +264,20 @@ async def _step_load_context(state: ChatState) -> ChatState:
 
     # Freeze the Turn Base once.  Later Agent calls append a Call Suffix to
     # this same shape; they do not rebuild or reorder the preceding blocks.
-    session = await asyncio.to_thread(
-        chat_service.get_harness_session,
-        state["conversation_id"],
-        user_id=state["user_id"],
-    )
-    ledger = await asyncio.to_thread(
-        chat_service.get_interview_ledger,
-        state["conversation_id"],
-        user_id=state["user_id"],
-    )
+    session = None
+    if state.get("turn_id"):
+        session = await asyncio.to_thread(
+            chat_service.get_harness_session,
+            state["conversation_id"],
+            user_id=state["user_id"],
+        )
+    ledger = None
+    if state.get("turn_id"):
+        ledger = await asyncio.to_thread(
+            chat_service.get_interview_ledger,
+            state["conversation_id"],
+            user_id=state["user_id"],
+        )
     frozen_config = (state.get("turn_base_snapshot") or {}).get("interview_config")
     if isinstance(frozen_config, dict):
         state["interview_config"] = frozen_config
@@ -288,16 +295,45 @@ async def _step_load_context(state: ChatState) -> ChatState:
         harness_version=state.get("harness_version", "2.0"),
     )
     state["resolved_skills"] = [skill.__dict__ for skill in resolved_skills]
-    pack = build_harness_context_pack(
-        state=state,
-        call_mode="observe_propose",
-        action_id=f"{state.get('turn_id') or state['conversation_id']}:observe",
-        call_suffix={"phase": "observe_propose"},
-    )
+    observe_action_id = f"{state.get('turn_id') or state['conversation_id']}:observe"
+    frozen_base = {}
+    if state.get("turn_id"):
+        frozen_base = await asyncio.to_thread(
+            chat_service.get_frozen_turn_context_base,
+            state["turn_id"],
+            user_id=state["user_id"],
+            conversation_id=state["conversation_id"],
+        )
+        latest_pack = await asyncio.to_thread(
+            chat_service.get_latest_harness_context_pack,
+            state["turn_id"],
+            user_id=state["user_id"],
+            conversation_id=state["conversation_id"],
+        )
+        if latest_pack:
+            frozen_base = latest_pack
+    if frozen_base:
+        pack = build_harness_context_pack_from_frozen_base(
+            frozen_base=frozen_base,
+            call_mode="observe_propose",
+            action_id=observe_action_id,
+            call_suffix={"phase": "observe_propose"},
+        )
+    else:
+        pack = build_harness_context_pack(
+            state=state,
+            call_mode="observe_propose",
+            action_id=observe_action_id,
+            call_suffix={"phase": "observe_propose"},
+        )
     state["context_pack"] = pack
     state["stable_prefix_hash"] = pack.stable_prefix_hash
     state["context_pack_hash"] = pack.context_pack_hash
-    if state.get("turn_id") and state.get("turn_fence") is not None:
+    if (
+        state.get("turn_id")
+        and state.get("turn_fence") is not None
+        and not frozen_base
+    ):
         await asyncio.to_thread(
             chat_service.persist_turn_context_snapshot,
             state["turn_id"],
@@ -307,6 +343,32 @@ async def _step_load_context(state: ChatState) -> ChatState:
             context_pack_hash=pack.context_pack_hash,
             stable_prefix_hash=pack.stable_prefix_hash,
             budget_snapshot=state.get("budget_snapshot") or {},
+            context_base_snapshot={
+                "stable_prefix": [item.as_dict() for item in pack.stable_prefix],
+                "turn_base": [item.as_dict() for item in pack.turn_base],
+            },
+            lease_owner=state.get("turn_lease_owner"),
+        )
+        await asyncio.to_thread(
+            chat_service.append_harness_artifact,
+            user_id=state["user_id"],
+            conversation_id=state["conversation_id"],
+            turn_id=state["turn_id"],
+            artifact_type="context_manifest",
+            content={
+                "harness_version": state.get("harness_version", "2.0"),
+                "prompt_schema": "agent-result-v1",
+                "stable_prefix_hash": pack.stable_prefix_hash,
+                "context_pack_hash": pack.context_pack_hash,
+                "skill_hashes": sorted(
+                    str(skill.get("content_hash"))
+                    for skill in state.get("resolved_skills", [])
+                    if isinstance(skill, dict) and skill.get("content_hash")
+                ),
+                "provider": str(state.get("provider") or ""),
+                "model": str(state.get("model") or ""),
+            },
+            visibility="audit",
             lease_owner=state.get("turn_lease_owner"),
         )
 
@@ -351,22 +413,24 @@ async def _step_classify(state: ChatState) -> ChatState:
     # turn. Rule-based parsing is retained inside the classifier only for an
     # LLM-failure fallback, never as the normal first-turn path.
     async def _classify_llm(prompt, **kwargs):
+        request = {"prompt": prompt, **kwargs}
         return await run_harness_agent_call(
             state=state,
             call_mode="observe_propose",
             action_key="classify",
-            request_payload={"prompt": prompt, **kwargs},
-            call=lambda: llm_service._call_llm_with_retry(prompt, **kwargs),
+            request_payload=request,
+            call=lambda: llm_service._call_llm_with_retry(request["prompt"], **kwargs),
             prompt_cache_key="",
         )
 
     async def _control_facts_llm(prompt, **kwargs):
+        request = {"prompt": prompt, **kwargs}
         return await run_harness_agent_call(
             state=state,
             call_mode="observe_propose",
             action_key="control_facts",
-            request_payload={"prompt": prompt, **kwargs},
-            call=lambda: llm_service._call_llm_with_retry(prompt, **kwargs),
+            request_payload=request,
+            call=lambda: llm_service._call_llm_with_retry(request["prompt"], **kwargs),
             prompt_cache_key="",
         )
 
@@ -548,11 +612,13 @@ async def _persist_mcp_session(state: ChatState) -> None:
 async def _load_interview_config(state: ChatState) -> None:
     """Load cross-turn interview config into ChatState."""
 
-    session = await asyncio.to_thread(
-        chat_service.get_harness_session,
-        state["conversation_id"],
-        user_id=state["user_id"],
-    )
+    session = None
+    if state.get("turn_id"):
+        session = await asyncio.to_thread(
+            chat_service.get_harness_session,
+            state["conversation_id"],
+            user_id=state["user_id"],
+        )
     frozen_config = (state.get("turn_base_snapshot") or {}).get("interview_config")
     if isinstance(frozen_config, dict):
         config = frozen_config

@@ -438,6 +438,56 @@ def build_harness_context_pack(
     )
 
 
+def build_harness_context_pack_from_frozen_base(
+    *,
+    frozen_base: Mapping[str, Any],
+    call_mode: str,
+    action_id: str,
+    call_suffix: Mapping[str, Any] | None = None,
+) -> ContextPack:
+    """Rehydrate the immutable prefix/base and append only a new call suffix."""
+    if call_mode not in CALL_MODES:
+        raise ValueError(f"unsupported call_mode: {call_mode}")
+    try:
+        stable = tuple(ContextBlock(**item) for item in frozen_base["stable_prefix"])
+        base = tuple(ContextBlock(**item) for item in frozen_base["turn_base"])
+        prior_suffix = tuple(
+            ContextBlock(**item) for item in frozen_base.get("call_suffix", [])
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid frozen ContextPack base") from exc
+    existing_ids = {item.block_id for item in prior_suffix}
+    additions = []
+    if f"call-mode:{action_id}" not in existing_ids:
+        additions.append(
+            ContextBlock(
+                f"call-mode:{action_id}",
+                "call_mode",
+                "harness",
+                {"call_mode": call_mode},
+                "model",
+                len(prior_suffix) + len(additions),
+            )
+        )
+    if f"action:{action_id}" not in existing_ids:
+        additions.append(
+            ContextBlock(
+                f"action:{action_id}",
+                "action",
+                "harness",
+                _canonicalize(call_suffix or {}),
+                "model",
+                len(prior_suffix) + len(additions),
+            )
+        )
+    suffix = prior_suffix + tuple(additions)
+    return build_context_pack(
+        stable_prefix=stable,
+        turn_base=base,
+        call_suffix=suffix,
+    )
+
+
 __all__ = [
     "AGENT_RESULT_SCHEMA_VERSION",
     "AGENT_RESULT_STATUSES",
@@ -451,6 +501,7 @@ __all__ = [
     "PolicyGateDecision",
     "build_context_pack",
     "build_harness_context_pack",
+    "build_harness_context_pack_from_frozen_base",
     "evaluate_policy_gate",
     "normalize_agent_result",
 ]

@@ -197,6 +197,7 @@ def test_harness_2_turn_is_queued_and_returns_202(client, test_db):
     )
     assert [event["type"] for event in events] == ["turn.started", "turn.queued"]
     assert events[0]["sequence"] == 1
+    assert events[1]["payload"]["dispatch_state"] == "pending_dispatch"
 
     app.dependency_overrides.clear()
 
@@ -232,7 +233,51 @@ def test_harness_2_cancel_is_cooperative_until_worker_finalizes(client, test_db)
     )
     assert [event["type"] for event in events] == [
         "turn.started",
+        "turn.queued",
         "turn.cancel_requested",
     ]
 
+    app.dependency_overrides.clear()
+
+
+def test_user_artifact_projection_never_returns_audit_prompt_or_cot(client, test_db):
+    from app.asgi import app
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 1,
+        "username": "user1",
+        "is_admin": 0,
+    }
+    conversation = client.post(
+        "/api/chat/conversations", json={"mode": "free_practice"}
+    ).json()["data"]
+    turn = chat_service.reserve_chat_turn(
+        conversation["id"], 1, "sse-artifacts", "查看运行轨迹", harness_version="2.0"
+    )
+    chat_service.append_harness_artifact(
+        user_id=1,
+        conversation_id=conversation["id"],
+        turn_id=turn.id,
+        artifact_type="provider_request",
+        content={"prompt": "secret"},
+        visibility="audit",
+    )
+    chat_service.append_harness_artifact(
+        user_id=1,
+        conversation_id=conversation["id"],
+        turn_id=turn.id,
+        artifact_type="user_note",
+        content={"label": "可见步骤"},
+        visibility="user",
+    )
+
+    response = client.get(
+        f"/api/chat/conversations/{conversation['id']}/turns/{turn.id}/artifacts"
+    )
+
+    assert response.status_code == 200
+    artifacts = response.json()["data"]
+    assert [item["artifact_type"] for item in artifacts] == ["user_note"]
+    assert artifacts[0]["content"] == {"label": "可见步骤"}
+    assert "secret" not in response.text
     app.dependency_overrides.clear()

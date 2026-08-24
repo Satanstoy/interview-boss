@@ -787,3 +787,20 @@ def _migration_113_harness_turn_base_snapshot(conn):
         conn.execute(
             "ALTER TABLE chat_turns ADD COLUMN turn_base_snapshot_json TEXT NOT NULL DEFAULT '{}'"
         )
+
+
+def _migration_114_harness_attempt_provenance(conn):
+    """Persist the identities needed to compare a recorded provider call."""
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info('interview_attempts')").fetchall()
+    }
+    additions = {
+        "harness_version": "TEXT NOT NULL DEFAULT '2.0'",
+        "prompt_schema": "TEXT NOT NULL DEFAULT 'agent-result-v1'",
+        "sampling_hash": "TEXT NOT NULL DEFAULT ''",
+        "skill_hashes_json": "TEXT NOT NULL DEFAULT '[]'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE interview_attempts ADD COLUMN {name} {definition}")

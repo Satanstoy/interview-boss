@@ -48,6 +48,7 @@ async def test_harness_worker_projects_events_and_commits_turn(client, test_db):
     )
     assert [event["type"] for event in events] == [
         "turn.started",
+        "turn.queued",
         "reasoning.started",
         "reasoning.delta",
         "reasoning.completed",
@@ -58,7 +59,7 @@ async def test_harness_worker_projects_events_and_commits_turn(client, test_db):
         "commit.completed",
         "turn.completed",
     ]
-    assert [event["sequence"] for event in events] == list(range(1, 11))
+    assert [event["sequence"] for event in events] == list(range(1, 12))
     ledger = chat_service.get_interview_ledger(conversation["id"], user_id=1)
     assert ledger["ledger_version"] == 2
     app.dependency_overrides.clear()

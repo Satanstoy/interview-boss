@@ -62,6 +62,19 @@ async def scheduled_harness_turn_dispatch_task(ctx, limit: int = 20):
     return {"candidates": len(turn_ids), "dispatched": dispatched, "failed": failed}
 
 
+async def scheduled_harness_event_publisher_task(ctx, limit: int = 100):
+    """Publish committed user events; retry state remains in the DB outbox."""
+    from app.services.harness_event_publisher import (
+        publish_harness_event_to_redis,
+        publish_pending_harness_events,
+    )
+
+    return await publish_pending_harness_events(
+        publish=publish_harness_event_to_redis,
+        limit=limit,
+    )
+
+
 def _mark_job_complete(job_id: int, status: str, result: str = None, error: str = None):
     """标记任务完成/失败（jobs.error 列已废弃，错误只写 last_error）"""
     from app.db.connection import get_db_connection

@@ -363,6 +363,33 @@ async def get_turn_status(
     return {"status": "success", "data": turn}
 
 
+@router.get("/conversations/{conversation_id}/turns/{turn_id}/artifacts")
+async def get_turn_artifacts(
+    conversation_id: str,
+    turn_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return only user-visible artifacts; audit/model artifacts stay internal."""
+    turn = await run_db(
+        lambda: chat_service.get_chat_turn(
+            turn_id,
+            conversation_id=conversation_id,
+            user_id=user["id"],
+        )
+    )
+    if not turn:
+        raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+    artifacts = await run_db(
+        lambda: chat_service.list_harness_artifacts(
+            turn_id=turn_id,
+            user_id=user["id"],
+            conversation_id=conversation_id,
+            scope="user",
+        )
+    )
+    return {"status": "success", "data": artifacts}
+
+
 @router.get("/conversations/{conversation_id}/turns/{turn_id}/events")
 async def stream_turn_events(
     conversation_id: str,
@@ -406,44 +433,82 @@ async def stream_turn_events(
                 if resolved is not None:
                     cursor = max(cursor, int(resolved))
         idle_polls = 0
-        while True:
-            events = await run_db(
-                lambda: chat_service.get_turn_events(
-                    turn_id,
-                    user_id=user["id"],
-                    conversation_id=conversation_id,
-                    after_sequence=cursor,
-                )
-            )
-            for event in events:
-                cursor = max(cursor, int(event.get("sequence") or cursor))
-                yield f"id: {event.get('event_id', cursor)}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if not follow:
-                return
+        subscriber = None
+        try:
+            # Redis is only a wake-up signal. The next read always comes from
+            # the DB event stream, so a dropped broker message cannot create
+            # a gap or become a second source of business truth.
+            try:
+                from app.core.cache import get_cache_client
 
-            snapshot = await run_db(
-                lambda: chat_service.get_chat_turn(
-                    turn_id,
-                    conversation_id=conversation_id,
-                    user_id=user["id"],
+                cache = get_cache_client()
+                if cache is not None:
+                    subscriber = cache.pubsub()
+                    await subscriber.subscribe(
+                        f"interview-boss:harness:turn:{turn_id}"
+                    )
+            except Exception:
+                subscriber = None
+
+            while True:
+                events = await run_db(
+                    lambda: chat_service.get_turn_events(
+                        turn_id,
+                        user_id=user["id"],
+                        conversation_id=conversation_id,
+                        after_sequence=cursor,
+                    )
                 )
-            )
-            if not snapshot or snapshot.get("status") in {
-                "completed",
-                "failed",
-                "cancelled",
-                "timed_out",
-                "budget_exhausted",
-            }:
-                return
-            idle_polls += 1
-            if idle_polls >= 120:
-                return
-            if not events:
-                yield ": heartbeat\n\n"
-                await asyncio.sleep(0.5)
-            else:
-                idle_polls = 0
+                for event in events:
+                    cursor = max(cursor, int(event.get("sequence") or cursor))
+                    yield f"id: {event.get('event_id', cursor)}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if not follow:
+                    return
+
+                snapshot = await run_db(
+                    lambda: chat_service.get_chat_turn(
+                        turn_id,
+                        conversation_id=conversation_id,
+                        user_id=user["id"],
+                    )
+                )
+                if not snapshot or snapshot.get("status") in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "timed_out",
+                    "budget_exhausted",
+                }:
+                    return
+                idle_polls += 1
+                if idle_polls >= 120:
+                    return
+                notified = False
+                if not events and subscriber is not None:
+                    try:
+                        message = await subscriber.get_message(
+                            ignore_subscribe_messages=True, timeout=0.5
+                        )
+                        notified = bool(message)
+                    except Exception:
+                        subscriber = None
+                if not events and not notified:
+                    yield ": heartbeat\n\n"
+                    await asyncio.sleep(0.5)
+                elif events or notified:
+                    idle_polls = 0
+        finally:
+            if subscriber is not None:
+                try:
+                    close = getattr(subscriber, "aclose", None) or getattr(
+                        subscriber, "close", None
+                    )
+                    if close is not None:
+                        result = close()
+                        if hasattr(result, "__await__"):
+                            await result
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_stream(),
@@ -583,22 +648,6 @@ async def send_message(
         try:
             job = await enqueue_interview_turn_job(turn.id)
             arq_job_id = getattr(job, "job_id", None)
-            await run_db(
-                lambda: chat_service.append_turn_event(
-                    user_id=user["id"],
-                    conversation_id=conversation_id,
-                    turn_id=turn.id,
-                    event_id=f"evt:{turn.id}:queued",
-                    event_type="turn.queued",
-                    action_id=None,
-                    phase="observe_propose",
-                    channel="system",
-                    payload={
-                        "queue": "interview-turn",
-                        "arq_job_id": str(arq_job_id or ""),
-                    },
-                )
-            )
             return JSONResponse(
                 status_code=202,
                 content={

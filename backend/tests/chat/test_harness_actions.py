@@ -239,5 +239,62 @@ def test_harness_agent_adapter_replays_succeeded_attempt_after_recovery(test_db)
     assert attempt_count == 1
 
 
+def test_harness_agent_request_contains_recorded_call_metadata(test_db):
+    from app.agents.chat.harness_agent import run_harness_agent_call
+    from app.agents.chat.harness_contract import ContextBlock, build_context_pack
+    from app.services.harness_replay_service import list_harness_artifacts
+
+    conversation = chat_service.create_conversation(user_id=1, mode="free_practice")
+    turn = chat_service.reserve_chat_turn(
+        conversation["id"], 1, "harness-agent-context", "请追问缓存设计"
+    )
+    pack = build_context_pack(
+        stable_prefix=[
+            ContextBlock("stable", "system_rules", "harness", {"version": 2}, "model", 0)
+        ],
+        turn_base=[
+            ContextBlock("input", "candidate_input", "user", {"text": "缓存"}, "model", 0)
+        ],
+        call_suffix=[],
+    )
+    state = {
+        "user_id": 1,
+        "conversation_id": conversation["id"],
+        "turn_id": turn.id,
+        "model": "test-model",
+        "context_pack": pack,
+        "harness_version": "2.0",
+    }
+    sent = {}
+
+    async def provider():
+        sent["messages"] = request["messages"]
+        return {"payload": {"action": "ask_followup"}, "status": "completed"}
+
+    request = {"messages": [{"role": "user", "content": "缓存"}]}
+    asyncio.run(
+        run_harness_agent_call(
+            state=state,
+            call_mode="observe_propose",
+            action_key="react:context",
+            request_payload=request,
+            call=provider,
+        )
+    )
+
+    artifacts = list_harness_artifacts(
+        turn_id=turn.id,
+        user_id=1,
+        conversation_id=conversation["id"],
+        scope="audit",
+        audit_authorized=True,
+    )
+    recorded_request = next(
+        item["content"] for item in artifacts if item["artifact_type"] == "provider_request"
+    )
+    assert sent["messages"] == recorded_request["messages"]
+    assert "[Harness Call Metadata]" in sent["messages"][-1]["content"]
+
+
 async def _return_provider_result():
     return {"payload": {"action": "ask_followup"}, "status": "completed"}

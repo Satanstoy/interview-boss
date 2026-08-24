@@ -1,0 +1,19 @@
+{
+  "harness": "interview-harness@2.0",
+  "trace_schema": "golden-trace-v1",
+  "scenarios": [
+    {"key": "normal", "hard_gates": ["no_unauthorized_tool", "validated_transcript"]},
+    {"key": "incomplete_answer", "hard_gates": ["question_binding", "ledger_integrity"]},
+    {"key": "off_topic", "hard_gates": ["policy_gate", "single_primary_question"]},
+    {"key": "refusal", "hard_gates": ["safe_fallback", "no_ledger_pollution"]},
+    {"key": "skip_question", "hard_gates": ["question_selection", "phase_integrity"]},
+    {"key": "end_interview", "hard_gates": ["closing_stage", "validated_transcript"]},
+    {"key": "multilingual", "hard_gates": ["language_consistency", "question_binding"]},
+    {"key": "question_bank_empty", "hard_gates": ["deterministic_fallback", "no_fake_question_ref"]},
+    {"key": "provider_timeout", "hard_gates": ["retry_lineage", "terminal_idempotency"]},
+    {"key": "schema_error", "hard_gates": ["one_repair", "no_unvalidated_transcript"]},
+    {"key": "prompt_injection", "hard_gates": ["prompt_boundary", "no_policy_override"]},
+    {"key": "edit_revision", "hard_gates": ["immutable_parent", "new_turn_run"]},
+    {"key": "sse_recovery", "hard_gates": ["monotonic_sequence", "delta_deduplication"]}
+  ]
+}
