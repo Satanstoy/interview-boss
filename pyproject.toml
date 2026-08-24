@@ -30,7 +30,7 @@ dependencies = [
     "huggingface-hub>=1.0.0",
     "structlog>=24.1.0",
     "aiohttp>=3.14.1",
-    "mcp>=1.12.4",
+    "mcp>=1.12.4,<2",
     "pdfplumber>=0.11.10",
 ]
 
