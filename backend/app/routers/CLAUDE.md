@@ -29,6 +29,7 @@
 | `interview_distribution.py` | `/api/interview/distribution/*` | 模拟面试题型的系统默认分布与用户岗位偏好 |
 | `admin_evaluation.py` | `/api/admin/evals/*` | 评测控制面（admin-only）：capabilities / releases / benchmarks / runs（创建、列表、详情、cancel）、`runs/{id}/items/{item_id}`（兼容旧取证接口）、`runs/{id}/items/{item_id}/evidence`（版本化 Case Evidence View：冻结输入、Harness/Target 结果、指标、尝试与文件证据）、`retry-failed`（支持 created 孤儿重投，**每次入队必须传唯一 job id**，enqueue 返回 None 时不标记 queued）、`runs/{id}/events` SSE、experiments（创建/列表/详情/cancel/events SSE；`_refresh_experiment` 只在状态或进度实际变化时写库，避免 GET/SSE 读路径每次轮询写库） |
 | `health.py` | `/api/health` | 健康检查 |
+| `public_contributions.py` | `/api/public-contributions/*`, `/api/admin/public-contributions/*` | 私有 JD/面经公共化申请：用户侧 create/mine/详情/withdraw（属主校验），管理员侧 list/详情/approve/reject。approve 必须走 `services.public_contributions.finalize_public_contribution_approval` 统一入口（落库 + 聚类攒批调度），**禁止在路由层导入 pipeline 调度函数** |
 
 ## 子路由包
 

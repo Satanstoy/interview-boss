@@ -54,6 +54,7 @@
 | `job_position_service.py` | 岗位标准化与别名解析：复用 `interview_distribution_config.JOB_FAMILY_BY_POSITION` 的岗位族映射，提供精确的岗位发现、canonical name 解析和别名归一（连续空格/首尾空格/英文大小写/斜杠空格归一化）；未知岗位返回 `UNKNOWN_JOB_POSITION` | `core/interview_distribution_config` |
 | `llm_judge.py` | LLM 结构化判断统一工具（聚类验证层与检索 rerank 共用）：`parse_json_object()` / `parse_json_array()` 容错提取 JSON（容忍 markdown 代码块/前后文字/对象包裹），整体解析失败时逐个提取对象/数组元素 | — |
 | `mcp_token_service.py` | 账户级 MCP Token 生命周期：`generate_mcp_token()` 生成 opaque token（HMAC-SHA256 派生）、`validate_mcp_token()` 验证、`revoke_mcp_token()` 吊销；Token 与账户一一对应，轮换后旧 Token 立即失效 | `core/auth`, `db/connection` |
+| `public_contributions.py` | 私有 JD/面经公共化申请工作流：`create_public_contribution_request`（快照按 `owner_id = requester` 限定，不可变快照为审核对象）、`finalize_public_contribution_approval`（**审批统一入口**：落库 + 进入聚类队列时调度后台攒批，路由层不接触 pipeline）、`approve/reject/withdraw`、`_event` 审计事件只追加。**公开物化走字段白名单**（interview 与 jd 同口径，私有快照的非白名单列含未来新增列一律不外泄，audit D5）；公共投影按 URL 去重，`owner_id=NULL + status='approved'` | `db/connection`, `pipeline/queue`, `db/utils` |
 
 ## 核心规则
 
