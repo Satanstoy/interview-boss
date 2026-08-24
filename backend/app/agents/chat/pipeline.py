@@ -15,6 +15,9 @@ import time
 from typing import AsyncGenerator
 
 from app.agents.chat.context_builder import build_interview_context
+from app.agents.chat.harness_contract import build_harness_context_pack
+from app.agents.chat.skill_resolver import resolve_skills
+from app.agents.chat.skills.defaults import get_default_registry
 from app.agents.chat.nodes import (
     _repair_response_to_question_plan,  # noqa: F401 - compatibility re-export
     check_round_limit,
@@ -159,6 +162,10 @@ def _initial_state(
         "user_message": user_message,
         "turn_id": turn_id,
         "turn_fence": turn_fence,
+        "harness_version": "2.0",
+        "context_pack": None,
+        "context_pack_hash": "",
+        "resolved_skills": [],
         "mode": mode,
         "jd_id": jd_id,
         "jd_text": jd_text,
@@ -243,6 +250,51 @@ async def _step_load_context(state: ChatState) -> ChatState:
     # 上下文压缩
     result = await summarize_context(state)
     state.update(result)
+
+    # Freeze the Turn Base once.  Later Agent calls append a Call Suffix to
+    # this same shape; they do not rebuild or reorder the preceding blocks.
+    session = await asyncio.to_thread(
+        chat_service.get_harness_session,
+        state["conversation_id"],
+        user_id=state["user_id"],
+    )
+    ledger = await asyncio.to_thread(
+        chat_service.get_interview_ledger,
+        state["conversation_id"],
+        user_id=state["user_id"],
+    )
+    if session:
+        state["harness_version"] = session.get("harness_version") or "2.0"
+        explicit_config = session.get("interview_config")
+        if isinstance(explicit_config, dict) and explicit_config:
+            state["interview_config"] = explicit_config
+    if ledger:
+        state["ledger_version"] = int(ledger.get("ledger_version") or 1)
+        state["interview_state"] = dict(ledger)
+    resolved_skills = resolve_skills(
+        get_default_registry(),
+        state,
+        harness_version=state.get("harness_version", "2.0"),
+    )
+    state["resolved_skills"] = [skill.__dict__ for skill in resolved_skills]
+    pack = build_harness_context_pack(
+        state=state,
+        call_mode="observe_propose",
+        action_id=f"{state.get('turn_id') or state['conversation_id']}:observe",
+        call_suffix={"phase": "observe_propose"},
+    )
+    state["context_pack"] = pack
+    state["context_pack_hash"] = pack.stable_prefix_hash
+    if state.get("turn_id") and state.get("turn_fence") is not None:
+        await asyncio.to_thread(
+            chat_service.persist_turn_context_snapshot,
+            state["turn_id"],
+            int(state["turn_fence"]),
+            state["conversation_id"],
+            state["user_id"],
+            context_pack_hash=pack.stable_prefix_hash,
+            budget_snapshot=state.get("budget_snapshot") or {},
+        )
 
     # An incomplete frozen distribution plan has its own finite question target
     # and is measured from persisted events, not the 100-message LLM context.
@@ -460,13 +512,25 @@ async def _persist_mcp_session(state: ChatState) -> None:
 async def _load_interview_config(state: ChatState) -> None:
     """Load cross-turn interview config into ChatState."""
 
-    metadata = await asyncio.to_thread(
-        chat_service.get_conversation_metadata,
+    session = await asyncio.to_thread(
+        chat_service.get_harness_session,
         state["conversation_id"],
+        user_id=state["user_id"],
     )
-    config = metadata.get("interview_config") if isinstance(metadata, dict) else {}
-    if not isinstance(config, dict):
+    if session and isinstance(session.get("interview_config"), dict):
+        config = session["interview_config"]
+        state["harness_version"] = session.get("harness_version") or "2.0"
+    else:
         config = {}
+
+    if not config:
+        metadata = await asyncio.to_thread(
+            chat_service.get_conversation_metadata,
+            state["conversation_id"],
+        )
+        config = metadata.get("interview_config") if isinstance(metadata, dict) else {}
+        if not isinstance(config, dict):
+            config = {}
     state["interview_config"] = config
     state["interview_profile"] = config.get("interview_profile")
     state["difficulty"] = config.get("difficulty") or state.get("difficulty") or "mid"

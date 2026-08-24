@@ -17,7 +17,7 @@
 | `analytics.py` | `/api/analytics/*` | 数据分析 |
 | `insights.py` | `/api/insights` | 洞察工作台聚合快照 |
 | `profile.py` | `/api/profile/*` | 用户配置（公共+管理员）。`active-season` 为全局配置仅 admin 可写（user_profile 是全局单例）。`/api/profile/recruitment`（GET/PUT，任意登录用户）读写 per-user `user_recruitment_pref`（届次+批次+每日容量+pace 节奏），返回全年机会窗口、当前/下一窗口与紧迫度（机会脉冲模型），供刷题「今日复习」调度与前端状态行使用 |
-| `chat.py` | `/api/chat/*` | Chatbot 对话（SSE 流式、turn status、assistant regenerate） |
+| `chat.py` | `/api/chat/*` | Chatbot 对话（兼容 SSE 流式、canonical Harness 2.0 turn event replay、turn status、assistant regenerate） |
 | `bank_build.py` | `/api/bank-build/*` | 题库构建（Agent）。`build-personal` 合并：管理员可并入公共题（现有行为），非管理员只落个人题（个人题吸收公共题来源，公共题数据绝不改动，防审核旁路） |
 | `admin_quality.py` | `/api/admin/quality-issues/*` | 聚合质量审查清单生成与审批（`generate-all` 创建持久化后台任务，全量扫描公共题库误合并/漏合并；`generate-unmerged` 保留为单独即时入口；列表/单条 approve·reject/batch-approve）。业务逻辑在 `app.services.job_lifecycle` / `app.services.quality_issue_ops` / `app.services.unmerged_quality`，本路由只做 HTTP 感知 |
 | `admin_assistant.py` | `/api/admin/assistant/*` | 管理员 AI 助手（聚合质量审查）：`POST /chat`（LLM tool-calling，读工具即时执行，写工具只暂存为待确认）、`POST /confirm`（确认并执行写操作，重新校验 + reviewed_by 留痕）、`GET /history`（会话日志）。全部 `Depends(get_admin_user)`；工具 schema 只在后端，前端从不持有 |
@@ -46,6 +46,7 @@
 - **Chat 回合生命周期**：`chat.py` 发送消息必须先通过 `reserve_chat_turn` 原子占用回合并写入用户消息；流式完成必须通过 `turn_id + fence + user_id` finalize，取消必须调用幂等 cancel 端点，不能退回无回合约束的消息写入。
 - **Chat 重试与 revision**：发送请求应携带稳定 `client_request_id`；`GET /conversations/{id}/turns/{turn_id}` 只返回当前用户的 turn snapshot。regenerate 只能通过 assistant revision endpoint，不能把原 user message 截断后再次插入。
 - **Chat SSE 元数据**：`chat.py` 用 `_metadata_events_from_done()` 将 agent 的 done metadata 拆成公开事件（如 `selected_question`、`question_plan`、`basis`），避免直接暴露完整内部 metadata；`question_plan` 必须显式白名单输出字段，禁止透传内部 plan
+- **Harness 2.0 事件流**：消息 SSE 在向客户端 yield 前先追加 `interview_events`/Outbox；`GET /conversations/{id}/turns/{turn_id}/events?after_sequence=n&follow=false|true` 按数据库 sequence 重放 canonical Envelope，断线不能依赖旧连接内存
 - **岗位隔离**：列表、统计、练习进度、导入写入等用户可见数据必须通过 `get_user_job_position(user['id'])` 获取当前岗位；不要直接用全局 `get_current_job_position()` 作为用户视图过滤或写入依据。
 - **新路由注册**：在 `asgi.py` 中 `app.include_router(router)`
 - **面经分布事实**：修改 `questions_detail` 的文本或分类、重处理面经、删除/恢复公共面经时，必须复用 `db.operations` 的事实同步/刷新标记辅助函数；不能只更新题库代表题。

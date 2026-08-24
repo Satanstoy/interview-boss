@@ -26,7 +26,9 @@
 | `chat_message_service.py` | 消息写入（active 校验）/读取/分布事件/关联题目 id | `chat_common` |
 | `chat_memory_service.py` | 用户长期记忆：memory、主题记忆、简历记忆 | `chat_common` |
 | `chat_session_service.py` | session notes、刷盘触发、跨会话召回与格式化 | `chat_common`, `chat_memory_service` |
-| `chat_durable_service.py` | durable side-effect job、记忆抽取 job、CandidateSet、interview event/generation read model | `chat_common` |
+| `chat_durable_service.py` | durable side-effect job、记忆抽取 job、CandidateSet、legacy interview event/generation read model | `chat_common` |
+| `chat_event_service.py` | Harness 2.0 append-only turn event、sequence replay、event idempotency 和 transactional outbox 写入 | `db/connection` |
+| `harness_state_service.py` | Harness 2.0 Ledger bootstrap、Action 幂等、Attempt 重试链和不可变 Artifact 写入 | `db/connection`, `chat_common` |
 | `worker.py`（`app/worker.py`） | ARQ worker：任务执行 + 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |

@@ -21,7 +21,7 @@ SQLite 数据库层，线程安全，WAL 模式。
 | `question_bank_sources.py` | 题库来源表 CRUD + dual-write 工具 |
 | `utils.py` | DB 层工具函数（migration 辅助、SQL helpers） |
 | `migrations/interview_distribution.py` | 面经题目关联/题型事实、分布统计与用户偏好表的 migration 042 |
-| `migrations/chat.py` | Chat 会话、消息、工具 trace、asked question、turn fence、durable side effects 和 structured turn 的 migrations 024-046 |
+| `migrations/chat.py` | Chat 会话、消息、工具 trace、asked question、turn fence、durable side effects、structured turn 和 Harness 2.0 event/outbox/core state 的 migrations 024-046、110-111 |
 | `migrations/practice.py` | 刷题题单、用户题目复习状态和复习事件的 migration 055 |
 | `migrations/practice_decks.py` | 自定义题单所有者、可见性与题单题目关联的 migration 056 |
 | `migrations/practice_idempotency.py` | 复习提交幂等键 migration 088：`practice_review_events` 增加可选 `idempotency_key` 列 + `(user_id, question_bank_id, idempotency_key)` 部分唯一索引（WHERE idempotency_key IS NOT NULL），DB 层兜底防重发双写 |

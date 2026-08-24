@@ -19,6 +19,7 @@ from app.services.chat_common import (
     _safe_json_loads,
 )
 from app.services.chat_message_service import get_distribution_events
+from app.services.harness_state_service import ensure_interview_ledger_conn
 
 logger = logging.getLogger("interview-boss")
 
@@ -140,8 +141,9 @@ def create_conversation(
     with get_db_connection() as conn:
         cursor = conn.execute(
             "INSERT OR IGNORE INTO chat_conversations "
-            "(id, user_id, mode, title, jd_id, resume_text, job_position, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, user_id, mode, title, jd_id, resume_text, job_position, metadata, "
+            "harness_version, session_version, interview_config_json, provider_policy_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2.0', 1, ?, '{}')",
             (
                 conv_id,
                 user_id,
@@ -151,6 +153,7 @@ def create_conversation(
                 resume_text,
                 job_position,
                 json.dumps(metadata, ensure_ascii=False),
+                json.dumps(interview_config, ensure_ascii=False, sort_keys=True),
             ),
         )
         if cursor.rowcount == 0:
@@ -161,6 +164,9 @@ def create_conversation(
             ).fetchone()
             if not existing:
                 raise ConversationNotFound("conversation not found after idempotent create")
+            ensure_interview_ledger_conn(
+                conn, user_id=user_id, conversation_id=existing["id"]
+            )
             first_message_row = conn.execute(
                 "SELECT id FROM chat_messages WHERE conversation_id = ? "
                 "AND role = 'user' ORDER BY id ASC LIMIT 1",
@@ -176,6 +182,10 @@ def create_conversation(
                 "metadata": _safe_json_loads(existing["metadata"]),
                 "first_message_id": first_message_id,
             }
+
+        ensure_interview_ledger_conn(
+            conn, user_id=user_id, conversation_id=conv_id
+        )
 
         if first_message:
             message_cursor = conn.execute(
@@ -411,5 +421,3 @@ def get_conversation_metadata_snapshot(conversation_id: str) -> dict:
 # ═══════════════════════════════════════════════════
 #  消息管理
 # ═══════════════════════════════════════════════════
-
-

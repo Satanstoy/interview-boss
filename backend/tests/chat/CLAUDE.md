@@ -28,6 +28,12 @@ Chatbot 功能测试：agent 流程、记忆、预算、路由。
 | `test_interview_agent_real_e2e_verifier.py` | 真实多轮模拟面试 verifier 的 opt-in guard、候选人 profile、SSE 轮次解析和质量判定 |
 | `test_interview_distribution_plan.py` | 分布计划快照、整数目标分配和事件派生执行状态；包含 50 题计划不受 100 条 chat 上下文窗口截断的回归 |
 | `test_interview_distribution_e2e.py` / `test_interview_distribution_e2e_verifier.py` | 题库事实到统计、计划、控制器事件的确定性对齐、显式“下一道技术题”继续/否定指令、HR 独立词边界、50 题计划越过通用上下文与 stop/候选人反问收尾阈值，以及真实 verifier 的 opt-in guard |
+| `test_harness_events.py` | Harness 2.0 append-only event sequence、幂等和 Outbox |
+| `test_harness_contract.py` | Harness 2.0 三段式 `ContextPack`、稳定 hash、调用模式和生命周期状态合同 |
+| `test_harness_state.py` | Harness 2.0 Session/Ledger/TurnRun 字段、版本快照、revision 关系和迁移回填 |
+| `test_harness_actions.py` | Action 幂等、Attempt 追加式重试和 Artifact 可恢复保存 |
+| `test_harness_broker_skills.py` | QuestionBroker 权威题卡和 Harness 兼容 SkillResolver |
+| `test_harness_sse.py` | canonical SSE Envelope、断线 after-sequence 重放和消息流生命周期事件 |
 
 ## 运行
 

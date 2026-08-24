@@ -446,3 +446,322 @@ def _migration_046_structured_turns(conn):
         "CREATE INDEX IF NOT EXISTS idx_assistant_generations_visible "
         "ON assistant_generations(conversation_id, visible, created_at)"
     )
+
+
+def _migration_110_harness_event_stream(conn):
+    """Upgrade interview events to the Harness 2.0 append-only event contract."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('interview_events')").fetchall()
+    }
+    additions = {
+        "event_id": "TEXT",
+        "sequence": "INTEGER",
+        "action_id": "TEXT",
+        "phase": "TEXT",
+        "channel": "TEXT NOT NULL DEFAULT 'system'",
+        "visibility": "TEXT NOT NULL DEFAULT 'user'",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE interview_events ADD COLUMN {name} {definition}")
+
+    rows = conn.execute(
+        "SELECT id, turn_id, event_id, sequence FROM interview_events "
+        "ORDER BY turn_id, id"
+    ).fetchall()
+    next_sequence: dict[str, int] = {}
+    for row in rows:
+        turn_id = str(row["turn_id"])
+        sequence = row["sequence"]
+        if sequence is None:
+            sequence = next_sequence.get(turn_id, 0) + 1
+        next_sequence[turn_id] = max(next_sequence.get(turn_id, 0), int(sequence))
+        event_id = row["event_id"] or f"legacy-event-{row['id']}"
+        conn.execute(
+            "UPDATE interview_events SET event_id = ?, sequence = ? WHERE id = ?",
+            (event_id, int(sequence), row["id"]),
+        )
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_events_turn_event_id "
+        "ON interview_events(turn_id, event_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_events_turn_sequence "
+        "ON interview_events(turn_id, sequence)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_events_turn_channel "
+        "ON interview_events(turn_id, channel, sequence)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_event_outbox (
+            event_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'published', 'failed')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            locked_at TIMESTAMP,
+            published_at TIMESTAMP,
+            last_error TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(turn_id, sequence),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES chat_turns(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_event_outbox_ready "
+        "ON interview_event_outbox(status, available_at, created_at)"
+    )
+
+
+def _migration_111_harness_core_state(conn):
+    """Add durable Harness 2.0 Session/Ledger/TurnRun support state."""
+    conversation_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info('chat_conversations')").fetchall()
+    }
+    conversation_additions = {
+        "harness_version": "TEXT NOT NULL DEFAULT '2.0'",
+        "session_version": "INTEGER NOT NULL DEFAULT 1",
+        "interview_config_json": "TEXT NOT NULL DEFAULT '{}'",
+        "language": "TEXT NOT NULL DEFAULT 'zh-CN'",
+        "question_strategy": "TEXT NOT NULL DEFAULT 'balanced'",
+        "provider_policy_json": "TEXT NOT NULL DEFAULT '{}'",
+    }
+    for name, definition in conversation_additions.items():
+        if name not in conversation_columns:
+            conn.execute(
+                f"ALTER TABLE chat_conversations ADD COLUMN {name} {definition}"
+            )
+
+    # The existing metadata field already contains the interview config for
+    # historical sessions.  Copy it once into the stable Session snapshot;
+    # later writes use the explicit column and version it independently.
+    conn.execute(
+        """
+        UPDATE chat_conversations
+        SET interview_config_json = COALESCE(
+            NULLIF(json_extract(metadata, '$.interview_config'), 'null'),
+            '{}'
+        )
+        WHERE interview_config_json = '{}'
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_ledgers (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL UNIQUE,
+            ledger_version INTEGER NOT NULL DEFAULT 1,
+            asked_question_refs_json TEXT NOT NULL DEFAULT '[]',
+            coverage_events_json TEXT NOT NULL DEFAULT '[]',
+            covered_dimensions_json TEXT NOT NULL DEFAULT '{}',
+            current_topic TEXT NOT NULL DEFAULT '',
+            current_phase TEXT NOT NULL DEFAULT 'opening',
+            depth INTEGER NOT NULL DEFAULT 0,
+            closing_stage TEXT NOT NULL DEFAULT 'technical',
+            counter_question_status TEXT NOT NULL DEFAULT 'not_started',
+            recent_rhythm_signals_json TEXT NOT NULL DEFAULT '[]',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_ledgers_owner "
+        "ON interview_ledgers(user_id, conversation_id, ledger_version)"
+    )
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO interview_ledgers (id, user_id, conversation_id)
+        SELECT 'ledger:' || id, user_id, id FROM chat_conversations
+        """
+    )
+
+    turn_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('chat_turns')").fetchall()
+    }
+    turn_additions = {
+        "harness_status": (
+            "TEXT NOT NULL DEFAULT 'running' CHECK (harness_status IN "
+            "('running', 'completed', 'failed', 'cancelled', 'timed_out', 'budget_exhausted'))"
+        ),
+        "terminal_reason": "TEXT",
+        "session_version": "INTEGER NOT NULL DEFAULT 1",
+        "ledger_version_at_start": "INTEGER NOT NULL DEFAULT 1",
+        "turn_run_version": "INTEGER NOT NULL DEFAULT 1",
+        "current_action_id": "TEXT",
+        "current_attempt_no": "INTEGER NOT NULL DEFAULT 0",
+        "latest_sequence": "INTEGER NOT NULL DEFAULT 0",
+        "budget_snapshot_json": "TEXT NOT NULL DEFAULT '{}'",
+        "context_pack_hash": "TEXT NOT NULL DEFAULT ''",
+        "started_at": "TIMESTAMP",
+        "revision_of_turn_id": "TEXT",
+        "lease_owner": "TEXT",
+        "lease_expires_at": "TIMESTAMP",
+        "heartbeat_at": "TIMESTAMP",
+    }
+    for name, definition in turn_additions.items():
+        if name not in turn_columns:
+            conn.execute(f"ALTER TABLE chat_turns ADD COLUMN {name} {definition}")
+
+    conn.execute(
+        """
+        UPDATE chat_turns
+        SET harness_status = CASE status
+            WHEN 'completed' THEN 'completed'
+            WHEN 'failed' THEN 'failed'
+            WHEN 'cancelled' THEN 'cancelled'
+            ELSE 'running'
+        END,
+        started_at = COALESCE(started_at, created_at),
+        session_version = COALESCE(
+            (SELECT c.session_version FROM chat_conversations c
+             WHERE c.id = chat_turns.conversation_id), 1
+        ),
+        ledger_version_at_start = COALESCE(
+            (SELECT l.ledger_version FROM interview_ledgers l
+             WHERE l.conversation_id = chat_turns.conversation_id), 1
+        )
+        """
+    )
+    conn.execute(
+        """
+        UPDATE chat_turns
+        SET revision_of_turn_id = (
+            SELECT parent.id FROM chat_turns parent
+            WHERE parent.assistant_message_id = chat_turns.revision_of_message_id
+            LIMIT 1
+        )
+        WHERE revision_of_message_id IS NOT NULL
+          AND revision_of_turn_id IS NULL
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_turn_harness_status "
+        "ON chat_turns(conversation_id, harness_status, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_turn_revision_of_turn "
+        "ON chat_turns(revision_of_turn_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chat_turn_recovery "
+        "ON chat_turns(harness_status, lease_expires_at, heartbeat_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_actions (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            action_key TEXT NOT NULL,
+            action_type TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN (
+                    'pending', 'started', 'streaming', 'waiting', 'completed',
+                    'failed', 'cancel_requested', 'cancelled'
+                )),
+            current_attempt_no INTEGER NOT NULL DEFAULT 0,
+            input_json TEXT NOT NULL DEFAULT '{}',
+            output_json TEXT NOT NULL DEFAULT '{}',
+            error_code TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP,
+            UNIQUE(turn_id, action_key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES chat_turns(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_actions_turn "
+        "ON interview_actions(turn_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_actions_recovery "
+        "ON interview_actions(status, created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_attempts (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            action_id TEXT NOT NULL,
+            attempt_no INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'succeeded', 'failed', 'superseded')),
+            call_mode TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            context_pack_hash TEXT NOT NULL DEFAULT '',
+            prompt_cache_key TEXT NOT NULL DEFAULT '',
+            request_hash TEXT NOT NULL DEFAULT '',
+            error_code TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP,
+            UNIQUE(action_id, attempt_no),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES chat_turns(id) ON DELETE CASCADE,
+            FOREIGN KEY (action_id) REFERENCES interview_actions(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_attempts_turn "
+        "ON interview_attempts(turn_id, created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_artifacts (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            action_id TEXT,
+            attempt_id TEXT,
+            artifact_type TEXT NOT NULL,
+            visibility TEXT NOT NULL DEFAULT 'audit'
+                CHECK (visibility IN ('user', 'audit', 'model')),
+            content_json TEXT NOT NULL,
+            content_hash TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (turn_id) REFERENCES chat_turns(id) ON DELETE CASCADE,
+            FOREIGN KEY (action_id) REFERENCES interview_actions(id) ON DELETE SET NULL,
+            FOREIGN KEY (attempt_id) REFERENCES interview_attempts(id) ON DELETE SET NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_artifacts_turn "
+        "ON interview_artifacts(turn_id, created_at)"
+    )

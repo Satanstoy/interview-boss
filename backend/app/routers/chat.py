@@ -318,6 +318,81 @@ async def get_turn_status(
     return {"status": "success", "data": turn}
 
 
+@router.get("/conversations/{conversation_id}/turns/{turn_id}/events")
+async def stream_turn_events(
+    conversation_id: str,
+    turn_id: str,
+    after_sequence: int = 0,
+    follow: bool = False,
+    user: dict = Depends(get_current_user),
+):
+    """Replay canonical turn events and optionally follow until terminal state.
+
+    The database sequence is authoritative.  A reconnect starts at
+    ``after_sequence`` (or the HTTP ``Last-Event-ID`` equivalent supplied by
+    the client) and never relies on the previous HTTP connection remaining
+    alive.
+    """
+    turn = await run_db(
+        lambda: chat_service.get_chat_turn(
+            turn_id,
+            conversation_id=conversation_id,
+            user_id=user["id"],
+        )
+    )
+    if not turn:
+        raise HTTPException(status_code=404, detail="TURN_NOT_FOUND")
+
+    async def event_stream():
+        cursor = max(0, int(after_sequence))
+        idle_polls = 0
+        while True:
+            events = await run_db(
+                lambda: chat_service.get_turn_events(
+                    turn_id,
+                    user_id=user["id"],
+                    conversation_id=conversation_id,
+                    after_sequence=cursor,
+                )
+            )
+            for event in events:
+                cursor = max(cursor, int(event.get("sequence") or cursor))
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if not follow:
+                return
+
+            snapshot = await run_db(
+                lambda: chat_service.get_chat_turn(
+                    turn_id,
+                    conversation_id=conversation_id,
+                    user_id=user["id"],
+                )
+            )
+            if not snapshot or snapshot.get("status") in {
+                "completed",
+                "failed",
+                "cancelled",
+            }:
+                return
+            idle_polls += 1
+            if idle_polls >= 120:
+                return
+            if not events:
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(0.5)
+            else:
+                idle_polls = 0
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(
     conversation_id: str,
@@ -453,7 +528,43 @@ async def send_message(
     async def event_stream():
         """SSE 流式输出 AI 回复"""
         full_response = ""
+        event_index = 0
+
+        async def persist_event(
+            event_type: str,
+            *,
+            channel: str = "system",
+            phase: str = "",
+            payload: Optional[dict] = None,
+            action_id: Optional[str] = None,
+        ) -> dict:
+            """Persist before yielding so a reconnect can replay this event."""
+            nonlocal event_index
+            current_index = event_index
+            event_index += 1
+            return await run_db(
+                lambda: chat_service.append_turn_event(
+                    user_id=user["id"],
+                    conversation_id=conversation_id,
+                    turn_id=turn.id,
+                    event_id=f"evt:{turn.id}:{current_index}",
+                    event_type=event_type,
+                    action_id=action_id,
+                    phase=phase,
+                    channel=channel,
+                    payload=payload or {},
+                )
+            )
+
         try:
+            await persist_event(
+                "turn.started",
+                phase="observe_propose",
+                payload={
+                    "client_request_id": turn.client_request_id,
+                    "session_id": conversation_id,
+                },
+            )
             yield f"data: {json.dumps({'type': 'turn_started', 'turn_id': turn.id, 'fence': turn.fence, 'client_request_id': turn.client_request_id}, ensure_ascii=False)}\n\n"
 
             # 导入 chat agent
@@ -496,9 +607,22 @@ async def send_message(
                         step_data["insight"] = event["insight"]
                     if event.get("skill_name"):
                         step_data["skill_name"] = event["skill_name"]
+                    await persist_event(
+                        "action.updated",
+                        phase=str(event.get("phase") or "observe_propose"),
+                        action_id=event.get("action_id"),
+                        payload=step_data,
+                    )
                     yield f"data: {json.dumps(step_data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "tool_step":
+                    await persist_event(
+                        "action.updated",
+                        channel="evidence",
+                        phase=str(event.get("phase") or "observe_propose"),
+                        action_id=event.get("action_id"),
+                        payload=event,
+                    )
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 elif event_type == "chunk":
@@ -508,25 +632,71 @@ async def send_message(
                     if event.get("replace"):
                         full_response = content
                         payload["replace"] = True
+                    await persist_event(
+                        "assistant.delta",
+                        channel="assistant",
+                        phase="write_response",
+                        action_id=event.get("action_id"),
+                        payload={**payload, "delta_index": event_index},
+                    )
                     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "thinking_start":
+                    await persist_event(
+                        "reasoning.started",
+                        channel="reasoning",
+                        phase="observe_propose",
+                        payload={"content": ""},
+                    )
                     yield f"data: {json.dumps({'type': 'thinking_start', 'content': ''}, ensure_ascii=False)}\n\n"
 
                 elif event_type == "thinking":
+                    await persist_event(
+                        "reasoning.delta",
+                        channel="reasoning",
+                        phase="observe_propose",
+                        payload={"content": event.get("content", ""), "delta_index": event_index},
+                    )
                     yield f"data: {json.dumps({'type': 'thinking', 'content': event.get('content', '')}, ensure_ascii=False)}\n\n"
 
                 elif event_type == "thinking_done":
+                    await persist_event(
+                        "reasoning.completed",
+                        channel="reasoning",
+                        phase="observe_propose",
+                        payload={
+                            "duration": event.get("duration", 0),
+                            "content": event.get("content", ""),
+                        },
+                    )
                     yield f"data: {json.dumps({'type': 'thinking_done', 'duration': event.get('duration', 0), 'content': event.get('content', '')}, ensure_ascii=False)}\n\n"
 
                 elif event_type == "retrieved":
+                    await persist_event(
+                        "evidence.appended",
+                        channel="evidence",
+                        phase="observe_propose",
+                        payload={"questions": event.get("questions", [])},
+                    )
                     yield f"data: {json.dumps({'type': 'retrieved', 'questions': event.get('questions', [])}, ensure_ascii=False)}\n\n"
 
                 elif event_type == "insight":
+                    await persist_event(
+                        "reasoning.insight",
+                        channel="reasoning",
+                        phase="observe_propose",
+                        payload=event,
+                    )
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 elif event_type == "done":
                     meta = event.get("metadata", {})
+
+                    await persist_event(
+                        "commit.started",
+                        phase="commit",
+                        payload={"has_response": bool(full_response)},
+                    )
 
                     import re as _re
 
@@ -563,8 +733,30 @@ async def send_message(
                             )
                         )
                     except chat_service.TurnCancelled:
+                        await persist_event(
+                            "turn.cancelled",
+                            phase="commit",
+                            payload={"reason": "client_stop"},
+                        )
                         yield f"data: {json.dumps({'type': 'cancelled', 'turn_id': turn.id}, ensure_ascii=False)}\n\n"
                         return
+
+                    await persist_event(
+                        "assistant.completed",
+                        channel="assistant",
+                        phase="write_response",
+                        payload={"content": clean_for_persist or full_response},
+                    )
+                    await persist_event(
+                        "commit.completed",
+                        phase="commit",
+                        payload={"status": "committed"},
+                    )
+                    await persist_event(
+                        "turn.completed",
+                        phase="commit",
+                        payload={"status": "completed"},
+                    )
 
                     for metadata_event in _metadata_events_from_done(meta):
                         yield f"data: {json.dumps(metadata_event, ensure_ascii=False)}\n\n"
@@ -602,6 +794,11 @@ async def send_message(
                             event.get("code") or "PIPELINE_ERROR",
                         )
                     )
+                    await persist_event(
+                        "turn.failed",
+                        phase="commit",
+                        payload={"code": event.get("code") or "PIPELINE_ERROR"},
+                    )
                     error_payload = {
                         "type": "error",
                         "message": event.get("message", "未知错误"),
@@ -611,6 +808,11 @@ async def send_message(
                     yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
                 elif event_type == "cancelled":
+                    await persist_event(
+                        "turn.cancelled",
+                        phase="commit",
+                        payload={"reason": "worker_cancelled"},
+                    )
                     yield f"data: {json.dumps({'type': 'cancelled', 'turn_id': turn.id}, ensure_ascii=False)}\n\n"
                     return
 

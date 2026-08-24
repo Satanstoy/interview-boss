@@ -102,3 +102,16 @@ from app.services.chat_durable_service import (
     record_assistant_generation,
     get_current_assistant_generation,
 )
+from app.services.chat_event_service import (
+    TurnEventConflict,
+    append_turn_event,
+    get_turn_events,
+)
+from app.services.harness_state_service import (
+    get_harness_session,
+    get_interview_ledger,
+    persist_turn_context_snapshot,
+    create_harness_action,
+    start_harness_attempt,
+    append_harness_artifact,
+)

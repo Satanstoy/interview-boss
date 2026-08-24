@@ -24,6 +24,7 @@ from app.services.chat_common import (
     _safe_json_loads,
     build_turn_request_fingerprint,
 )
+from app.services.harness_state_service import ensure_interview_ledger_conn
 
 logger = logging.getLogger("interview-boss")
 
@@ -86,13 +87,22 @@ def reserve_chat_turn(
         conn.execute("BEGIN IMMEDIATE")
         try:
             conversation = conn.execute(
-                "SELECT user_id, status FROM chat_conversations WHERE id = ?",
+                "SELECT user_id, status, session_version FROM chat_conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
             if not conversation or int(conversation["user_id"]) != int(user_id):
                 raise ConversationNotFound("conversation not found")
             if conversation["status"] != "active":
                 raise ConversationNotWritable("conversation is not writable")
+            ensure_interview_ledger_conn(
+                conn, user_id=user_id, conversation_id=conversation_id
+            )
+            ledger = conn.execute(
+                "SELECT ledger_version FROM interview_ledgers WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            session_version = int(conversation["session_version"] or 1)
+            ledger_version = int(ledger["ledger_version"] if ledger else 1)
 
             existing = conn.execute(
                 "SELECT id, conversation_id, user_id, client_request_id, fence, status, "
@@ -183,9 +193,20 @@ def reserve_chat_turn(
             if user_message_id is None:
                 conn.execute(
                     "INSERT INTO chat_turns "
-                    "(id, conversation_id, user_id, client_request_id, fence, status, request_fingerprint) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?)",
-                    (turn_id, conversation_id, user_id, request_id, fence, fingerprint),
+                    "(id, conversation_id, user_id, client_request_id, fence, status, "
+                    "request_fingerprint, harness_status, session_version, "
+                    "ledger_version_at_start, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
+                    (
+                        turn_id,
+                        conversation_id,
+                        user_id,
+                        request_id,
+                        fence,
+                        fingerprint,
+                        session_version,
+                        ledger_version,
+                    ),
                 )
                 message_cursor = conn.execute(
                     "INSERT INTO chat_messages "
@@ -209,8 +230,9 @@ def reserve_chat_turn(
                 conn.execute(
                     "INSERT INTO chat_turns "
                     "(id, conversation_id, user_id, client_request_id, fence, status, "
-                    "user_message_id, request_fingerprint) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?)",
+                    "user_message_id, request_fingerprint, harness_status, session_version, "
+                    "ledger_version_at_start, started_at) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
                     (
                         turn_id,
                         conversation_id,
@@ -219,6 +241,8 @@ def reserve_chat_turn(
                         fence,
                         user_message_id,
                         fingerprint,
+                        session_version,
+                        ledger_version,
                     ),
                 )
                 precreated_metadata.update(
@@ -277,16 +301,26 @@ def reserve_chat_revision(
         conn.execute("BEGIN IMMEDIATE")
         try:
             conversation = conn.execute(
-                "SELECT user_id, status FROM chat_conversations WHERE id = ?",
+                "SELECT user_id, status, session_version FROM chat_conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
             if not conversation or int(conversation["user_id"]) != int(user_id):
                 raise ConversationNotFound("conversation not found")
             if conversation["status"] != "active":
                 raise ConversationNotWritable("conversation is not writable")
+            ensure_interview_ledger_conn(
+                conn, user_id=user_id, conversation_id=conversation_id
+            )
+            ledger = conn.execute(
+                "SELECT ledger_version FROM interview_ledgers WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            session_version = int(conversation["session_version"] or 1)
+            ledger_version = int(ledger["ledger_version"] if ledger else 1)
 
             target = conn.execute(
-                "SELECT t.user_message_id, t.assistant_message_id, u.content AS user_content "
+                "SELECT t.id AS source_turn_id, t.user_message_id, t.assistant_message_id, "
+                "u.content AS user_content "
                 "FROM chat_turns t "
                 "JOIN chat_messages a ON a.id = t.assistant_message_id "
                 "JOIN chat_messages u ON u.id = t.user_message_id "
@@ -336,8 +370,10 @@ def reserve_chat_revision(
             conn.execute(
                 "INSERT INTO chat_turns "
                 "(id, conversation_id, user_id, client_request_id, fence, status, "
-                "user_message_id, request_fingerprint, revision_of_message_id) "
-                "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                "user_message_id, request_fingerprint, revision_of_message_id, "
+                "revision_of_turn_id, harness_status, session_version, "
+                "ledger_version_at_start, started_at) "
+                "VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP)",
                 (
                     turn_id,
                     conversation_id,
@@ -347,6 +383,9 @@ def reserve_chat_revision(
                     target["user_message_id"],
                     fingerprint,
                     assistant_message_id,
+                    target["source_turn_id"],
+                    session_version,
+                    ledger_version,
                 ),
             )
             conn.commit()
@@ -382,9 +421,10 @@ def cancel_chat_turn(
             row = _load_owned_turn(conn, turn_id, conversation_id, user_id)
             if row["status"] == "running":
                 conn.execute(
-                    "UPDATE chat_turns SET status = 'cancelled', cancel_reason = ?, "
-                    "finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'",
-                    (reason[:120], turn_id),
+                    "UPDATE chat_turns SET status = 'cancelled', harness_status = 'cancelled', "
+                    "terminal_reason = ?, cancel_reason = ?, finished_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND status = 'running'",
+                    (reason[:120], reason[:120], turn_id),
                 )
             conn.commit()
             return _chat_turn_from_row(
@@ -587,7 +627,8 @@ def finalize_chat_turn(
                         ),
                     )
             updated = conn.execute(
-                "UPDATE chat_turns SET status = 'completed', assistant_message_id = ?, "
+                "UPDATE chat_turns SET status = 'completed', harness_status = 'completed', "
+                "terminal_reason = 'completed', assistant_message_id = ?, "
                 "finished_at = CURRENT_TIMESTAMP "
                 "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
                 "AND status = 'running'",
@@ -648,11 +689,13 @@ def fail_chat_turn(
     """Mark a still-running turn failed without resurrecting old turns."""
     with get_db_connection() as conn:
         conn.execute(
-            "UPDATE chat_turns SET status = 'failed', error_code = ?, "
+            "UPDATE chat_turns SET status = 'failed', harness_status = 'failed', "
+            "terminal_reason = ?, error_code = ?, "
             "finished_at = CURRENT_TIMESTAMP "
             "WHERE id = ? AND fence = ? AND conversation_id = ? AND user_id = ? "
             "AND status = 'running'",
             (
+                str(error_code or "turn_failed")[:120],
                 str(error_code or "turn_failed")[:120],
                 turn_id,
                 fence,
@@ -686,5 +729,3 @@ def generate_opening_message(mode: str) -> str:
 # ═══════════════════════════════════════════════════
 #  会话管理
 # ═══════════════════════════════════════════════════
-
-

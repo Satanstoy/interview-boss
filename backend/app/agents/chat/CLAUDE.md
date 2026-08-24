@@ -43,6 +43,9 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 | `tool_strategy.py` | `ToolStrategy` + `compute_tool_strategy(state)`：基于状态字段推导工具策略 |
 | `routing.py` | 纯函数条件边：`should_record_retrieval_gap`、`should_topic_shift` 等 |
 | `context_builder.py` | 上下文拼接（记忆 + 简历 + JD + 历史消息） |
+| `harness_contract.py` | Harness 2.0 的固定调用模式、Action/Attempt/Turn 终态常量，以及 `ContextBlock`/`ContextPack` 的三段式确定性序列化合同 |
+| `question_broker.py` | 模型外的权威 QuestionCard 选择：候选集过滤、维度约束、确定性排序和 authority check |
+| `skill_resolver.py` | 模型外的 Harness 兼容 SkillResolver：版本、兼容范围和 content hash 固定后再注入 Turn Base |
 | `budget.py` | Token 预算管理（控制上下文长度） |
 | `tools.py` | ReAct tool schemas and tool execution entrypoint；执行时先经过 `tool_policy.enforce_tool_call()`，再委托 `app.mcp_server.interview_tools`（单轨双入口架构）；不组装 envelope；`search_questions` 只可基于统一 envelope 的 `items` 做 LLM rerank 后同步 state |
 | `tool_policy.py` | 从服务端 ChatState 计算不可变 ToolPolicy；在 executor 和 ReAct validator 共用的边界执行工具 allowlist、严格参数和 skill scope 校验 |
@@ -109,6 +112,7 @@ run_chat() → _step_load_context → _step_classify (writes ClassifyResult fiel
 - P2 structured turn：CandidateSet 只保存 question reference，最终内容必须 authority reload；`EvidenceBundle` 和 `TurnContractV2` 是 typed facts/contract，`interview_events` 与 `assistant_generations` 支持生命周期、coverage 和 revision replay。
 - Chat 用户消息必须通过 `save_user_message_if_writable()` 的原子 active 检查；assistant finalize 通过 `save_assistant_message_if_active()`，归档期间不新增消息。归档会话仍可读，但不应恢复普通 `save_message()` 作为新用户输入写入口
 - Thinking chunks 上限 50，避免 metadata 膨胀
+- Harness 2.0 上下文合同：`ContextPack` 固定按 `stable_prefix → turn_base → call_suffix` 序列化；stable prefix 禁止放入候选人输入、ledger snapshot、时间戳等每轮变化内容，调用差异只能追加到 call suffix
 
 ## 模块依赖图
 
