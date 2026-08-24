@@ -18,7 +18,6 @@ backend/.redis-password
 *.db.bak.*
 *.db
 *.sqlite
-!backend/schema.db
 
 # 敏感文件
 *.pem
