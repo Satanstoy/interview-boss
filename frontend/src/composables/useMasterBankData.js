@@ -33,6 +33,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const currentPage = ref(1)
   const hasMore = ref(true)
   const isLoadingMore = ref(false)
+  const requestVersion = ref(0)
 
   // ── Filters ──
   const bankFilter = ref('all')  // all/public/mine（题库过滤口径）
@@ -59,7 +60,10 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   }
 
   // ── Data fetching ──
-  const fetchTableData = async () => {
+  const fetchTableData = async ({ resetSubTags = true } = {}) => {
+    const currentRequestVersion = ++requestVersion.value
+    if (resetSubTags) selectedSubTags.value = []
+    const requestTag = selectedSubTags.value.join(',')
     isDataLoading.value = true
     dataLoadError.value = null
     invalidateCache()
@@ -68,8 +72,9 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     filteredTagCountsFromServer.value = []
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, filter: bankFilter.value })
+        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
       ])
+      if (currentRequestVersion !== requestVersion.value) return
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
       const items = (masterResp.items || masterResp).map(decorateQuestion)
@@ -78,20 +83,31 @@ export function useMasterBankData({ onAfterFetch } = {}) {
       applyMasterBankMeta(masterResp)
       hasMore.value = items.length < masterBankTotal.value
       currentPage.value = 1
-      selectedSubTags.value = []
       onAfterFetch?.()
     } catch (e) {
+      if (currentRequestVersion !== requestVersion.value) return
       dataLoadError.value = getFriendlyError(e, '数据加载失败，请刷新重试')
-    } finally { isDataLoading.value = false }
+    } finally {
+      if (currentRequestVersion === requestVersion.value) isDataLoading.value = false
+    }
   }
 
   /** 加载下一页题库数据（无限滚动） */
   const loadMoreMasterBank = async () => {
-    if (isLoadingMore.value || !hasMore.value) return
+    if (isDataLoading.value || isLoadingMore.value || !hasMore.value) return
+    const currentRequestVersion = requestVersion.value
+    const requestTag = selectedSubTags.value.join(',')
     isLoadingMore.value = true
     try {
       const nextPage = currentPage.value + 1
-      const resp = await api.fetchMasterBank({ page: nextPage, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, filter: bankFilter.value })
+      const resp = await api.fetchMasterBank({
+        page: nextPage,
+        page_size: PAGE_SIZE,
+        cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined,
+        tag: requestTag || undefined,
+        filter: bankFilter.value,
+      })
+      if (currentRequestVersion !== requestVersion.value) return
       const newItems = (resp.items || resp).map(decorateQuestion)
       if (newItems.length > 0) {
         masterBank.value = [...masterBank.value, ...newItems]

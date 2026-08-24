@@ -375,6 +375,73 @@ test.describe('题库管理 — 搜索', () => {
 // ═══════════════════════════════════════════════
 
 test.describe('题库管理 — 筛选', () => {
+  test('分类标签数量与点击后的题目保持一致', async ({ page }) => {
+    await mockAllAPIs(page)
+
+    const category = 'E.语言与编程工具'
+    const pythonQuestion = {
+      id: 9001,
+      question: 'Python 依赖管理',
+      cat1: category,
+      cat2: 'E1.Python',
+      tags: 'Python',
+      difficulty: 'L2',
+      frequency: 1,
+      ai_answer: '',
+      owner_id: null,
+      is_starred: false,
+      has_reference_answer: false,
+      original_questions: [],
+      sources: [],
+      original_question_sources: [],
+      source_labels: {},
+    }
+    const categoryPage = Array.from({ length: 30 }, (_, index) => ({
+      ...pythonQuestion,
+      id: 9100 + index,
+      question: `其他工程题 ${index + 1}`,
+      tags: 'Redis',
+    }))
+
+    await page.route('**/api/master-bank**', async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      if (request.method() !== 'GET' || url.pathname !== '/api/master-bank') {
+        await route.fallback()
+        return
+      }
+
+      const tag = url.searchParams.get('tag')
+      const cat1 = url.searchParams.get('cat1')
+      const items = tag === 'Python'
+        ? [pythonQuestion]
+        : cat1 === category
+          ? categoryPage
+          : [...categoryPage, pythonQuestion]
+      await route.fulfill({
+        json: {
+          items,
+          total: tag === 'Python' ? 1 : 31,
+          overall_total: 31,
+          category_counts: [{ category, count: 31 }],
+          filtered_tag_counts: cat1 === category ? [{ tag: 'Python', count: 1 }] : [],
+        },
+      })
+    })
+
+    await page.goto('/')
+    await page.waitForSelector('main', { timeout: 15000 })
+    await page.waitForTimeout(1500)
+
+    await page.locator('button').filter({ hasText: category }).first().click()
+    const pythonTag = page.locator('button').filter({ hasText: 'Python' }).first()
+    await expect(pythonTag).toBeVisible({ timeout: 5000 })
+    await expect(pythonTag).toHaveText('Python 1')
+    await pythonTag.click()
+
+    await expect(page.getByText('Python 依赖管理')).toBeVisible({ timeout: 5000 })
+  })
+
   test('难度下拉筛选器存在', async ({ page }) => {
     await gotoMasterBank(page)
 

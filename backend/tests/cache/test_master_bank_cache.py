@@ -85,6 +85,32 @@ async def test_master_bank_cache_isolated_by_user_and_context(fake_cache):
 
 
 @pytest.mark.asyncio
+async def test_master_bank_cache_isolated_by_tag_filter(fake_cache):
+    """不同标签筛选不能复用同一个题库缓存结果。"""
+    user = _user()
+    kwargs = {
+        "sort": "frequency_desc",
+        "page": 1,
+        "page_size": 30,
+        "cat1": "E.语言与编程工具",
+        "compact": True,
+        "filter_mode": "all",
+    }
+    python_response = {"items": [{"id": 1}], "total": 1}
+    redis_response = {"items": [{"id": 2}], "total": 1}
+
+    await cache.set_master_bank_cache(user, python_response, tag="Python", **kwargs)
+    await cache.set_master_bank_cache(user, redis_response, tag="Redis", **kwargs)
+
+    assert await cache.get_master_bank_cache(user, tag="Python", **kwargs) == python_response
+    assert await cache.get_master_bank_cache(user, tag="Redis", **kwargs) == redis_response
+
+    combined_response = {"items": [{"id": 3}], "total": 2}
+    await cache.set_master_bank_cache(user, combined_response, tag="Redis, Python", **kwargs)
+    assert await cache.get_master_bank_cache(user, tag="Python,Redis", **kwargs) == combined_response
+
+
+@pytest.mark.asyncio
 async def test_master_bank_invalidation_changes_cache_epoch(fake_cache):
     response = {"items": [], "total": 0}
     user = _user()

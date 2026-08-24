@@ -66,6 +66,7 @@ def _cache_signature(
     filter_mode: str,
     epoch: str,
     user_epoch: str = "1",
+    tag: str | None = None,
 ) -> str:
     """Build a bounded key while retaining every visibility dimension.
 
@@ -74,6 +75,9 @@ def _cache_signature(
     only invalidate that user's master-bank view).
     """
 
+    normalized_tag = ",".join(
+        sorted({item.strip() for item in (tag or "").split(",") if item.strip()})
+    )
     payload = {
         "user_id": int(user["id"]),
         "bank_mode": user.get("bank_mode", ""),
@@ -83,6 +87,7 @@ def _cache_signature(
         "page": page,
         "page_size": page_size,
         "cat1": cat1 or "",
+        "tag": normalized_tag,
         "compact": bool(compact),
         "filter": filter_mode,
         "epoch": epoch,
@@ -128,6 +133,7 @@ async def get_master_bank_cache(
     cat1: str | None,
     compact: bool,
     filter_mode: str,
+    tag: str | None = None,
 ) -> dict[str, Any] | None:
     """Return a cached response, or None when cache is unavailable/missed."""
 
@@ -147,6 +153,7 @@ async def get_master_bank_cache(
             filter_mode=filter_mode,
             epoch=epoch,
             user_epoch=user_epoch,
+            tag=tag,
         )
         raw = await client.get(key)
         if raw is None:
@@ -168,6 +175,7 @@ async def set_master_bank_cache(
     cat1: str | None,
     compact: bool,
     filter_mode: str,
+    tag: str | None = None,
 ) -> None:
     """Cache a bounded response. Cache errors never fail the API request."""
 
@@ -187,6 +195,7 @@ async def set_master_bank_cache(
             filter_mode=filter_mode,
             epoch=epoch,
             user_epoch=user_epoch,
+            tag=tag,
         )
         encoded = json.dumps(
             response, ensure_ascii=False, separators=(",", ":")

@@ -489,6 +489,7 @@ const toggleSubTag = (tag) => {
   const idx = selectedSubTags.value.indexOf(tag)
   if (idx === -1) { selectedSubTags.value = [...selectedSubTags.value, tag] }
   else { selectedSubTags.value = selectedSubTags.value.filter(t => t !== tag) }
+  fetchTableData({ resetSubTags: false })
 }
 
 const onNavigateToInterview = (event) => {

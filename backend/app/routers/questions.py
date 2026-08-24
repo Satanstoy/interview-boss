@@ -80,6 +80,24 @@ def _split_join_and_where_params(from_clause: str, params: list):
     return list(params[:1]), list(params[1:])
 
 
+def _build_tag_filter_clause(tag: str | None, table_alias: str = "qb"):
+    """Build an exact comma-separated tag filter while preserving OR semantics."""
+    tags = [item.strip() for item in (tag or "").split(",") if item.strip()]
+    if not tags:
+        return "", []
+
+    tags_expression = f"COALESCE({table_alias}.tags, '')"
+    for _ in range(2):
+        tags_expression = (
+            f"REPLACE(REPLACE({tags_expression}, ', ', ','), ' ,', ',')"
+        )
+    tag_expression = f"instr(',' || {tags_expression} || ',', ?) > 0"
+    return (
+        " AND (" + " OR ".join(tag_expression for _ in tags) + ")",
+        [f",{item}," for item in tags],
+    )
+
+
 @router.get("/api/master-bank")
 async def get_master_bank(
     sort: str = "frequency_desc",
@@ -94,6 +112,11 @@ async def get_master_bank(
         pattern="^(all|public|mine)$",
         description="题库过滤口径: all/public/mine",
     ),
+    tag: str = Query(
+        None,
+        max_length=500,
+        description="按逗号分隔的精确标签筛选，多个标签按 OR 匹配",
+    ),
     user: dict = Depends(get_current_user),
 ):
     filter_mode = filter
@@ -105,6 +128,7 @@ async def get_master_bank(
         cat1=cat1,
         compact=compact,
         filter_mode=filter_mode,
+        tag=tag,
     )
     if cached_response is not None:
         return cached_response
@@ -127,6 +151,12 @@ async def get_master_bank(
             f"WHERE ({where_clause.removeprefix('WHERE ').strip()}) AND qb.cat1 LIKE ?"
         )
         params = params + [f"%{cat1}%"]
+    tag_scope_where_clause = where_clause
+    tag_scope_params = list(params)
+    tag_clause, tag_params = _build_tag_filter_clause(tag)
+    if tag_clause:
+        where_clause = f"{where_clause}{tag_clause}"
+        params = params + tag_params
     join_params, where_params = _split_join_and_where_params(from_clause, params)
 
     def _query():
@@ -225,8 +255,8 @@ async def get_master_bank(
                     if tag:
                         tag_counts[tag] += 1
             filtered_tag_rows = conn.execute(
-                f"SELECT qb.tags {from_clause} {where_clause}",
-                params,
+                f"SELECT qb.tags {from_clause} {tag_scope_where_clause}",
+                tag_scope_params,
             ).fetchall()
             filtered_tag_counts = Counter()
             for row in filtered_tag_rows:
@@ -276,6 +306,7 @@ async def get_master_bank(
         cat1=cat1,
         compact=compact,
         filter_mode=filter_mode,
+        tag=tag,
     )
     return response
 
