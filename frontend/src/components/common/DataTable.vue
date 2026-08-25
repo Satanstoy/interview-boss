@@ -30,7 +30,7 @@
             :style="{ animationDelay: Math.min(idx * 30, 300) + 'ms' }"
           >
             <TableCell class="px-3 py-2.5 text-center whitespace-nowrap">
-              <input type="checkbox" :checked="isSelected(row.id)" @change="$emit('toggle-item', row.id)"
+              <input type="checkbox" :checked="isSelected(row.id)" :aria-label="`选择第 ${idx + 1} 行`" @change="$emit('toggle-item', row.id)"
                 class="size-4 text-primary-600 rounded-md border-border focus:ring-primary-500 cursor-pointer transition">
             </TableCell>
             <TableCell v-for="col in columns" :key="col.key" class="px-3 py-2.5 whitespace-normal break-words text-foreground" :class="col.cellClass || ''" :style="col.width ? { width: col.width } : {}">
@@ -76,6 +76,7 @@
           <input
             type="checkbox"
             :checked="isSelected(row.id)"
+            :aria-label="`选择第 ${idx + 1} 行`"
             class="mt-0.5 size-4 shrink-0 cursor-pointer rounded-md border-border text-primary-600 transition focus:ring-primary-500"
             @change="$emit('toggle-item', row.id)"
           >

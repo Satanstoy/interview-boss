@@ -36,8 +36,9 @@
 
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">邮箱</label>
+          <label for="bind-email" class="text-sm font-medium text-foreground">邮箱</label>
           <input
+            id="bind-email"
             v-model="bindEmail"
             type="email"
             placeholder="your@email.com"
@@ -47,9 +48,10 @@
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">验证码</label>
+          <label for="bind-code" class="text-sm font-medium text-foreground">验证码</label>
           <div class="flex gap-2">
             <input
+              id="bind-code"
               v-model="bindCode"
               type="text"
               placeholder="6位数字"
@@ -79,7 +81,7 @@
       <button
         type="submit"
         :disabled="loading || !bindEmail.trim() || bindCode.length < 6"
-        class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
       >
         <span :class="{ 'opacity-0': loading }">{{ loading ? '绑定中...' : '绑定邮箱并登录' }}</span>
         <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -109,8 +111,9 @@
     >
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">用户名</label>
+          <label for="login-username" class="text-sm font-medium text-foreground">用户名</label>
           <input
+            id="login-username"
             ref="usernameInput"
             v-model="username"
             type="text"
@@ -123,8 +126,9 @@
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">密码</label>
+          <label for="login-password" class="text-sm font-medium text-foreground">密码</label>
           <input
+            id="login-password"
             v-model="password"
             type="password"
             name="password"
@@ -135,10 +139,11 @@
           />
         </div>
         <div v-if="isRegister" class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">
+          <label for="register-email" class="text-sm font-medium text-foreground">
             邮箱 <span class="text-destructive">*</span>
           </label>
           <input
+            id="register-email"
             v-model="email"
             type="email"
             placeholder="your@email.com"
@@ -150,8 +155,9 @@
       </div>
 
       <div v-if="!isRegister" class="flex items-center justify-between gap-3 mt-3">
-        <label class="flex items-center gap-2 cursor-pointer group min-w-0">
+        <label for="remember-me" class="flex items-center gap-2 cursor-pointer group min-w-0">
           <input
+            id="remember-me"
             v-model="rememberMe"
             type="checkbox"
             class="h-4 w-4 rounded-sm border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
@@ -173,7 +179,7 @@
       <button
         type="submit"
         :disabled="loading || !username.trim() || password.length < 8"
-        class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+        class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
       >
         <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
         <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -187,8 +193,9 @@
     <form v-else-if="!needEmailBind && !resetMode" @submit.prevent="handleEmailSubmit">
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">邮箱</label>
+          <label for="email-login-email" class="text-sm font-medium text-foreground">邮箱</label>
           <input
+            id="email-login-email"
             v-model="email"
             type="email"
             placeholder="your@email.com"
@@ -198,9 +205,10 @@
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">验证码</label>
+          <label for="email-login-code" class="text-sm font-medium text-foreground">验证码</label>
           <div class="flex gap-2">
             <input
+              id="email-login-code"
               v-model="verifyCode"
               type="text"
               placeholder="6位数字"
@@ -220,8 +228,9 @@
         </div>
         <template v-if="isRegister">
           <div class="flex flex-col gap-2">
-            <label class="text-sm font-medium text-foreground">用户名</label>
+            <label for="email-register-username" class="text-sm font-medium text-foreground">用户名</label>
             <input
+              id="email-register-username"
               ref="usernameInput"
               v-model="username"
               type="text"
@@ -233,8 +242,9 @@
             />
           </div>
           <div class="flex flex-col gap-2">
-            <label class="text-sm font-medium text-foreground">密码</label>
+            <label for="email-register-password" class="text-sm font-medium text-foreground">密码</label>
             <input
+              id="email-register-password"
               v-model="password"
               type="password"
               placeholder="至少 8 位"
@@ -256,7 +266,7 @@
       <button
         type="submit"
         :disabled="loading || !email.trim() || verifyCode.length < 6"
-        class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+        class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
       >
         <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
         <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -270,8 +280,9 @@
     <form v-if="resetMode && !needEmailBind" @submit.prevent="handleResetPasswordSubmit">
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">邮箱</label>
+          <label for="reset-email" class="text-sm font-medium text-foreground">邮箱</label>
           <input
+            id="reset-email"
             v-model="resetEmail"
             type="email"
             placeholder="your@email.com"
@@ -281,9 +292,10 @@
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">验证码</label>
+          <label for="reset-code" class="text-sm font-medium text-foreground">验证码</label>
           <div class="flex gap-2">
             <input
+              id="reset-code"
               v-model="resetCode"
               type="text"
               placeholder="6位数字"
@@ -302,8 +314,9 @@
           </div>
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">新密码</label>
+          <label for="reset-new-password" class="text-sm font-medium text-foreground">新密码</label>
           <input
+            id="reset-new-password"
             v-model="resetNewPassword"
             type="password"
             placeholder="至少 8 位"
@@ -313,8 +326,9 @@
           />
         </div>
         <div class="flex flex-col gap-2">
-          <label class="text-sm font-medium text-foreground">确认新密码</label>
+          <label for="reset-confirm-password" class="text-sm font-medium text-foreground">确认新密码</label>
           <input
+            id="reset-confirm-password"
             v-model="resetConfirmPassword"
             type="password"
             placeholder="再次输入新密码"
@@ -336,7 +350,7 @@
       <button
         type="submit"
         :disabled="loading || !resetEmail.trim() || resetCode.length < 6 || resetNewPassword.length < 8 || resetConfirmPassword.length < 8"
-        class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+        class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
       >
         <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : '重置密码' }}</span>
         <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -417,8 +431,9 @@
 
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">邮箱</label>
+                <label for="modal-bind-email" class="text-sm font-medium text-foreground">邮箱</label>
                 <input
+                  id="modal-bind-email"
                   v-model="bindEmail"
                   type="email"
                   placeholder="your@email.com"
@@ -428,9 +443,10 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">验证码</label>
+                <label for="modal-bind-code" class="text-sm font-medium text-foreground">验证码</label>
                 <div class="flex gap-2">
                   <input
+                    id="modal-bind-code"
                     v-model="bindCode"
                     type="text"
                     placeholder="6位数字"
@@ -460,7 +476,7 @@
             <button
               type="submit"
               :disabled="loading || !bindEmail.trim() || bindCode.length < 6"
-              class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+              class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
             >
               <span :class="{ 'opacity-0': loading }">{{ loading ? '绑定中...' : '绑定邮箱并登录' }}</span>
               <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -491,8 +507,9 @@
           >
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">用户名</label>
+                <label for="modal-login-username" class="text-sm font-medium text-foreground">用户名</label>
                 <input
+                  id="modal-login-username"
                   ref="usernameInput"
                   v-model="username"
                   type="text"
@@ -505,8 +522,9 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">密码</label>
+                <label for="modal-login-password" class="text-sm font-medium text-foreground">密码</label>
                 <input
+                  id="modal-login-password"
                   v-model="password"
                   type="password"
                   name="password"
@@ -517,10 +535,11 @@
                 />
               </div>
               <div v-if="isRegister" class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">
+                <label for="modal-register-email" class="text-sm font-medium text-foreground">
                   邮箱 <span class="text-destructive">*</span>
                 </label>
                 <input
+                  id="modal-register-email"
                   v-model="email"
                   type="email"
                   placeholder="your@email.com"
@@ -532,8 +551,9 @@
             </div>
 
             <div v-if="!isRegister" class="flex items-center justify-between gap-3 mt-3">
-              <label class="flex items-center gap-2 cursor-pointer group min-w-0">
+              <label for="modal-remember-me" class="flex items-center gap-2 cursor-pointer group min-w-0">
                 <input
+                  id="modal-remember-me"
                   v-model="rememberMe"
                   type="checkbox"
                   class="h-4 w-4 rounded-sm border border-input bg-transparent checked:bg-primary checked:text-primary-foreground focus-visible:ring-ring/50 focus-visible:ring-3 transition"
@@ -555,7 +575,7 @@
             <button
               type="submit"
               :disabled="loading || !username.trim() || password.length < 8"
-              class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+              class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
             >
               <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
               <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -569,8 +589,9 @@
           <form v-else-if="!needEmailBind && !resetMode" @submit.prevent="handleEmailSubmit" class="px-6 pb-6">
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">邮箱</label>
+                <label for="modal-email-login-email" class="text-sm font-medium text-foreground">邮箱</label>
                 <input
+                  id="modal-email-login-email"
                   v-model="email"
                   type="email"
                   placeholder="your@email.com"
@@ -580,9 +601,10 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">验证码</label>
+                <label for="modal-email-login-code" class="text-sm font-medium text-foreground">验证码</label>
                 <div class="flex gap-2">
                   <input
+                    id="modal-email-login-code"
                     v-model="verifyCode"
                     type="text"
                     placeholder="6位数字"
@@ -602,8 +624,9 @@
               </div>
               <template v-if="isRegister">
                 <div class="flex flex-col gap-2">
-                  <label class="text-sm font-medium text-foreground">用户名</label>
+                  <label for="modal-register-username" class="text-sm font-medium text-foreground">用户名</label>
                   <input
+                    id="modal-register-username"
                     ref="usernameInput"
                     v-model="username"
                     type="text"
@@ -615,8 +638,9 @@
                   />
                 </div>
                 <div class="flex flex-col gap-2">
-                  <label class="text-sm font-medium text-foreground">密码</label>
+                  <label for="modal-register-password" class="text-sm font-medium text-foreground">密码</label>
                   <input
+                    id="modal-register-password"
                     v-model="password"
                     type="password"
                     placeholder="至少 8 位"
@@ -638,7 +662,7 @@
             <button
               type="submit"
               :disabled="loading || !email.trim() || verifyCode.length < 6"
-              class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+              class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
             >
               <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : (isRegister ? '注册' : '登录') }}</span>
               <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">
@@ -652,8 +676,9 @@
           <form v-if="resetMode && !needEmailBind" @submit.prevent="handleResetPasswordSubmit" class="px-6 pb-6">
             <div class="flex flex-col gap-4">
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">邮箱</label>
+                <label for="modal-reset-email" class="text-sm font-medium text-foreground">邮箱</label>
                 <input
+                  id="modal-reset-email"
                   v-model="resetEmail"
                   type="email"
                   placeholder="your@email.com"
@@ -663,9 +688,10 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">验证码</label>
+                <label for="modal-reset-code" class="text-sm font-medium text-foreground">验证码</label>
                 <div class="flex gap-2">
                   <input
+                    id="modal-reset-code"
                     v-model="resetCode"
                     type="text"
                     placeholder="6位数字"
@@ -684,8 +710,9 @@
                 </div>
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">新密码</label>
+                <label for="modal-reset-new-password" class="text-sm font-medium text-foreground">新密码</label>
                 <input
+                  id="modal-reset-new-password"
                   v-model="resetNewPassword"
                   type="password"
                   placeholder="至少 8 位"
@@ -695,8 +722,9 @@
                 />
               </div>
               <div class="flex flex-col gap-2">
-                <label class="text-sm font-medium text-foreground">确认新密码</label>
+                <label for="modal-reset-confirm-password" class="text-sm font-medium text-foreground">确认新密码</label>
                 <input
+                  id="modal-reset-confirm-password"
                   v-model="resetConfirmPassword"
                   type="password"
                   placeholder="再次输入新密码"
@@ -718,7 +746,7 @@
             <button
               type="submit"
               :disabled="loading || !resetEmail.trim() || resetCode.length < 6 || resetNewPassword.length < 8 || resetConfirmPassword.length < 8"
-              class="w-full mt-5 h-9 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-primary-foreground bg-primary rounded-md transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden"
+              class="relative mt-5 h-9 w-full overflow-hidden rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-all enabled:hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 inline-flex items-center justify-center gap-2"
             >
               <span :class="{ 'opacity-0': loading }">{{ loading ? '处理中...' : '重置密码' }}</span>
               <svg v-if="loading" class="animate-spin h-4 w-4 absolute" viewBox="0 0 24 24">

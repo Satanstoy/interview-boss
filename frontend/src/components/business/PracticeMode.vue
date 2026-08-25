@@ -149,7 +149,18 @@
       </div>
     </div>
 
-    <Card v-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
+    <div v-if="deckLoading" data-testid="practice-deck-loading" class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-border bg-card px-6 py-12 text-center">
+      <Loader2 class="size-7 animate-spin text-primary" aria-hidden="true" />
+      <h2 class="mt-4 text-lg font-semibold text-foreground">正在加载题单</h2>
+      <p class="mt-2 text-sm text-muted-foreground">正在同步今日复习计划和题目，请稍候。</p>
+      <div class="mt-6 w-full max-w-sm space-y-2" aria-hidden="true">
+        <div class="h-3 animate-pulse rounded bg-muted" />
+        <div class="h-3 w-4/5 animate-pulse rounded bg-muted" />
+        <div class="h-3 w-3/5 animate-pulse rounded bg-muted" />
+      </div>
+    </div>
+
+    <Card v-else-if="currentQ" data-testid="practice-card" class="practice-card mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl p-0 shadow-sm">
       <div data-testid="practice-focus-card" class="contents">
       <div class="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3 md:px-6">
         <div class="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden text-xs text-muted-foreground sm:flex-wrap sm:gap-2">
@@ -362,6 +373,13 @@
       </div>
     </Card>
 
+    <div v-else-if="deckError" data-testid="practice-deck-error" class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-destructive/40 bg-card px-6 py-12 text-center">
+      <div class="flex size-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive"><RefreshCw :size="26" /></div>
+      <h2 class="mt-5 text-lg font-semibold text-foreground">题单加载失败</h2>
+      <p class="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">{{ deckError }}，可以重新加载；你的题目和复习记录不会受影响。</p>
+      <Button class="mt-5 gap-1.5" @click="emit('select-deck', selectedDeckKey)"><RefreshCw class="size-3.5" />重新加载题单</Button>
+    </div>
+
     <div v-else class="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
       <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><List :size="26" /></div>
       <h2 class="mt-5 text-lg font-semibold text-foreground">{{ sessionKey === 'due' ? '今日复习已经完成' : '这个题单还没有题目' }}</h2>
@@ -551,6 +569,7 @@ const props = defineProps({
   selectedDeck: { type: Object, default: null },
   reviewLoading: { type: Boolean, default: false },
   deckLoading: { type: Boolean, default: false },
+  deckError: { type: String, default: '' },
   hasMoreQuestions: { type: Boolean, default: false },
   questionTotal: { type: Number, default: 0 },
   loadingMoreQuestions: { type: Boolean, default: false },

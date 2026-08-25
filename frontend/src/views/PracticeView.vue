@@ -21,6 +21,7 @@
       :selected-deck="selectedDeck"
       :review-loading="isReviewing"
       :deck-loading="isLoading"
+      :deck-error="practiceDeckError"
       :has-more-questions="serverReady && hasMoreQuestions"
       :question-total="serverReady ? questionTotal : practiceQuestions.length"
       :loading-more-questions="isLoadingMoreQuestions"
@@ -63,7 +64,7 @@ const router = useRouter()
 const toast = useToast()
 const { filteredMasterBank, practicedQuestions, toggleStar, currentUser } = inject('appData')
 const {
-  decks, questions: deckQuestions, selectedDeckKey, selectedDeck, isLoading, isReviewing, serverReady,
+  decks, questions: deckQuestions, selectedDeckKey, selectedDeck, isLoading, isReviewing, serverReady, error: practiceDeckError,
   questionTotal, hasMoreQuestions, isLoadingMoreQuestions, loadQuestions, invalidateQuestions, loadMoreQuestions, submitReview, correctReview, addItem,
 } = inject('practiceDecks')
 const practiceQuestions = computed(() => serverReady.value ? deckQuestions.value : filteredMasterBank.value)

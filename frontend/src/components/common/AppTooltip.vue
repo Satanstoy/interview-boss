@@ -54,6 +54,10 @@ const AccessibleSlot = defineComponent({
 
 const supportsHover = ref(true)
 const isOpen = ref(false)
+const closeTooltip = () => { isOpen.value = false }
+const handleVisibilityChange = () => {
+  if (document.visibilityState !== 'visible') closeTooltip()
+}
 // Gracefully handle being mounted outside a vue-router context (e.g. isolated
 // component tests): only auto-close on route change when a router is present.
 const route = (() => { try { return useRoute() } catch { return null } })()
@@ -71,7 +75,15 @@ onMounted(() => {
   hoverQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
   syncHoverCapability()
   hoverQuery.addEventListener?.('change', syncHoverCapability)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('blur', closeTooltip)
+  window.addEventListener('pagehide', closeTooltip)
 })
 
-onBeforeUnmount(() => hoverQuery?.removeEventListener?.('change', syncHoverCapability))
+onBeforeUnmount(() => {
+  hoverQuery?.removeEventListener?.('change', syncHoverCapability)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('blur', closeTooltip)
+  window.removeEventListener('pagehide', closeTooltip)
+})
 </script>

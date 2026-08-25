@@ -195,7 +195,7 @@ html.dark
   [class*="bg-emerald-"],
   [class*="bg-green-"],
   [class*="bg-amber-"]
-):is(:hover, :focus-visible, [data-state="open"]) {
+):not(:disabled):is(:hover, :focus-visible, [data-state="open"]) {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22),
     0 16px 36px -8px rgba(0, 0, 0, 0.38);
   text-shadow: none;
@@ -214,7 +214,7 @@ html.dark
   [class*="bg-emerald-"],
   [class*="bg-green-"],
   [class*="bg-amber-"]
-):is(:hover, :focus-visible, [data-state="open"]) svg {
+):not(:disabled):is(:hover, :focus-visible, [data-state="open"]) svg {
   filter: none;
 }
 

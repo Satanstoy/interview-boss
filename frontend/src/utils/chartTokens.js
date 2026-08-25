@@ -63,10 +63,22 @@ export function porcelainTooltip(dark, trigger = 'item') {
  * 蓝阶明度梯（由浅到深）：0 = 最浅，4 = 最深。
  * 用于有序数据（难度/排名/状态档位）——明度即数据。
  */
-export const RAMP = ['#D0E3FF', '#BAD6EB', '#7096D1', '#334EAC', '#081F5C']
+export const RAMP = [
+  PORCELAIN.light.faint2,
+  PORCELAIN.light.faint,
+  PORCELAIN.light.data2,
+  PORCELAIN.light.data,
+  PORCELAIN.light.hero,
+]
 
 /** 暗色下的蓝阶明度梯（由浅到深，暗卡上用） */
-export const RAMP_DARK = ['#4D82C6', '#6C93C7', '#9EB3CD', '#D5DBE2', '#EDEFF1']
+export const RAMP_DARK = [
+  PORCELAIN.dark.faint2,
+  PORCELAIN.dark.faint,
+  PORCELAIN.dark.data2,
+  PORCELAIN.dark.data,
+  PORCELAIN.dark.hero,
+]
 
 /** 取第 n 档（越靠后越深；越重要的数据用越大的 index） */
 export function rampLevel(index, dark, max = 5) {

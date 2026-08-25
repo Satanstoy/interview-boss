@@ -17,7 +17,7 @@
           <Search :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input v-model="searchQuery" class="h-8 rounded-lg border-0 bg-muted pl-8 text-xs shadow-none" placeholder="搜索当前题单" @keyup.enter="refreshProblems" />
         </div>
-        <Button size="sm" variant="outline" class="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs" @click="importDialogOpen = true">
+        <Button size="sm" variant="outline" class="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs" aria-label="AI 导入" @click="importDialogOpen = true">
           <Sparkles :size="13" /> <span class="hidden xl:inline">AI 导入</span>
         </Button>
         <AppTooltip text="收起题目列表" side="right">

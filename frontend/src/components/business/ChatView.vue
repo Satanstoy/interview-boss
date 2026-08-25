@@ -321,12 +321,23 @@
                   <AppTooltip text="上传文件">
                     <button
                       type="button"
+                      aria-label="上传文件"
+                      :disabled="attachmentLoading || isSending || sendInFlight"
                       class="flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground sm:size-8 sm:px-0"
+                      @click="attachmentInput?.click()"
                     >
-                      <Paperclip :size="16" />
+                      <Loader2 v-if="attachmentLoading" :size="16" class="animate-spin" />
+                      <Paperclip v-else :size="16" />
                       <span class="text-xs sm:hidden">附件</span>
                     </button>
                   </AppTooltip>
+                  <input
+                    ref="attachmentInput"
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    class="hidden"
+                    @change="handleAttachmentChange"
+                  />
                   <!-- Model selector -->
                   <ModelSelector
                     :current-model="selectedModel"
@@ -414,6 +425,7 @@ import { formatGroupTime, formatRelativeTime, createClientRequestId } from '@/ut
 import { useChatFormat } from '@/composables/useChatFormat.js'
 import { promptSuggestions } from '@/constants/chatSuggestions.js'
 import { useChatInput } from '@/composables/useChatInput.js'
+import { upload } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -476,6 +488,8 @@ const conversations = ref([])
 const activeConversationId = ref(null)
 const messages = ref([])
 const inputText = ref('')
+const attachmentInput = ref(null)
+const attachmentLoading = ref(false)
 const isSending = ref(false)
 // Lock immediately on submit, including the async model check and delayed
 // conversation creation window where isSending has not started yet.
@@ -512,6 +526,37 @@ const headerTitleDraft = ref('')
 const headerTitleInput = ref(null)
 const pendingNewConversation = ref(null)
 const openingMessageText = ref('')
+
+async function handleAttachmentChange(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  if (!isPdf) {
+    toastError('目前仅支持 PDF 附件')
+    return
+  }
+
+  attachmentLoading.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await upload('/api/chat/extract-pdf', formData)
+    const extractedText = String(response?.text || '').trim()
+    if (!extractedText) throw new Error('PDF 中没有可读取的文本')
+
+    const prefix = inputText.value.trim()
+    inputText.value = `${prefix ? `${prefix}\n\n` : ''}[附件：${file.name}]\n${extractedText}`
+    toastSuccess(`已读取 ${file.name}，发送前可以继续编辑`)
+    await nextTick()
+    autoResize()
+  } catch (error) {
+    toastError(error?.message || '附件读取失败，请重试')
+  } finally {
+    attachmentLoading.value = false
+  }
+}
 
 // Rename dialog state
 const showRenameDialog = ref(false)
