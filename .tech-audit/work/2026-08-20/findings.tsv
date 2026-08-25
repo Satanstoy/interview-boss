@@ -1,0 +1,8 @@
+severity	dim	location	title	fix	effort	confidence
+4	D5	backend/app/worker.py:974-980; backend/app/routers/data.py:426-432	公共/个人明细通过 URL 连接而不是 interview_id，同 URL 场景可把私有明细带入公共查询和公共重建	所有 questions_detail→interview 关联统一使用 qd.interview_id=i.id；对历史 interview_id 为空的数据增加显式迁移/隔离策略，并加入公共+个人同 URL 的真实 SQLite 回归测试	1 day	certain
+3	D9/D14	backend/app/db/operations.py:343-370; backend/app/db/operations.py:790	重新分析和批处理按 URL 清理 question_bank 来源，调用链没有传入 interview_id 或 owner scope	清理函数改为按 interview_id/来源归属删除；URL 仅作为明确的 legacy fallback，且 fallback 必须带 owner/status 边界	4-8 h	certain
+3	D5	backend/app/worker.py:982-989; backend/app/worker.py:1097-1123	公共重建的答案缓存读取所有 owner，个人题答案可按题干匹配并写回公共题	公共重建的答案快照只读取 owner_id IS NULL AND status='approved' 的公共题；个人答案保留在个人答案模型或个人行	2-4 h	certain
+3	D9	backend/app/db/migrations/question_bank.py:142-163; backend/app/db/queries.py:163-181	公共、个人、待审核由 owner_id NULL 语义和应用层 WHERE 拼接隐式表达，数据库没有约束合法组合	明确拆分 visibility/owner/review_state 的不变量，补 CHECK/索引/迁移校验，并让所有写入口共享同一策略函数	1-2 days	certain
+2	D14	backend/app/db/question_bank_sources.py:785-839	题库列表的批量来源投影没有过滤规范化 source/item 的 deleted_at，软删除来源仍可能回到 API 形状	Query 1/2/3 全部加对应 deleted_at IS NULL，并增加软删除后列表与详情一致性的测试	1-2 h	certain
+3	D3	backend/tests/infra/test_build_master_bank_rebuild_scope.py:17-50; backend/tests/security/test_insights_owner_isolation.py:24-38	现有隔离回归使用不同 URL 或不设置 interview_id，没有锁定同 URL 公共/个人交叉场景	新增同 URL、不同 owner、details 带 interview_id 的端到端 SQLite 测试，覆盖列表、统计和公共重建三条路径	2-4 h	certain
+4	D5	backend/app/services/pipeline/writer.py:165-182; backend/app/services/pipeline/batch.py:278-280	个人 owner_id 分桶的聚类批次写入新 question_bank 行时将 owner_id 硬编码为 NULL，个人新题可直接落入公共题库	写入函数必须显式接收并校验 scope_key/owner_id，公共与个人写入使用不同生命周期和权限策略；补个人队列新聚类不可见于公共库的集成测试	4-8 h	certain

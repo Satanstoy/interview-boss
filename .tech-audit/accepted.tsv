@@ -1,0 +1,4 @@
+dim	location	title_slug	severity	reason	date	revisit_by
+D4	backend/.env ADMIN_PASSWORD	weak-admin-password-length	2	owner-decision: 明确不做最小长度限制；缓解已在位——登录连续失败 5 次锁 15 分钟（login_failures 持久化）+ slowapi IP 5/min 限速，管理面仅单人使用	2026-08-24	
+D4	git history (8 commits)	siliconflow-key-in-git-history-dead	3	key 已在服务商侧轮换（owner 确认 2026-08-24），历史残留为死凭据；单维护者仓库不做 filter-repo，新 key 不落库即可	2026-08-24	2027-02-24
+D11	docs/compliance + SettingsSecurity.vue	account-deletion-manual-flow-only	2	当前用户规模下「邮件申请 + 运营者手动删除」流程可辩护：合规文档、前端入口、数据清单齐备；自助端点待真实用户增长后再立项	2026-08-24	2027-08-24

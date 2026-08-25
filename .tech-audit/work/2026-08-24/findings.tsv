@@ -1,0 +1,6 @@
+severity	dim	location	title	fix	effort	confidence
+2	D5	backend/app/services/public_contributions.py:314	JD 公开物化用 dict(source) 整行拷贝快照（interview 路径是字段白名单），未来 jd 表新增列会自动公开	改为与 _materialize_public_interview 相同的字段白名单	S	certain
+2	D4	backend/app/routers/public_contributions.py:168-173	admin approve 端点内联 await _run_cluster_batch_in_background，LLM 聚类时长直接挂在 HTTP 请求上（超时/连接占用风险）；业务逻辑混入路由层	改投 ARQ 任务返回 scheduled 状态；或至少移入 services 并设硬超时	M	certain
+1	D1	backend/app/routers/public_contributions.py:60-71	/mine 端点全表拉取所有用户的申请再 Python 过滤，无分页无 SQL 过滤	list_public_contribution_requests 增加 requester_id 参数下推到 WHERE	S	certain
+1	D5	backend/app/services/public_contributions.py:128-168	每用户活跃公共化申请数无上限，可刷 admin 审核队列（有全局限速兜底，低危）	create 时统计该用户 active 申请数并设上限（如 20）	S	certain
+1	D7	frontend(npm audit)/repo tools	npm audit 因 npmmirror 镜像不支持而失败；gitleaks/trivy/semgrep/pip-audit 未安装，secret/SAST 扫描缺位（2026-08-13 D8 发现至今未解）	npm audit 加 --registry=https://registry.npmjs.org；check.sh 接入 gitleaks（阻断）+ trivy/semgrep（WARN）	M	certain
