@@ -76,7 +76,7 @@ jobs:
       - name: Build deployable images (app-runtime + nginx)
         run: docker compose build backend nginx
       - name: Trivy scan app image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: interview-boss-app:local
           format: table
@@ -84,7 +84,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '0'
       - name: Trivy scan nginx image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: interview-boss-nginx:local
           format: table
@@ -92,7 +92,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '0'
       - name: Trivy filesystem + IaC scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
