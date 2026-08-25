@@ -821,10 +821,11 @@ async def run_chat(
     """面试对话 pipeline — SSE 兼容的 async generator。
 
     替代 LangGraph StateGraph，使用纯 async pipeline。
-    所有事件通过 _event_queue_var 上下文变量传递。
+    所有事件通过 _event_queue_var 上下文变量传递。该变量的 token 由
+    graph_task 自己创建和清理，避免 SSE async generator 被其他 task 关闭时
+    跨 Context 重置 token。
     """
     queue: asyncio.Queue = asyncio.Queue()
-    token = _event_queue_var.set(queue)
 
     state = _initial_state(
         conversation_id,
@@ -845,6 +846,10 @@ async def run_chat(
     assert_chat_turn_active(state)
 
     async def _run_pipeline() -> None:
+        # ContextVar tokens must be reset in the same task/context that created
+        # them. The graph task owns the event queue for the whole pipeline;
+        # run_chat may be closed by a different SSE/finalizer task.
+        token = _event_queue_var.set(queue)
         t0 = time.monotonic()
         try:
             assert_chat_turn_active(state)
@@ -1008,7 +1013,10 @@ async def run_chat(
             logger.exception("Pipeline 执行失败")
             queue.put_nowait({"type": "error", "message": _sanitize_error_message(e)})
         finally:
-            queue.put_nowait(_SENTINEL)
+            try:
+                _event_queue_var.reset(token)
+            finally:
+                queue.put_nowait(_SENTINEL)
 
     graph_task = asyncio.create_task(_run_pipeline())
 
@@ -1116,6 +1124,16 @@ async def run_chat(
             yield item
             await asyncio.sleep(0)
     finally:
-        _event_queue_var.reset(token)
         if not graph_task.done():
             graph_task.cancel()
+        try:
+            await graph_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            # The pipeline reports normal failures as an error event. An
+            # unexpected task failure must still reach the stream caller; the
+            # await here ensures it is observed instead of becoming an
+            # unhandled "Task exception was never retrieved".
+            logger.exception("Unexpected pipeline task failure during cleanup")
+            raise
