@@ -52,6 +52,51 @@ def test_interview_e2e_suite_1_0_contains_structured_cases():
         assert "rubric" not in case["input_snapshot"]["candidate_view"]
 
 
+def test_interview_e2e_suite_1_2_contains_implemented_greeting_assertions():
+    catalog = _catalog()
+    suite = catalog.load_suite_definition("interview-e2e-suite@1.2")
+
+    assert suite["release_key"] == "interview-eval@1.2"
+    greeting = next(
+        case for case in suite["cases"] if case["case_key"] == "greeting_role_adherence"
+    )
+    assert {item["id"] for item in greeting["contract"]["hard_assertions"]} == {
+        "role_adherence",
+        "first_question",
+    }
+
+
+def test_sync_builtin_suite_preserves_interview_eval_1_1_history(test_db):
+    catalog = _catalog()
+    service = importlib.import_module("app.services.evaluation_service")
+    previous = service.create_release(
+        test_db,
+        release_key="interview-eval@1.1",
+        release_type="evaluation",
+        version="1.1",
+        target_type="interview",
+        manifest={"benchmark": {"version": "1.1"}},
+    )
+    test_db.execute(
+        "UPDATE eval_releases SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (previous["id"],),
+    )
+    test_db.commit()
+
+    catalog.sync_builtin_benchmarks(test_db)
+
+    statuses = dict(
+        test_db.execute(
+            "SELECT release_key, status FROM eval_releases "
+            "WHERE release_key IN ('interview-eval@1.1', 'interview-eval@1.2')"
+        ).fetchall()
+    )
+    assert statuses == {
+        "interview-eval@1.1": "published",
+        "interview-eval@1.2": "published",
+    }
+
+
 def test_sync_builtin_suite_uses_configured_model_for_candidate_simulator(test_db, monkeypatch):
     catalog = _catalog()
     monkeypatch.delenv("CANDIDATE_LLM_MODEL", raising=False)
@@ -60,7 +105,7 @@ def test_sync_builtin_suite_uses_configured_model_for_candidate_simulator(test_d
     catalog.sync_builtin_benchmarks(test_db)
 
     manifest = test_db.execute(
-        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.2'"
     ).fetchone()[0]
     assert '"model":"mimo-v2.5-pro"' in manifest
 
@@ -91,7 +136,7 @@ def test_sync_builtin_suite_archives_legacy_component_releases(test_db, monkeypa
     ).fetchone()[0]
     assert status == "archived"
     evaluation_manifest = test_db.execute(
-        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
+        "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.2'"
     ).fetchone()[0]
     assert '"model":"mimo-v2.5-pro"' in evaluation_manifest
 

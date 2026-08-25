@@ -15,12 +15,12 @@ from app.services.evaluation_service import create_benchmark_case, create_benchm
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUITES_ROOT = REPO_ROOT / "evals" / "suites"
-EVALUATION_RELEASE_KEY = "interview-eval@1.1"
+EVALUATION_RELEASE_KEY = "interview-eval@1.2"
 INTERNAL_SUITE_KEY = "interview-e2e-suite"
 
 BUILTIN_SUITES = (
     {
-        "evaluation_key": "interview-eval@1.1",
+        "evaluation_key": "interview-eval@1.2",
         "target_key": "interview-agent@1.0",
         "target_type": "interview",
         "target_component": "interview-agent",
@@ -63,8 +63,12 @@ BUILTIN_SUITES = (
 
 
 def _suite_root(release_key: str) -> Path:
-    if release_key == "interview-e2e-suite@1.0":
-        return SUITES_ROOT / "interview-e2e" / "1.0"
+    if release_key.startswith("interview-e2e-suite@"):
+        version = release_key.rsplit("@", 1)[-1]
+        suite_root = SUITES_ROOT / "interview-e2e" / version
+        if suite_root.is_dir():
+            return suite_root
+        raise ValueError(f"未知评测版本: {release_key}")
     spec = next((item for item in BUILTIN_SUITES if item["evaluation_key"] == release_key), None)
     if spec is None:
         raise ValueError(f"未知评测版本: {release_key}")

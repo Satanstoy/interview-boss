@@ -12,7 +12,6 @@ import os
 import uuid
 from typing import Any
 
-from app.agents.chat.graph import run_chat
 from app.evaluation.tool_scoring import evaluate_interview_trace
 from app.services import chat_service
 from app.services.llm import _call_llm_with_retry_messages
@@ -20,6 +19,61 @@ from app.services.llm import _call_llm_with_retry_messages
 
 class InterviewE2EAdapter:
     """Run a benchmark case through the production interview pipeline."""
+
+    _META_LEAK_MARKERS = (
+        "benchmark",
+        "hidden prompt",
+        "hidden system",
+        "system prompt",
+        "rubric",
+        "评测",
+        "基准",
+        "隐藏提示",
+        "系统提示",
+        "内部提示",
+        "评分标准",
+        "评测契约",
+    )
+    _QUESTION_MARKERS = (
+        "?",
+        "？",
+        "请介绍",
+        "介绍一下",
+        "介绍下",
+        "请分享",
+        "分享一下",
+        "分享下",
+        "请描述",
+        "描述一下",
+        "请说明",
+        "说明一下",
+        "请讲",
+        "讲一下",
+        "谈谈",
+        "说说",
+        "如何",
+        "为什么",
+        "是什么",
+        "能否",
+        "是否",
+        "哪些",
+        "怎样",
+    )
+    _ROLE_TOPIC_MARKERS = (
+        "项目",
+        "经验",
+        "技术",
+        "工作",
+        "岗位",
+        "职责",
+        "系统",
+        "团队",
+        "挑战",
+        "经历",
+        "自我介绍",
+        "rag",
+        "agent",
+    )
 
     async def prepare(
         self, case_snapshot: dict[str, Any], target_release: dict[str, Any]
@@ -301,6 +355,33 @@ class InterviewE2EAdapter:
             )
             passed = not any(marker.lower() in assistant_text.lower() for marker in leak_markers)
             return passed, "no raw tool marker in assistant output" if passed else "raw tool marker leaked"
+        if normalized == "role_adherence":
+            normalized_text = assistant_text.casefold()
+            leaked_markers = [
+                marker
+                for marker in InterviewE2EAdapter._META_LEAK_MARKERS
+                if marker.casefold() in normalized_text
+            ]
+            passed = bool(assistant_text.strip()) and not leaked_markers
+            if passed:
+                return True, "no meta leakage in interviewer output"
+            return False, f"meta leakage markers: {', '.join(leaked_markers) or 'empty output'}"
+        if normalized == "first_question":
+            first_response = ""
+            if turns and isinstance(turns[0], dict):
+                first_response = str(turns[0].get("assistant") or "").strip()
+            response_lower = first_response.casefold()
+            has_question_signal = any(
+                marker.casefold() in response_lower
+                for marker in InterviewE2EAdapter._QUESTION_MARKERS
+            )
+            has_role_topic = any(
+                marker.casefold() in response_lower
+                for marker in InterviewE2EAdapter._ROLE_TOPIC_MARKERS
+            )
+            passed = bool(first_response) and has_question_signal and has_role_topic
+            evidence = "role-relevant first question observed" if passed else "no role-relevant first question"
+            return passed, evidence
         if "correction" in normalized:
             correction_terms = {
                 "bert": ("encoder", "判别式", "不是生成式"),

@@ -60,7 +60,7 @@ def _context(conn):
     return target, suite_release, protocol, judge, harness, simulator
 
 
-def test_executor_completes_items_and_persists_attempt_evidence(test_db):
+def test_executor_completes_items_and_persists_attempt_evidence(test_db, monkeypatch):
     executor = _executor()
     target, suite, protocol, judge, harness, simulator = _context(test_db)
     run = _service().create_eval_run(
@@ -90,6 +90,16 @@ def test_executor_completes_items_and_persists_attempt_evidence(test_db):
                 "payload": raw_result,
                 "hard_assertions": [{"id": "has_answer", "passed": True}],
             }
+
+    async def fake_judge(**kwargs):
+        return {
+            "judge_status": "succeeded",
+            "judge_model": "fixed-judge",
+            "score": 1.0,
+            "dimensions": {},
+        }
+
+    monkeypatch.setattr(executor, "judge_observation", fake_judge)
 
     result = asyncio.run(
         executor.execute_eval_run(

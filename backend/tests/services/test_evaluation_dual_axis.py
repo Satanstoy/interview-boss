@@ -21,7 +21,7 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_per_tar
     actual = {(row[0], row[1], row[2], row[3], row[4]) for row in rows}
     assert {
         ("interview-agent@1.0", "target", "interview", "1.0", "published"),
-        ("interview-eval@1.1", "evaluation", "interview", "1.1", "published"),
+        ("interview-eval@1.2", "evaluation", "interview", "1.2", "published"),
         ("experience-extraction@1.0", "target", "experience_extraction", "1.0", "published"),
         ("experience-extraction-eval@1.0", "evaluation", "experience_extraction", "1.0", "published"),
         ("jd-extraction@1.0", "target", "jd_extraction", "1.0", "published"),
@@ -33,11 +33,11 @@ def test_builtin_catalog_publishes_one_target_and_one_evaluation_release_per_tar
     } <= actual
     manifest = _service()._decode_manifest(
         test_db.execute(
-            "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
+            "SELECT manifest_json FROM eval_releases WHERE release_key = 'interview-eval@1.2'"
         ).fetchone()[0]
     )
     assert {"benchmark", "protocol", "judge", "simulator_harness", "candidate_simulator"} <= set(manifest)
-    assert manifest["benchmark"]["version"] == "1.1"
+    assert manifest["benchmark"]["version"] == "1.2"
     assert all(
         manifest[component]["version"] == "1.0"
         for component in (
@@ -247,6 +247,63 @@ def test_interview_adapter_does_not_treat_unsupported_assertion_as_passed(monkey
 
     assert passed is False
     assert "unsupported" in evidence
+
+
+def test_interview_adapter_checks_role_adherence_without_meta_leaks():
+    adapter_module = importlib.import_module("app.evaluation.interview_adapter")
+    adapter = adapter_module.InterviewE2EAdapter()
+
+    passed, evidence = adapter._check_assertion(
+        "role_adherence",
+        [{"turn": 1, "assistant": "你好，先介绍一下你负责的 RAG 项目。"}],
+        [],
+        "你好，先介绍一下你负责的 RAG 项目。",
+        [],
+    )
+
+    assert passed is True
+    assert evidence == "no meta leakage in interviewer output"
+
+    passed, evidence = adapter._check_assertion(
+        "role_adherence",
+        [{"turn": 1, "assistant": "这是 benchmark 的隐藏 prompt。"}],
+        [],
+        "这是 benchmark 的隐藏 prompt。",
+        [],
+    )
+
+    assert passed is False
+    assert "meta" in evidence.lower()
+
+
+def test_interview_adapter_checks_first_question_signal():
+    adapter_module = importlib.import_module("app.evaluation.interview_adapter")
+    adapter = adapter_module.InterviewE2EAdapter()
+
+    passed, evidence = adapter._check_assertion(
+        "first_question",
+        [{
+            "turn": 1,
+            "assistant": "请分享一个你近期参与的最有挑战性的技术项目，重点描述你在其中的角色以及遇到的主要技术难点。",
+        }],
+        [],
+        "请分享一个你近期参与的最有挑战性的技术项目，重点描述你在其中的角色以及遇到的主要技术难点。",
+        [],
+    )
+
+    assert passed is True
+    assert "question" in evidence.lower()
+
+    passed, evidence = adapter._check_assertion(
+        "first_question",
+        [{"turn": 1, "assistant": "你好，欢迎参加今天的模拟面试。"}],
+        [],
+        "你好，欢迎参加今天的模拟面试。",
+        [],
+    )
+
+    assert passed is False
+    assert "question" in evidence.lower()
 
 
 def test_interview_adapter_passes_target_model_into_production_pipeline(monkeypatch):
