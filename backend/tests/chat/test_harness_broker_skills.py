@@ -1,5 +1,9 @@
 """Harness-owned QuestionBroker and SkillResolver contracts."""
 
+import json
+
+import pytest
+
 
 def test_question_broker_returns_one_authoritative_card_deterministically():
     from app.agents.chat.question_broker import QuestionBroker
@@ -50,7 +54,12 @@ def test_question_broker_normalizes_bank_tool_records_for_react_context():
     from app.agents.chat.question_broker import normalize_question_candidate
 
     candidate = normalize_question_candidate(
-        {"id": 17, "question": "Redis 缓存击穿怎么处理？", "cat2": "缓存"},
+        {
+            "id": 17,
+            "question": "Redis 缓存击穿怎么处理？",
+            "cat2": "缓存",
+            "source": "draw",
+        },
         source="question_bank",
     )
     assert candidate["question_ref"] == "17"
@@ -59,7 +68,17 @@ def test_question_broker_normalizes_bank_tool_records_for_react_context():
     assert candidate["source"] == "question_bank"
 
 
-def test_harness_react_binds_selected_card_and_appends_context_suffix():
+@pytest.mark.parametrize(
+    ("tool_name", "tool_source", "authority_source"),
+    [
+        ("draw_questions", "draw", "question_bank"),
+        ("search_questions", "search", "question_bank"),
+        ("draw_agent_private_questions", "agent_internal", "private_question_bank"),
+    ],
+)
+def test_harness_react_binds_selected_card_and_appends_context_suffix(
+    tool_name, tool_source, authority_source
+):
     from app.agents.chat.harness_contract import build_harness_context_pack
     from app.agents.chat.react_loop import _bind_question_card_to_react, _append_harness_call_suffix
 
@@ -83,11 +102,24 @@ def test_harness_react_binds_selected_card_and_appends_context_suffix():
     _bind_question_card_to_react(
         state,
         messages,
-        tool_name="search_questions",
-        output='{"ok": true, "items": [{"id": 9, "question": "缓存击穿怎么处理？", "cat2": "缓存"}]}',
+        tool_name=tool_name,
+        output=json.dumps(
+            {
+                "ok": True,
+                "items": [
+                    {
+                        "id": 9,
+                        "question": "缓存击穿怎么处理？",
+                        "cat2": "缓存",
+                        "source": tool_source,
+                    }
+                ],
+            }
+        ),
     )
 
     assert state["question_card"]["question_ref"] == "9"
+    assert state["question_card"]["source"] == authority_source
     assert "QuestionCard" in messages[-1]["content"]
     stable_hash = state["context_pack"].stable_prefix_hash
     suffix = _append_harness_call_suffix(state, {"question_card": state["question_card"]})

@@ -23,7 +23,11 @@ def normalize_question_candidate(
         **candidate,
         "question_ref": str(ref or "").strip(),
         "canonical_text": str(text or "").strip(),
-        "source": candidate.get("source") or source,
+        # The caller derives this authority source from the server-side tool
+        # identity.  Never trust a source label carried by the tool payload;
+        # public bank tools use labels such as ``draw`` and ``search`` while
+        # the Broker contract uses ``question_bank``.
+        "source": source,
         "dimension": candidate.get("dimension") or candidate.get("cat2") or candidate.get("cat1"),
     }
     return normalized
