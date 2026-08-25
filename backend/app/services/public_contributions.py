@@ -271,9 +271,6 @@ def _materialize_public_interview(
 
     detail_ids = []
     new_detail_flags = []
-    detail_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info('questions_detail')").fetchall()
-    }
     for item in approved_items:
         question = item.get("question", "")
         if not question:
