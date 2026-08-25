@@ -1425,13 +1425,10 @@ async def _react_loop(state: ChatState) -> AsyncGenerator[dict, None]:
             "attempts": 0,
         }
         yield {"type": "error", "message": "模型决策失败，请稍后再试。"}
-    elif stop_reason == "max_seconds":
-        state["final_answer_error"] = {
-            "reason": "react_loop_timeout",
-            "attempts": 0,
-        }
-        yield {"type": "error", "message": "模型生成超时，请稍后再试。"}
     else:
+        # A max_seconds stop still has usable LLM/tool evidence. Let the
+        # deterministic contract writer produce the turn instead of converting
+        # a recoverable slow call into a failed TurnRun.
         # ReAct content is evidence only. Empty content is valid once tools
         # have completed; a contract writer owns all user-visible wording.
         state["react_evidence_draft"] = final_answer_text
