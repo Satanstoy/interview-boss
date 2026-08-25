@@ -75,3 +75,19 @@ def test_evaluation_migration_is_idempotent(test_db):
     test_db.commit()
 
     assert test_db.execute("SELECT COUNT(*) FROM eval_runs").fetchone()[0] == 0
+
+
+def test_evaluation_lifecycle_migration_adds_expiry_and_restart_lineage(test_db):
+    version = test_db.execute(
+        "SELECT version, name FROM schema_version WHERE version = 115"
+    ).fetchone()
+
+    assert tuple(version) == (115, "evaluation_lifecycle")
+    run_columns = {
+        row[1] for row in test_db.execute("PRAGMA table_info(eval_runs)").fetchall()
+    }
+    batch_columns = {
+        row[1] for row in test_db.execute("PRAGMA table_info(eval_batches)").fetchall()
+    }
+    assert {"last_heartbeat_at", "restart_of_run_id"} <= run_columns
+    assert {"last_heartbeat_at"} <= batch_columns

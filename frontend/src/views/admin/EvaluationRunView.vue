@@ -7,7 +7,7 @@ import EvalEvidencePanel from '@/components/business/EvalEvidencePanel.vue'
 import AsyncLoading from '@/components/common/AsyncLoading.vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cancelEvaluationRun, fetchEvaluationEvidence, fetchEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
+import { cancelEvaluationRun, fetchEvaluationEvidence, fetchEvaluationRun, restartEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
 import { normalizeCaseEvidenceForLegacyPanel } from '@/services/evaluationSchemas.js'
 import { casePrioritySort, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
@@ -25,9 +25,10 @@ const evidence = ref(null)
 const evidenceLoading = ref(false)
 const evidenceError = ref('')
 const retrying = ref(false)
+const restarting = ref(false)
 let abortController = new AbortController()
 let stopped = false
-const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(run.value?.status))
+const terminal = computed(() => ['completed', 'failed', 'cancelled', 'expired'].includes(run.value?.status))
 
 const sortedItems = computed(() => casePrioritySort(run.value?.items || []))
 const distribution = computed(() => runDistribution(run.value))
@@ -138,6 +139,20 @@ async function retryFailed() {
   }
 }
 
+async function restart() {
+  restarting.value = true
+  error.value = ''
+  try {
+    const result = await restartEvaluationRun(route.params.runId)
+    if (result?.dispatch_error) error.value = `重启已创建，但暂未入队：${result.dispatch_error}`
+    if (result?.run_id) router.push(`/admin/evals/runs/${result.run_id}`)
+  } catch (err) {
+    error.value = err.message || '重启评测失败'
+  } finally {
+    restarting.value = false
+  }
+}
+
 async function loadEvidence(item) {
   if (!item) return
   activeCaseId.value = item.id
@@ -209,6 +224,7 @@ onUnmounted(() => {
         <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`" description="查看每个 Case 的执行进度、业务结果和质量指标。">
           <template #actions>
             <Button variant="ghost" @click="router.push('/admin/evals/results')"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
+            <Button v-if="run?.status === 'expired'" variant="outline" :disabled="restarting" @click="restart"><RefreshCw class="mr-1.5 size-4" />{{ restarting ? '正在重启...' : '重启评测' }}</Button>
             <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
             <Button v-if="run && !terminal" variant="destructive" @click="cancel"><Ban class="mr-1.5 size-4" />取消评测</Button>
           </template>

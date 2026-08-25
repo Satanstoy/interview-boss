@@ -22,7 +22,7 @@ const cancelling = ref(false)
 let abortController = new AbortController()
 let stopped = false
 
-const terminal = computed(() => ['completed', 'failed', 'cancelled'].includes(experiment.value?.status))
+const terminal = computed(() => ['completed', 'failed', 'cancelled', 'expired'].includes(experiment.value?.status))
 const progress = computed(() => {
   if (!experiment.value) return 0
   if (experiment.value.total_items) {

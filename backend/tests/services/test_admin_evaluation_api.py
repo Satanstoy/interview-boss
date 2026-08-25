@@ -72,13 +72,51 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/experiments/{experiment_id}" in paths
     assert "/api/admin/evals/experiments/{experiment_id}/cancel" in paths
     assert "/api/admin/evals/experiments/{experiment_id}/events" in paths
+    assert "/api/admin/evals/active" in paths
     assert "/api/admin/evals/runs/{run_id}" in paths
     assert "/api/admin/evals/runs/{run_id}/items/{item_id}" in paths
     assert "/api/admin/evals/runs/{run_id}/items/{item_id}/evidence" in paths
     assert "/api/admin/evals/runs/{run_id}/cancel" in paths
     assert "/api/admin/evals/runs/{run_id}/retry-failed" in paths
+    assert "/api/admin/evals/runs/{run_id}/restart" in paths
     assert "/api/admin/evals/runs/{run_id}/events" in paths
     assert "/api/admin/evals/reviews" in paths
+
+
+def test_active_queue_includes_standalone_running_run(test_db, monkeypatch):
+    module = _router()
+    context = _context(test_db)
+    service = importlib.import_module("app.services.evaluation_service")
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=9,
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'running', started_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?",
+        (run["id"],),
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+    result = asyncio.run(module.list_active_evaluations(50, {"id": 1, "is_admin": 1}))
+
+    item = next(item for item in result["items"] if item["run_id"] == run["id"])
+    assert item["kind"] == "run"
+    assert item["status"] == "running"
+    assert item["total_items"] == 1
 
 
 def test_human_ab_context_includes_frozen_project_harness_identity(test_db):

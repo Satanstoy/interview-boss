@@ -23,6 +23,7 @@ export const fetchEvaluationRuns = (status = '') => {
     runs: (data.runs || []).map(normalizeRunSummary),
   }))
 }
+export const fetchActiveEvaluations = () => get(`${ROOT}/active`, { noCache: true })
 export const fetchEvaluationRun = (runId) => get(`${ROOT}/runs/${runId}`, { noCache: true }).then(normalizeRunSummary)
 export const fetchEvaluationItem = (runId, itemId) => get(`${ROOT}/runs/${runId}/items/${itemId}`, { noCache: true })
 export const fetchEvaluationEvidence = (runId, itemId) => (
@@ -31,6 +32,7 @@ export const fetchEvaluationEvidence = (runId, itemId) => (
 export const createEvaluationRun = (payload) => post(`${ROOT}/runs`, payload)
 export const cancelEvaluationRun = (runId) => post(`${ROOT}/runs/${runId}/cancel`, {})
 export const retryFailedEvaluationRun = (runId) => post(`${ROOT}/runs/${runId}/retry-failed`, {})
+export const restartEvaluationRun = (runId) => post(`${ROOT}/runs/${runId}/restart`, {})
 export const createEvaluationExperiment = (payload) => post(`${ROOT}/experiments`, payload)
 export const fetchEvaluationExperiment = (experimentId) => get(`${ROOT}/experiments/${experimentId}`, { noCache: true })
 export const cancelEvaluationExperiment = (experimentId) => post(`${ROOT}/experiments/${experimentId}/cancel`, {})

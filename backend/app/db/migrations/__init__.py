@@ -14,7 +14,7 @@ from app.core.config import DB_PATH
 from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
-DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92}
+DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92, 115}
 
 
 def _backup_before_destructive(db_path: str, version: int, name: str) -> str | None:
@@ -179,6 +179,7 @@ from app.db.migrations.question_bank_scope import (
     _migration_109_question_detail_scope_guard,
 )
 from app.db.migrations.evaluation_experiment import _migration_095_evaluation_experiment
+from app.db.migrations.evaluation_lifecycle import _migration_115_evaluation_lifecycle
 from app.db.migrations.practice import (
     _migration_094_review_event_answer_snapshot,
     _migration_096_review_event_evaluation_snapshot,
@@ -321,6 +322,7 @@ _MIGRATIONS = [
     (112, "harness_context_hashes", _migration_112_harness_context_hashes),
     (113, "harness_turn_base_snapshot", _migration_113_harness_turn_base_snapshot),
     (114, "harness_attempt_provenance", _migration_114_harness_attempt_provenance),
+    (115, "evaluation_lifecycle", _migration_115_evaluation_lifecycle),
 ]
 
 

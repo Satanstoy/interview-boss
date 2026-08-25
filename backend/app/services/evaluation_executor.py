@@ -326,7 +326,7 @@ def reconcile_interrupted_eval_run(
     ).fetchone()
     if run_row is None:
         raise ValueError(f"Eval Run 不存在: {run_id}")
-    if run_row["status"] in {"completed", "failed", "cancelled"}:
+    if run_row["status"] in {"completed", "failed", "cancelled", "expired"}:
         return {"run_id": run_id, "status": run_row["status"]}
 
     failure_class = str(reason or "worker_cancelled")[:100]
@@ -444,7 +444,7 @@ async def execute_eval_run(
     run = _load_run(connection, run_id)
     if run is None:
         raise ValueError(f"Eval Run 不存在: {run_id}")
-    if run["status"] in {"completed", "failed", "cancelled"}:
+    if run["status"] in {"completed", "failed", "cancelled", "expired"}:
         return {"run_id": run_id, "status": run["status"]}
     if run.get("_snapshot_error"):
         error = run["_snapshot_error"]
@@ -473,7 +473,8 @@ async def execute_eval_run(
     connection.execute(
         """
         UPDATE eval_runs
-        SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+        SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+            last_heartbeat_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
         (run_id,),
@@ -481,7 +482,8 @@ async def execute_eval_run(
     connection.execute(
         """
         UPDATE eval_batches
-        SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP)
+        SET status = 'running', started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+            last_heartbeat_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
         (run["batch_id"],),
@@ -723,9 +725,13 @@ async def execute_eval_run(
             )
             connection.commit()
 
-    remaining_cancelled = connection.execute(
-        "SELECT cancel_requested FROM eval_runs WHERE id = ?", (run_id,)
-    ).fetchone()[0]
+    current_run = connection.execute(
+        "SELECT status, cancel_requested FROM eval_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    if current_run["status"] == "expired":
+        connection.commit()
+        return {"run_id": run_id, "status": "expired"}
+    remaining_cancelled = current_run["cancel_requested"]
     counts = connection.execute(
         """
         SELECT

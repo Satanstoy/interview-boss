@@ -5,6 +5,7 @@ export const STATUS_LABELS = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  expired: '已失效',
   draft: '草稿',
   published: '已发布',
   archived: '已归档',
@@ -125,7 +126,7 @@ export function reviewChoiceLabel(choice) {
 
 export function statusClass(status) {
   if (['completed', 'published'].includes(status)) return 'text-emerald-600 bg-emerald-500/10'
-  if (['failed', 'cancelled'].includes(status)) return 'text-destructive bg-destructive/10'
+  if (['failed', 'cancelled', 'expired'].includes(status)) return 'text-destructive bg-destructive/10'
   if (['running', 'queued'].includes(status)) return 'text-amber-600 bg-amber-500/10'
   return 'text-muted-foreground bg-muted'
 }

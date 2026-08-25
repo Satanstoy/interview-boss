@@ -25,6 +25,21 @@ from app.worker_enqueue import (
 logger = logging.getLogger("interview-boss")
 
 
+async def scheduled_eval_expiry_task(ctx):
+    """Expire queued/running Eval Runs whose durable lease stopped advancing."""
+    from app.db.connection import get_db_connection
+    from app.services.evaluation_lifecycle import expire_stale_eval_runs
+
+    def _expire():
+        with get_db_connection() as conn:
+            return expire_stale_eval_runs(conn)
+
+    expired = await asyncio.to_thread(_expire)
+    if expired:
+        logger.warning("[评测] 标记失效 Run: %s", expired)
+    return {"expired_run_ids": expired, "count": len(expired)}
+
+
 async def scheduled_harness_turn_dispatch_task(ctx, limit: int = 20):
     """Retry ARQ handoff for accepted Harness 2.0 TurnRuns.
 

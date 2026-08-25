@@ -76,7 +76,7 @@ def test_eval_run_can_pin_a_project_harness_release_for_ab(test_db):
         (
             current["harness_key"],
             current["target_type"],
-            "2.0",
+            "2.1",
             current["display_name"],
             current["manifest_json"],
             "sha256:harness-v2",
@@ -87,14 +87,14 @@ def test_eval_run_can_pin_a_project_harness_release_for_ab(test_db):
         ),
     )
     harness_v2 = test_db.execute(
-        "SELECT * FROM harness_releases WHERE harness_key = ? AND version = '2.0'",
+        "SELECT * FROM harness_releases WHERE harness_key = ? AND version = '2.1'",
         (current["harness_key"],),
     ).fetchone()
     target = test_db.execute(
         "SELECT id FROM eval_releases WHERE release_key = 'interview-agent@1.0'"
     ).fetchone()
     evaluation = test_db.execute(
-        "SELECT id FROM eval_releases WHERE release_key = 'interview-eval@1.1'"
+        "SELECT id FROM eval_releases WHERE release_key = 'interview-eval@1.2'"
     ).fetchone()
 
     result = create_eval_run(
@@ -109,7 +109,7 @@ def test_eval_run_can_pin_a_project_harness_release_for_ab(test_db):
 
     snapshot = json.loads(result["snapshot_json"])
     assert result["harness_release_id"] == harness_v2["id"]
-    assert snapshot["harness_release"]["version"] == "2.0"
+    assert snapshot["harness_release"]["version"] == "2.1"
 
     default_run = create_eval_run(
         test_db,
@@ -120,4 +120,4 @@ def test_eval_run_can_pin_a_project_harness_release_for_ab(test_db):
         seed=24,
     )
     default_snapshot = json.loads(default_run["snapshot_json"])
-    assert default_snapshot["harness_release"]["version"] == "1.0"
+    assert default_snapshot["harness_release"]["version"] == "2.0"

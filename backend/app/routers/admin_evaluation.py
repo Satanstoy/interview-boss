@@ -32,6 +32,7 @@ from app.services.evaluation_service import (
     create_eval_run,
     list_events_after,
 )
+from app.services.evaluation_lifecycle import expire_stale_eval_runs, restart_eval_run
 
 router = APIRouter(prefix="/api/admin/evals", tags=["admin-evaluation"])
 
@@ -143,11 +144,12 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
     completed_runs = sum(row["status"] == "completed" for row in children)
     failed_runs = sum(row["status"] == "failed" for row in children)
     cancelled_runs = sum(row["status"] == "cancelled" for row in children)
+    expired_runs = sum(row["status"] == "expired" for row in children)
     total_items = sum(row["total_items"] or 0 for row in children)
     completed_items = sum(row["completed_items"] or 0 for row in children)
     failed_items = sum(row["failed_items"] or 0 for row in children)
-    if total_runs and completed_runs + failed_runs + cancelled_runs == total_runs:
-        status = "failed" if failed_runs else "cancelled" if cancelled_runs else "completed"
+    if total_runs and completed_runs + failed_runs + cancelled_runs + expired_runs == total_runs:
+        status = "failed" if failed_runs else "expired" if expired_runs else "cancelled" if cancelled_runs else "completed"
     elif any(row["status"] == "running" for row in children):
         status = "running"
     elif any(row["status"] == "queued" for row in children):
@@ -159,6 +161,7 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
         "completed_runs": completed_runs,
         "failed_runs": failed_runs,
         "cancelled_runs": cancelled_runs,
+        "expired_runs": expired_runs,
         "total_items": total_items,
         "completed_items": completed_items,
         "failed_items": failed_items,
@@ -182,7 +185,7 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
     previous_summary = _decode_json(experiment["summary_json"], {})
     previous_status = experiment["status"]
     progress_keys = (
-        "total_runs", "completed_runs", "failed_runs", "cancelled_runs",
+        "total_runs", "completed_runs", "failed_runs", "cancelled_runs", "expired_runs",
         "total_items", "completed_items", "failed_items", "quality_status",
     )
     derived_progress = {key: summary[key] for key in progress_keys}
@@ -199,7 +202,7 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
                 cancelled_runs = ?, summary_json = ?,
                 started_at = CASE WHEN ? IN ('running', 'completed', 'failed')
                                   THEN COALESCE(started_at, CURRENT_TIMESTAMP) ELSE started_at END,
-                finished_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled')
+                finished_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled', 'expired')
                                    THEN COALESCE(finished_at, CURRENT_TIMESTAMP) ELSE NULL END
             WHERE id = ?
             """,
@@ -238,6 +241,7 @@ def _refresh_experiment(conn, experiment_id: int) -> dict[str, Any] | None:
         "completed_runs": completed_runs,
         "failed_runs": failed_runs,
         "cancelled_runs": cancelled_runs,
+        "expired_runs": expired_runs,
         "total_items": total_items,
         "completed_items": completed_items,
         "failed_items": failed_items,
@@ -794,6 +798,7 @@ async def list_experiments(
 
     def _query():
         with get_db_connection() as conn:
+            expire_stale_eval_runs(conn)
             params = []
             limit_clause = " LIMIT ?"
             if not status:
@@ -849,6 +854,7 @@ async def list_experiments(
                 item["completed_runs"] = sum(child["status"] == "completed" for child in children)
                 item["failed_runs"] = sum(child["status"] == "failed" for child in children)
                 item["cancelled_runs"] = sum(child["status"] == "cancelled" for child in children)
+                item["expired_runs"] = sum(child["status"] == "expired" for child in children)
                 item["total_items"] = sum(child["total_items"] or 0 for child in children)
                 item["completed_items"] = sum(child["completed_items"] or 0 for child in children)
                 item["failed_items"] = sum(child["failed_items"] or 0 for child in children)
@@ -858,12 +864,13 @@ async def list_experiments(
                     "completed_runs": item["completed_runs"],
                     "failed_runs": item["failed_runs"],
                     "cancelled_runs": item["cancelled_runs"],
+                    "expired_runs": item["expired_runs"],
                     "total_items": item["total_items"],
                     "completed_items": item["completed_items"],
                     "failed_items": item["failed_items"],
                 }
-                if item["total_runs"] and item["completed_runs"] + item["failed_runs"] + item["cancelled_runs"] == item["total_runs"]:
-                    item["status"] = "failed" if item["failed_runs"] else "cancelled" if item["cancelled_runs"] else "completed"
+                if item["total_runs"] and item["completed_runs"] + item["failed_runs"] + item["cancelled_runs"] + item["expired_runs"] == item["total_runs"]:
+                    item["status"] = "failed" if item["failed_runs"] else "expired" if item["expired_runs"] else "cancelled" if item["cancelled_runs"] else "completed"
                 elif any(child["status"] == "running" for child in children):
                     item["status"] = "running"
                 elif any(child["status"] == "queued" for child in children):
@@ -881,6 +888,72 @@ async def list_experiments(
                     continue
                 experiments.append(item)
             return {"experiments": experiments[:limit]}
+
+    return await run_db(_query)
+
+
+@router.get("/active")
+async def list_active_evaluations(
+    limit: int = Query(default=50, ge=1, le=200),
+    admin: dict = Depends(get_admin_user),
+):
+    """Return one normalized live queue for Experiments and standalone Runs."""
+
+    def _query():
+        with get_db_connection() as conn:
+            expire_stale_eval_runs(conn)
+            active = []
+            experiments = conn.execute(
+                "SELECT id FROM eval_experiments ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            for row in experiments:
+                experiment = _refresh_experiment(conn, row["id"])
+                if experiment and experiment["status"] in {"created", "queued", "running"}:
+                    active.append(
+                        {
+                            "kind": "experiment",
+                            "id": experiment["id"],
+                            "experiment_id": experiment["id"],
+                            **experiment,
+                        }
+                    )
+
+            rows = conn.execute(
+                """
+                SELECT r.id, r.status, r.total_items, r.completed_items, r.failed_items,
+                       r.comparison_group, r.created_at, r.started_at, r.finished_at,
+                       r.last_heartbeat_at, r.restart_of_run_id,
+                       tr.release_key AS target_release_key, tr.target_type,
+                       COALESCE(er.release_key, br.release_key) AS evaluation_release_key,
+                       br.release_key AS benchmark_suite_release_key,
+                       hr.harness_key AS project_harness_key,
+                       hr.version AS project_harness_version
+                FROM eval_runs r
+                JOIN eval_releases tr ON tr.id = r.target_release_id
+                JOIN eval_releases br ON br.id = r.benchmark_suite_release_id
+                LEFT JOIN eval_releases er ON er.id = r.evaluation_release_id
+                LEFT JOIN harness_releases hr ON hr.id = r.harness_release_id
+                WHERE r.status IN ('created', 'queued', 'running')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM eval_experiment_runs erun WHERE erun.run_id = r.id
+                  )
+                ORDER BY r.id DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            for row in rows:
+                item = dict(row)
+                item.update(
+                    {
+                        "kind": "run",
+                        "run_id": row["id"],
+                        "restartable": False,
+                        "distribution": _run_progress_distribution(conn, row["id"]),
+                    }
+                )
+                active.append(item)
+            active.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+            return {"items": active[:limit]}
 
     return await run_db(_query)
 
@@ -1201,7 +1274,7 @@ async def experiment_events(
                     f"event: {event['event_type']}\n"
                     f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 )
-            if experiment["status"] in {"completed", "failed", "cancelled"}:
+            if experiment["status"] in {"completed", "failed", "cancelled", "expired"}:
                 return
             await asyncio.sleep(0.5)
 
@@ -1779,7 +1852,7 @@ async def cancel_run(run_id: int, admin: dict = Depends(get_admin_user)):
             ).fetchone()
             if row is None:
                 return None
-            if row["status"] in {"completed", "failed", "cancelled"}:
+            if row["status"] in {"completed", "failed", "cancelled", "expired"}:
                 return {"run_id": run_id, "status": row["status"], "cancel_requested": True}
             conn.execute(
                 "UPDATE eval_runs SET cancel_requested = 1, status = CASE "
@@ -1919,6 +1992,58 @@ async def retry_failed_run(run_id: int, admin: dict = Depends(get_admin_user)):
         dispatch_error = str(exc)[:300]
     return {**result, "status": status, "dispatch_error": dispatch_error}
 
+
+@router.post("/runs/{run_id}/restart")
+async def restart_run(run_id: int, admin: dict = Depends(get_admin_user)):
+    """Create and dispatch a fresh Run from an expired Run snapshot."""
+
+    def _restart():
+        with get_db_connection() as conn:
+            return restart_eval_run(conn, run_id, created_by=admin["id"])
+
+    try:
+        result = await run_db(_restart)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "不存在" in message else 409
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+    dispatch_error = None
+    status = "created"
+    try:
+        job = await enqueue_eval_run_job(
+            result["id"], job_id=f"eval-run-{result['id']}-{uuid.uuid4().hex[:8]}"
+        )
+        if job is None:
+            dispatch_error = "ARQ 未接受入队，Run 保持 created，可稍后重试"
+        else:
+            arq_job_id = getattr(job, "job_id", None)
+
+            def _mark_queued():
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "UPDATE eval_runs SET status = 'queued' WHERE id = ? AND status = 'created'",
+                        (result["id"],),
+                    )
+                    conn.execute(
+                        "UPDATE eval_batches SET status = 'queued' WHERE id = ? AND status = 'created'",
+                        (result["batch_id"],),
+                    )
+                    append_event(conn, result["id"], "run.queued", {"arq_job_id": arq_job_id})
+                    conn.commit()
+
+            await run_db(_mark_queued)
+            status = "queued"
+    except Exception as exc:
+        dispatch_error = str(exc)[:300]
+    return {
+        "run_id": result["id"],
+        "restart_of_run_id": run_id,
+        "batch_id": result["batch_id"],
+        "status": status,
+        "dispatch_error": dispatch_error,
+    }
+
 @router.get("/runs/{run_id}/events")
 async def run_events(
     request: Request,
@@ -1951,7 +2076,7 @@ async def run_events(
                     f"event: {event['event_type']}\n"
                     f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 )
-            if run["status"] in {"completed", "failed", "cancelled"}:
+            if run["status"] in {"completed", "failed", "cancelled", "expired"}:
                 return
             await asyncio.sleep(0.5)
 

@@ -484,3 +484,31 @@ def test_reconcile_interrupted_run_closes_active_items_and_batch(test_db):
     assert test_db.execute(
         "SELECT status FROM eval_batches WHERE id = ?", (run["batch_id"],)
     ).fetchone()[0] == "failed"
+
+
+def test_reconcile_does_not_overwrite_expired_run(test_db):
+    executor = _executor()
+    target, suite, protocol, judge, harness, simulator = _context(test_db)
+    run = _service().create_eval_run(
+        test_db,
+        created_by=None,
+        target_release_id=target["id"],
+        benchmark_suite_release_id=suite["id"],
+        eval_protocol_release_id=protocol["id"],
+        judge_release_id=judge["id"],
+        simulator_harness_release_id=harness["id"],
+        candidate_simulator_release_id=simulator["id"],
+        replication_count=1,
+        seed=17,
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'expired' WHERE id = ?", (run["id"],)
+    )
+    test_db.commit()
+
+    result = executor.reconcile_interrupted_eval_run(run["id"], conn=test_db)
+
+    assert result == {"run_id": run["id"], "status": "expired"}
+    assert test_db.execute(
+        "SELECT status FROM eval_runs WHERE id = ?", (run["id"],)
+    ).fetchone()[0] == "expired"

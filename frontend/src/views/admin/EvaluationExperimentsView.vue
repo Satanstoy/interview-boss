@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cancelEvaluationExperiment, createEvaluationExperiment, createEvaluationRun, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationExperiments, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
+import { cancelEvaluationExperiment, cancelEvaluationRun, createEvaluationExperiment, createEvaluationRun, fetchActiveEvaluations, fetchEvaluationBenchmarks, fetchEvaluationCapabilities, fetchEvaluationReleases, fetchProjectHarnessReleases } from '@/services/evaluationApi.js'
 import { evaluationTargetLabel, formatDate, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationStepCard from './EvaluationStepCard.vue'
 import EvaluationTargetPicker from './EvaluationTargetPicker.vue'
@@ -28,6 +28,7 @@ const experiments = ref([])
 const activeTab = ref(route.query.tab === 'create' ? 'create' : 'active')
 const selectedExperimentId = ref(null)
 const cancellingExperimentId = ref(null)
+const cancellingRunId = ref(null)
 const error = ref('')
 const form = ref({ target: '', evaluation: '', harness: '', replication: 5, seed: 1, environment: 'local-baseline', comparison: '' })
 const selectedTargetType = ref('interview')
@@ -36,7 +37,7 @@ let experimentPollTimer = null
 let experimentsRequestInFlight = false
 let componentActive = false
 
-const activeExperiments = computed(() => experiments.value.filter(experiment => ['created', 'queued', 'running'].includes(experiment.status)))
+const activeExperiments = computed(() => experiments.value)
 
 function experimentProgress(experiment) {
   if (experiment?.total_items) {
@@ -49,6 +50,7 @@ function experimentProgress(experiment) {
 }
 
 function experimentDistribution(experiment) {
+  if (experiment?.kind === 'run') return runDistribution(experiment)
   const distributions = (experiment?.runs || []).map(run => runDistribution(run)).filter(item => item.total)
   if (!distributions.length) {
     const total = Number(experiment?.total_items || 0)
@@ -77,11 +79,17 @@ function experimentOutcomeSegments(experiment) {
 }
 
 function experimentTargets(experiment) {
+  if (experiment?.kind === 'run') return evaluationTargetLabel(experiment.target_type)
   const labels = [...new Set((experiment?.runs || []).map(run => evaluationTargetLabel(run.target_type)))]
   return labels.length ? labels.join('、') : '—'
 }
 
 function experimentHarness(experiment) {
+  if (experiment?.kind === 'run') {
+    return experiment.project_harness_key && experiment.project_harness_version
+      ? `${experiment.project_harness_key}@${experiment.project_harness_version}`
+      : '—'
+  }
   const versions = (experiment?.runs || [])
     .filter(run => run.project_harness_key && run.project_harness_version)
     .map(run => `${run.project_harness_key}@${run.project_harness_version}`)
@@ -89,6 +97,7 @@ function experimentHarness(experiment) {
 }
 
 function experimentEvaluation(experiment) {
+  if (experiment?.kind === 'run') return experiment.benchmark_suite_release_key || experiment.evaluation_release_key || '—'
   const versions = (experiment?.runs || [])
     .map(run => run.benchmark_suite_release_key || run.evaluation_release_key)
     .filter(Boolean)
@@ -118,8 +127,8 @@ async function loadExperiments() {
   experimentsLoading.value = true
   error.value = ''
   try {
-    const data = await fetchEvaluationExperiments()
-    experiments.value = data.experiments || []
+    const data = await fetchActiveEvaluations()
+    experiments.value = data.items || []
     if (selectedExperimentId.value && !activeExperiments.value.some(item => item.id === selectedExperimentId.value)) {
       selectedExperimentId.value = null
     }
@@ -137,6 +146,10 @@ function selectTab(tab) {
 }
 
 function openExperiment(experiment) {
+  if (experiment?.kind === 'run') {
+    router.push(`/admin/evals/runs/${experiment.run_id || experiment.id}`)
+    return
+  }
   router.push({
     path: `/admin/evals/experiments/${experiment.id}`,
     query: route.query.preview === '1' ? { preview: '1' } : {},
@@ -144,6 +157,19 @@ function openExperiment(experiment) {
 }
 
 async function cancelExperiment(experiment) {
+  if (experiment?.kind === 'run') {
+    cancellingRunId.value = experiment.run_id || experiment.id
+    error.value = ''
+    try {
+      await cancelEvaluationRun(cancellingRunId.value)
+      await loadExperiments()
+    } catch (err) {
+      error.value = err.message || '取消评测失败'
+    } finally {
+      cancellingRunId.value = null
+    }
+    return
+  }
   cancellingExperimentId.value = experiment.id
   error.value = ''
   try {
@@ -286,18 +312,18 @@ async function load() {
   error.value = ''
   experimentsRequestInFlight = true
   try {
-    const [releaseData, capabilityData, benchmarkData, harnessData, experimentData] = await Promise.all([
+    const [releaseData, capabilityData, benchmarkData, harnessData, activeData] = await Promise.all([
       fetchEvaluationReleases(),
       fetchEvaluationCapabilities(),
       fetchEvaluationBenchmarks(),
       fetchProjectHarnessReleases(),
-      fetchEvaluationExperiments(),
+      fetchActiveEvaluations(),
     ])
     releases.value = releaseData.releases || []
     capabilities.value = capabilityData.targets || []
     benchmarks.value = benchmarkData.suites || []
     harnesses.value = harnessData.harness_releases || []
-    experiments.value = experimentData.experiments || []
+    experiments.value = activeData.items || []
     selectedExperimentTargets.value = runnableCapabilities.value.map(item => item.target_type)
     chooseDefaults()
   } catch (err) {
@@ -427,10 +453,10 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-border/60">
-                <tr v-for="experiment in activeExperiments" :key="experiment.id" :data-testid="`active-experiment-row-${experiment.id}`" :class="['align-top transition-colors hover:bg-muted/25', selectedExperimentId === experiment.id ? 'bg-primary/5' : '']">
+                <tr v-for="experiment in activeExperiments" :key="`${experiment.kind || 'experiment'}-${experiment.id}`" :data-testid="`active-experiment-row-${experiment.id}`" :class="['align-top transition-colors hover:bg-muted/25', selectedExperimentId === experiment.id ? 'bg-primary/5' : '']">
                   <td class="px-4 py-4">
                     <button type="button" class="text-left font-medium text-foreground hover:text-primary" @click="openExperiment(experiment)">
-                      实验 #{{ experiment.id }}
+                      {{ experiment.kind === 'run' ? 'Run' : '实验' }} #{{ experiment.id }}
                       <span class="mt-1 block max-w-[170px] truncate text-xs font-normal text-muted-foreground">{{ experiment.experiment_key || '未命名实验' }}</span>
                     </button>
                   </td>
@@ -449,7 +475,7 @@ onUnmounted(() => {
                   <td class="px-4 py-4">
                     <div class="flex items-center gap-2">
                       <Button size="sm" variant="outline" @click="openExperiment(experiment)"><Eye class="mr-1.5 size-3.5" />详情</Button>
-                      <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" :disabled="cancellingExperimentId === experiment.id" @click.stop="cancelExperiment(experiment)"><XCircle class="mr-1.5 size-3.5" />{{ cancellingExperimentId === experiment.id ? '取消中' : '取消' }}</Button>
+                      <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" :disabled="experiment.kind === 'run' ? cancellingRunId === experiment.id : cancellingExperimentId === experiment.id" @click.stop="cancelExperiment(experiment)"><XCircle class="mr-1.5 size-3.5" />{{ (experiment.kind === 'run' ? cancellingRunId === experiment.id : cancellingExperimentId === experiment.id) ? '取消中' : '取消' }}</Button>
                     </div>
                   </td>
                 </tr>
