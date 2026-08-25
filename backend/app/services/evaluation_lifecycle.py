@@ -248,3 +248,267 @@ def restart_eval_run(
     result["batch_id"] = batch_id
     result["batch_fingerprint"] = fingerprint
     return result
+
+
+def resume_eval_run(
+    conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    created_by: int | None = None,
+) -> dict[str, Any]:
+    """Create an immutable continuation Run from an interrupted Run.
+
+    Completed Items, Attempts and Artifact indexes are copied as evidence and
+    remain completed. Interrupted, failed, cancelled and pending Items become
+    fresh pending work in the new Run. The source Run is never rewritten.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    source = conn.execute("SELECT * FROM eval_runs WHERE id = ?", (run_id,)).fetchone()
+    if source is None:
+        conn.rollback()
+        raise ValueError("Eval Run 不存在")
+    if source["status"] not in {"failed", "cancelled", "expired"}:
+        conn.rollback()
+        raise ValueError("只有中断、失败、取消或失效的 Eval Run 可以续作")
+    existing = conn.execute(
+        """
+        SELECT * FROM eval_runs
+        WHERE resume_of_run_id = ? AND status IN ('created', 'queued', 'running')
+        ORDER BY id
+        LIMIT 1
+        """,
+        (run_id,),
+    ).fetchone()
+    if existing is not None:
+        summary = _decode_json(existing["summary_json"])
+        result = dict(existing)
+        result["batch_id"] = existing["batch_id"]
+        result["reused_completed_items"] = int(summary.get("reused_completed_items", 0))
+        result["rerun_items"] = int(summary.get("rerun_items", 0))
+        result["already_exists"] = True
+        conn.commit()
+        return result
+    batch = conn.execute(
+        "SELECT * FROM eval_batches WHERE id = ?", (source["batch_id"],)
+    ).fetchone()
+    if batch is None:
+        conn.rollback()
+        raise ValueError("Eval Run 的 Batch 不存在")
+
+    source_items = conn.execute(
+        "SELECT * FROM eval_items WHERE run_id = ? ORDER BY id", (run_id,)
+    ).fetchall()
+    if not source_items:
+        conn.rollback()
+        raise ValueError("Eval Run 没有可续作的 Case")
+    reused_count = sum(item["status"] == "completed" for item in source_items)
+    rerun_count = len(source_items) - reused_count
+    source_summary = _decode_json(source["summary_json"])
+    fingerprint = hashlib.sha256(
+        f"{batch['batch_fingerprint']}:resume:{run_id}:{uuid.uuid4().hex}".encode()
+    ).hexdigest()
+    batch_cursor = conn.execute(
+        """
+        INSERT INTO eval_batches (
+            batch_fingerprint, target_release_id, evaluation_release_id,
+            benchmark_suite_release_id, eval_protocol_release_id, judge_release_id,
+            simulator_harness_release_id, candidate_simulator_release_id,
+            harness_release_id, environment_fingerprint, seed, replication_count,
+            status, total_items, completed_items, failed_items, created_by,
+            summary_json, snapshot_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, 0, ?, ?, ?)
+        """,
+        (
+            fingerprint,
+            batch["target_release_id"],
+            batch["evaluation_release_id"],
+            batch["benchmark_suite_release_id"],
+            batch["eval_protocol_release_id"],
+            batch["judge_release_id"],
+            batch["simulator_harness_release_id"],
+            batch["candidate_simulator_release_id"],
+            batch["harness_release_id"],
+            batch["environment_fingerprint"],
+            batch["seed"],
+            batch["replication_count"],
+            len(source_items),
+            reused_count,
+            created_by,
+            json.dumps(
+                {
+                    "resume_of_run_id": run_id,
+                    "reused_completed_items": reused_count,
+                    "rerun_items": rerun_count,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            batch["snapshot_json"],
+        ),
+    )
+    batch_id = batch_cursor.lastrowid
+    run_cursor = conn.execute(
+        """
+        INSERT INTO eval_runs (
+            batch_id, target_release_id, evaluation_release_id,
+            benchmark_suite_release_id, eval_protocol_release_id, judge_release_id,
+            simulator_harness_release_id, candidate_simulator_release_id,
+            harness_release_id, comparison_group, status, total_items,
+            completed_items, failed_items, summary_json, created_by, snapshot_json,
+            resume_of_run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, 0, ?, ?, ?, ?)
+        """,
+        (
+            batch_id,
+            source["target_release_id"],
+            source["evaluation_release_id"],
+            source["benchmark_suite_release_id"],
+            source["eval_protocol_release_id"],
+            source["judge_release_id"],
+            source["simulator_harness_release_id"],
+            source["candidate_simulator_release_id"],
+            source["harness_release_id"],
+            source["comparison_group"],
+            len(source_items),
+            reused_count,
+            json.dumps(
+                {
+                    "resume_of_run_id": run_id,
+                    "reused_completed_items": reused_count,
+                    "rerun_items": rerun_count,
+                    "source_status": source["status"],
+                    "source_failure_class": source_summary.get("failure_class"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            created_by,
+            source["snapshot_json"],
+            run_id,
+        ),
+    )
+    new_run_id = run_cursor.lastrowid
+    item_map: dict[int, int] = {}
+    completed_item_maps: list[tuple[sqlite3.Row, int]] = []
+    for item in source_items:
+        completed = item["status"] == "completed"
+        item_cursor = conn.execute(
+            """
+            INSERT INTO eval_items (
+                run_id, case_id, replication_index, seed, status,
+                contract_status, hard_gate_status, judge_status, score, result_json,
+                started_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_run_id,
+                item["case_id"],
+                item["replication_index"],
+                item["seed"],
+                "completed" if completed else "pending",
+                item["contract_status"] if completed else "pending",
+                item["hard_gate_status"] if completed else "pending",
+                item["judge_status"] if completed else "pending",
+                item["score"] if completed else None,
+                item["result_json"] if completed else "{}",
+                item["started_at"] if completed else None,
+                item["finished_at"] if completed else None,
+            ),
+        )
+        new_item_id = item_cursor.lastrowid
+        item_map[item["id"]] = new_item_id
+        if completed:
+            completed_item_maps.append((item, new_item_id))
+
+    for source_item, new_item_id in completed_item_maps:
+        attempt_map: dict[int, int] = {}
+        attempts = conn.execute(
+            "SELECT * FROM eval_attempts WHERE item_id = ? ORDER BY attempt_index",
+            (source_item["id"],),
+        ).fetchall()
+        for attempt in attempts:
+            attempt_cursor = conn.execute(
+                """
+                INSERT INTO eval_attempts (
+                    item_id, attempt_index, attempt_kind, status, failure_class,
+                    raw_observation_json, error_message, started_at, finished_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_item_id,
+                    attempt["attempt_index"],
+                    attempt["attempt_kind"],
+                    attempt["status"],
+                    attempt["failure_class"],
+                    attempt["raw_observation_json"],
+                    attempt["error_message"],
+                    attempt["started_at"],
+                    attempt["finished_at"],
+                ),
+            )
+            attempt_map[attempt["id"]] = attempt_cursor.lastrowid
+        selected_attempt_id = attempt_map.get(source_item["selected_attempt_id"])
+        if selected_attempt_id is not None:
+            conn.execute(
+                "UPDATE eval_items SET selected_attempt_id = ? WHERE id = ?",
+                (selected_attempt_id, new_item_id),
+            )
+        for artifact in conn.execute(
+            "SELECT * FROM eval_artifacts WHERE item_id = ? ORDER BY id",
+            (source_item["id"],),
+        ).fetchall():
+            conn.execute(
+                """
+                INSERT INTO eval_artifacts (
+                    run_id, item_id, attempt_id, artifact_type, storage_path,
+                    digest, size_bytes, retention_class
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_run_id,
+                    new_item_id,
+                    attempt_map.get(artifact["attempt_id"]),
+                    artifact["artifact_type"],
+                    artifact["storage_path"],
+                    artifact["digest"],
+                    artifact["size_bytes"],
+                    artifact["retention_class"],
+                ),
+            )
+
+    append_event(
+        conn,
+        run_id,
+        "run.resume_requested",
+        {
+            "new_run_id": new_run_id,
+            "reused_completed_items": reused_count,
+            "rerun_items": rerun_count,
+        },
+    )
+    append_event(
+        conn,
+        new_run_id,
+        "run.created",
+        {
+            "status": "created",
+            "resume_of_run_id": run_id,
+            "reused_completed_items": reused_count,
+            "rerun_items": rerun_count,
+        },
+    )
+    if reused_count:
+        append_event(
+            conn,
+            new_run_id,
+            "run.items_reused",
+            {"source_run_id": run_id, "item_count": reused_count},
+        )
+    conn.commit()
+    result = dict(conn.execute("SELECT * FROM eval_runs WHERE id = ?", (new_run_id,)).fetchone())
+    result["batch_id"] = batch_id
+    result["batch_fingerprint"] = fingerprint
+    result["reused_completed_items"] = reused_count
+    result["rerun_items"] = rerun_count
+    result["already_exists"] = False
+    return result

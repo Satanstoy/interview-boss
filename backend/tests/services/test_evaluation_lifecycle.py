@@ -128,3 +128,119 @@ def test_restart_expired_run_creates_new_immutable_run(test_db):
     assert test_db.execute(
         "SELECT COUNT(*) FROM eval_items WHERE run_id = ?", (restarted["id"],)
     ).fetchone()[0] == 1
+
+
+def test_resume_run_reuses_completed_evidence_and_requeues_interrupted_items(test_db):
+    module = importlib.import_module("app.services.evaluation_lifecycle")
+    service, context, case = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=2,
+        seed=7,
+    )
+    items = test_db.execute(
+        "SELECT id FROM eval_items WHERE run_id = ? ORDER BY id", (run["id"],)
+    ).fetchall()
+    completed_item_id, interrupted_item_id = (row["id"] for row in items)
+    attempt_id = test_db.execute(
+        """
+        INSERT INTO eval_attempts
+            (item_id, attempt_index, attempt_kind, status, raw_observation_json, finished_at)
+        VALUES (?, 1, 'target', 'succeeded', '{\"observation\":{}}', CURRENT_TIMESTAMP)
+        """,
+        (completed_item_id,),
+    ).lastrowid
+    test_db.execute(
+        """
+        UPDATE eval_items
+        SET status = 'completed', selected_attempt_id = ?, contract_status = 'valid',
+            hard_gate_status = 'passed', judge_status = 'succeeded', score = 0.9,
+            result_json = '{\"observation\":{\"status\":\"succeeded\"}}',
+            finished_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (attempt_id, completed_item_id),
+    )
+    test_db.execute(
+        "UPDATE eval_items SET status = 'cancelled', result_json = ? WHERE id = ?",
+        (json.dumps({"error": "worker_cancelled"}), interrupted_item_id),
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'failed', completed_items = 1, failed_items = 0, summary_json = ? WHERE id = ?",
+        (json.dumps({"failure_class": "worker_cancelled"}), run["id"]),
+    )
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'failed', completed_items = 1, failed_items = 0 WHERE id = ?",
+        (run["batch_id"],),
+    )
+    test_db.commit()
+
+    resumed = module.resume_eval_run(test_db, run["id"], created_by=1)
+
+    assert resumed["id"] != run["id"]
+    assert resumed["status"] == "created"
+    assert resumed["resume_of_run_id"] == run["id"]
+    assert resumed["completed_items"] == 1
+    assert resumed["failed_items"] == 0
+    new_items = test_db.execute(
+        "SELECT id, status, selected_attempt_id, result_json FROM eval_items WHERE run_id = ? ORDER BY id",
+        (resumed["id"],),
+    ).fetchall()
+    assert new_items[0]["status"] == "completed"
+    assert new_items[0]["selected_attempt_id"] is not None
+    assert json.loads(new_items[0]["result_json"])["observation"]["status"] == "succeeded"
+    assert new_items[1]["status"] == "pending"
+    assert new_items[1]["selected_attempt_id"] is None
+    assert test_db.execute(
+        "SELECT status, completed_items FROM eval_runs WHERE id = ?", (run["id"],)
+    ).fetchone()[0:2] == ("failed", 1)
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM eval_attempts WHERE item_id = ?", (new_items[0]["id"],)
+    ).fetchone()[0] == 1
+    event_types = [
+        row[0]
+        for row in test_db.execute(
+            "SELECT event_type FROM eval_events WHERE run_id = ? ORDER BY sequence", (resumed["id"],)
+        ).fetchall()
+    ]
+    assert event_types == ["run.created", "run.items_reused"]
+
+
+def test_resume_run_is_idempotent_while_continuation_is_active(test_db):
+    module = importlib.import_module("app.services.evaluation_lifecycle")
+    service, context, case = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=8,
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'failed' WHERE id = ?", (run["id"],)
+    )
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'failed' WHERE id = ?", (run["batch_id"],)
+    )
+    test_db.commit()
+
+    first = module.resume_eval_run(test_db, run["id"], created_by=1)
+    second = module.resume_eval_run(test_db, run["id"], created_by=1)
+
+    assert second["id"] == first["id"]
+    assert second["already_exists"] is True
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM eval_runs WHERE resume_of_run_id = ?", (run["id"],)
+    ).fetchone()[0] == 1

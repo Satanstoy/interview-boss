@@ -32,7 +32,11 @@ from app.services.evaluation_service import (
     create_eval_run,
     list_events_after,
 )
-from app.services.evaluation_lifecycle import expire_stale_eval_runs, restart_eval_run
+from app.services.evaluation_lifecycle import (
+    expire_stale_eval_runs,
+    restart_eval_run,
+    resume_eval_run,
+)
 
 router = APIRouter(prefix="/api/admin/evals", tags=["admin-evaluation"])
 
@@ -922,7 +926,7 @@ async def list_active_evaluations(
                 """
                 SELECT r.id, r.status, r.total_items, r.completed_items, r.failed_items,
                        r.comparison_group, r.created_at, r.started_at, r.finished_at,
-                       r.last_heartbeat_at, r.restart_of_run_id,
+                       r.last_heartbeat_at, r.restart_of_run_id, r.resume_of_run_id,
                        tr.release_key AS target_release_key, tr.target_type,
                        COALESCE(er.release_key, br.release_key) AS evaluation_release_key,
                        br.release_key AS benchmark_suite_release_key,
@@ -2040,6 +2044,67 @@ async def restart_run(run_id: int, admin: dict = Depends(get_admin_user)):
         "run_id": result["id"],
         "restart_of_run_id": run_id,
         "batch_id": result["batch_id"],
+        "status": status,
+        "dispatch_error": dispatch_error,
+    }
+
+
+@router.post("/runs/{run_id}/resume")
+async def resume_run(run_id: int, admin: dict = Depends(get_admin_user)):
+    """Create and dispatch a continuation Run, reusing completed Cases."""
+
+    def _resume():
+        with get_db_connection() as conn:
+            return resume_eval_run(conn, run_id, created_by=admin["id"])
+
+    try:
+        result = await run_db(_resume)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "不存在" in message else 409
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+    dispatch_error = None
+    status = result["status"]
+    if not result.get("already_exists"):
+        try:
+            job = await enqueue_eval_run_job(
+                result["id"], job_id=f"eval-run-{result['id']}-{uuid.uuid4().hex[:8]}"
+            )
+            if job is None:
+                dispatch_error = "ARQ 未接受入队，Run 保持 created，可稍后重试"
+            else:
+                arq_job_id = getattr(job, "job_id", None)
+
+                def _mark_queued():
+                    with get_db_connection() as conn:
+                        changed = conn.execute(
+                            "UPDATE eval_runs SET status = 'queued' WHERE id = ? AND status = 'created'",
+                            (result["id"],),
+                        ).rowcount
+                        if changed:
+                            conn.execute(
+                                "UPDATE eval_batches SET status = 'queued' WHERE id = ? AND status = 'created'",
+                                (result["batch_id"],),
+                            )
+                            append_event(conn, result["id"], "run.queued", {"arq_job_id": arq_job_id})
+                        current = conn.execute(
+                            "SELECT status FROM eval_runs WHERE id = ?", (result["id"],)
+                        ).fetchone()
+                        conn.commit()
+                        return current["status"] if current else "missing"
+
+                status = await run_db(_mark_queued)
+                if status == "missing":
+                    dispatch_error = "续作 Run 在入队期间不存在"
+        except Exception as exc:
+            dispatch_error = str(exc)[:300]
+    return {
+        "run_id": result["id"],
+        "resume_of_run_id": run_id,
+        "batch_id": result["batch_id"],
+        "reused_completed_items": result["reused_completed_items"],
+        "rerun_items": result["rerun_items"],
         "status": status,
         "dispatch_error": dispatch_error,
     }

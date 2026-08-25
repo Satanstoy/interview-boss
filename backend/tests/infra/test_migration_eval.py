@@ -91,3 +91,28 @@ def test_evaluation_lifecycle_migration_adds_expiry_and_restart_lineage(test_db)
     }
     assert {"last_heartbeat_at", "restart_of_run_id"} <= run_columns
     assert {"last_heartbeat_at"} <= batch_columns
+
+
+def test_evaluation_resume_migration_adds_resume_lineage(test_db):
+    version = test_db.execute(
+        "SELECT version, name FROM schema_version WHERE version = 116"
+    ).fetchone()
+
+    assert tuple(version) == (116, "evaluation_resume")
+    run_columns = {
+        row[1] for row in test_db.execute("PRAGMA table_info(eval_runs)").fetchall()
+    }
+    assert "resume_of_run_id" in run_columns
+
+
+def test_evaluation_resume_idempotency_migration_adds_active_unique_index(test_db):
+    version = test_db.execute(
+        "SELECT version, name FROM schema_version WHERE version = 117"
+    ).fetchone()
+
+    assert tuple(version) == (117, "evaluation_resume_idempotency")
+    indexes = {
+        row[1]
+        for row in test_db.execute("PRAGMA index_list(eval_runs)").fetchall()
+    }
+    assert "idx_eval_runs_active_resume_of" in indexes

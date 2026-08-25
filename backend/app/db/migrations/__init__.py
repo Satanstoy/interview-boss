@@ -180,6 +180,10 @@ from app.db.migrations.question_bank_scope import (
 )
 from app.db.migrations.evaluation_experiment import _migration_095_evaluation_experiment
 from app.db.migrations.evaluation_lifecycle import _migration_115_evaluation_lifecycle
+from app.db.migrations.evaluation_resume import _migration_116_evaluation_resume
+from app.db.migrations.evaluation_resume_idempotency import (
+    _migration_117_evaluation_resume_idempotency,
+)
 from app.db.migrations.practice import (
     _migration_094_review_event_answer_snapshot,
     _migration_096_review_event_evaluation_snapshot,
@@ -323,6 +327,8 @@ _MIGRATIONS = [
     (113, "harness_turn_base_snapshot", _migration_113_harness_turn_base_snapshot),
     (114, "harness_attempt_provenance", _migration_114_harness_attempt_provenance),
     (115, "evaluation_lifecycle", _migration_115_evaluation_lifecycle),
+    (116, "evaluation_resume", _migration_116_evaluation_resume),
+    (117, "evaluation_resume_idempotency", _migration_117_evaluation_resume_idempotency),
 ]
 
 

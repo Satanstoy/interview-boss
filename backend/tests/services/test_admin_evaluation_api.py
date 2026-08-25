@@ -79,6 +79,7 @@ def test_admin_router_exposes_control_plane_routes():
     assert "/api/admin/evals/runs/{run_id}/cancel" in paths
     assert "/api/admin/evals/runs/{run_id}/retry-failed" in paths
     assert "/api/admin/evals/runs/{run_id}/restart" in paths
+    assert "/api/admin/evals/runs/{run_id}/resume" in paths
     assert "/api/admin/evals/runs/{run_id}/events" in paths
     assert "/api/admin/evals/reviews" in paths
 
@@ -117,6 +118,114 @@ def test_active_queue_includes_standalone_running_run(test_db, monkeypatch):
     assert item["kind"] == "run"
     assert item["status"] == "running"
     assert item["total_items"] == 1
+
+
+def test_resume_run_dispatches_continuation_with_reused_counts(test_db, monkeypatch):
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    context = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=12,
+    )
+    item_id = test_db.execute(
+        "SELECT id FROM eval_items WHERE run_id = ?", (run["id"],)
+    ).fetchone()[0]
+    test_db.execute(
+        "UPDATE eval_items SET status = 'cancelled' WHERE id = ?", (item_id,)
+    )
+    test_db.execute(
+        "UPDATE eval_runs SET status = 'cancelled' WHERE id = ?", (run["id"],)
+    )
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'cancelled' WHERE id = ?", (run["batch_id"],)
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    class _Job:
+        job_id = "eval-resume-job"
+
+    enqueued = {}
+
+    async def fake_enqueue(run_id, **kwargs):
+        enqueued["run_id"] = run_id
+        return _Job()
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    result = asyncio.run(module.resume_run(run["id"], {"id": 1, "is_admin": 1}))
+
+    assert result["status"] == "queued"
+    assert result["resume_of_run_id"] == run["id"]
+    assert result["reused_completed_items"] == 0
+    assert result["rerun_items"] == 1
+    assert enqueued["run_id"] == result["run_id"]
+    assert test_db.execute(
+        "SELECT status FROM eval_runs WHERE id = ?", (result["run_id"],)
+    ).fetchone()[0] == "queued"
+
+
+def test_resume_run_reports_worker_winning_race_without_queued_event(test_db, monkeypatch):
+    module = _router()
+    service = importlib.import_module("app.services.evaluation_service")
+    context = _context(test_db)
+    run = service.create_eval_run(
+        test_db,
+        created_by=1,
+        target_release_id=context[0]["id"],
+        benchmark_suite_release_id=context[1]["id"],
+        eval_protocol_release_id=context[2]["id"],
+        judge_release_id=context[3]["id"],
+        simulator_harness_release_id=context[4]["id"],
+        candidate_simulator_release_id=context[5]["id"],
+        replication_count=1,
+        seed=13,
+    )
+    item_id = test_db.execute(
+        "SELECT id FROM eval_items WHERE run_id = ?", (run["id"],)
+    ).fetchone()[0]
+    test_db.execute("UPDATE eval_items SET status = 'cancelled' WHERE id = ?", (item_id,))
+    test_db.execute("UPDATE eval_runs SET status = 'failed' WHERE id = ?", (run["id"],))
+    test_db.execute(
+        "UPDATE eval_batches SET status = 'failed' WHERE id = ?", (run["batch_id"],)
+    )
+    test_db.commit()
+    monkeypatch.setattr(module, "get_db_connection", lambda: test_db)
+
+    async def sync_run_db(func):
+        return func()
+
+    monkeypatch.setattr(module, "run_db", sync_run_db)
+
+    class _Job:
+        job_id = "eval-resume-race"
+
+    async def fake_enqueue(run_id, **kwargs):
+        test_db.execute("UPDATE eval_runs SET status = 'running' WHERE id = ?", (run_id,))
+        test_db.commit()
+        return _Job()
+
+    monkeypatch.setattr(module, "enqueue_eval_run_job", fake_enqueue)
+    result = asyncio.run(module.resume_run(run["id"], {"id": 1, "is_admin": 1}))
+
+    assert result["status"] == "running"
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM eval_events WHERE run_id = ? AND event_type = 'run.queued'",
+        (result["run_id"],),
+    ).fetchone()[0] == 0
 
 
 def test_human_ab_context_includes_frozen_project_harness_identity(test_db):
