@@ -51,6 +51,7 @@ def test_deploy_preflights_bind_mounted_data_for_appuser():
     assert "ensure_runtime_data_dir" in source
     assert "chown -R \"${APP_RUNTIME_UID}:${APP_RUNTIME_GID}\"" in source
     assert 'write_probe="$data_dir/.write-test.$$"' in source
+    assert 'setpriv --reuid="${APP_RUNTIME_UID}"' in source
     assert 'touch "$write_probe"' in source
     assert source.index("ensure_runtime_data_dir") < source.index(
         "docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway"

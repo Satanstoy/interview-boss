@@ -103,7 +103,7 @@ ensure_runtime_data_dir() {
 
   mkdir -p "$data_dir"
   current_owner=$(stat -c '%u:%g' "$data_dir" 2>/dev/null || true)
-  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ] || [ ! -w "$data_dir" ]; then
+  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ]; then
     if [ "$(id -u)" -eq 0 ]; then
       chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
     elif command -v sudo >/dev/null 2>&1; then
@@ -115,7 +115,18 @@ ensure_runtime_data_dir() {
   fi
 
   write_probe="$data_dir/.write-test.$$"
-  if ! touch "$write_probe" 2>/dev/null; then
+  rm -f "$write_probe" 2>/dev/null || true
+  if [ "$(id -u)" -eq "$APP_RUNTIME_UID" ]; then
+    touch "$write_probe" 2>/dev/null || true
+  elif [ "$(id -u)" -eq 0 ] && command -v setpriv >/dev/null 2>&1; then
+    setpriv --reuid="${APP_RUNTIME_UID}" --regid="${APP_RUNTIME_GID}" --clear-groups -- touch "$write_probe" 2>/dev/null || true
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -u "#${APP_RUNTIME_UID}" -g "#${APP_RUNTIME_GID}" -- touch "$write_probe" 2>/dev/null || true
+  else
+    err "无法以 appuser 身份验证运行时数据目录: $data_dir（需要 setpriv 或 sudo）"
+    return 1
+  fi
+  if [ ! -e "$write_probe" ]; then
     err "运行时数据目录写入检查失败: $data_dir（appuser 需要可写）"
     return 1
   fi
