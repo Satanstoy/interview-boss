@@ -67,7 +67,7 @@ The increase is not evidence of a new regression by itself: this is the first fu
 
 ### Accepted baseline and debt register
 
-`.tech-audit/accepted.tsv` contains three owner-accepted items: weak admin-password length, dead historical provider-key material, and manual account deletion. They are not re-counted as current findings. No `.tech-audit/debt.tsv` debt register exists, so there is no separate debt inventory or expiry enforcement beyond `accepted.tsv`.
+`.tech-audit/accepted.tsv` contains three owner-accepted items: weak admin-password length, dead historical provider-key material, and manual account deletion. They are not re-counted as current findings. At audit time no `.tech-audit/debt.tsv` debt register existed; the remediation follow-up now records open yellow items and expiry/verification ownership in that file.
 
 ## Findings — red items
 

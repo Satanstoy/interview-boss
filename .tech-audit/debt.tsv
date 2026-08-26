@@ -1,0 +1,3 @@
+id	severity	dimension	scope	status	owner	due	verification	notes
+D3-mocked-playwright-contract-drift	YELLOW	D3	frontend/tests/e2e	OPEN	frontend	2026-09-09	cd frontend && npm run test:e2e	Audit baseline was 174 failed / 250 passed; stale response-shape and post-login selector assumptions remain. Keep separate from real-stack evidence; no skip or continue-on-error.
+D8-static-type-baseline	YELLOW	D8	backend/app,frontend	TRACKED	backend-and-frontend	2026-09-30	MYPY_BASELINE=551 ./scripts/check_mypy_baseline.sh && (cd frontend && npm run type-check)	The reliable type-check entrypoints now exist and prevent regression, but the existing mypy baseline is still 551 errors and strict TypeScript adoption is incomplete.

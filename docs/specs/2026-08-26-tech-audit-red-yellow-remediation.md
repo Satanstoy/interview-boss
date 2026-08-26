@@ -34,7 +34,7 @@
 | `npm run lint` | exit 0，有 38 warnings | 先确保 errors blocking，再建立 warning 清单与期限 |
 | line guard | 当前 3 个文件超过冻结 cap | 先拆分/缩小文件，再更新 cap；不直接上调上限 |
 | runtime health | backend/OAuth HTTP 200；nginx/OAuth Compose health 为空 | 为 nginx 与 OAuth 增加健康检查并验证 `service_healthy` |
-| 数据库 | schema version 117，`foreign_key_check=0` | 文档生成到 117，迁移不能破坏当前 FK 约束 |
+| 数据库 | schema version 120，`foreign_key_check=0` | 文档生成到 120，迁移不能破坏当前 FK 约束 |
 
 说明：首次后端测试运行受本机 `socks5h://127.0.0.1:7891` 代理影响，测试 fixture 清理代理发生在 collection 之后；整改时要让测试入口在 collection 前处理环境，或提供显式无代理命令，不能把环境噪声误报成代码通过。
 
@@ -265,7 +265,7 @@
 
 #### M3-B：schema 文档自动生成与 freshness gate（D9 🟡）
 
-- 以 live migration registry（当前到 117）和可重建临时库为唯一来源，更新 `docs/architecture/schema.md`。
+- 以 live migration registry（当前到 120）和可重建临时库为唯一来源，更新 `docs/architecture/schema.md`。
 - 生成内容至少包含 migration range、表/列/索引/FK、schema version 与生成时间/commit 信息。
 - 增加生成脚本或已有脚本的可复用入口；CI 在 schema 输出与临时库不一致时失败。
 - 验收：临时库 `foreign_key_check=0`，schema version 与 registry 一致，文档不再停留在 086。
@@ -320,7 +320,7 @@
 
 ### M3 完成条件
 
-- README/env/seed 默认值一致；schema 文档与 migration 117 自动校验一致。
+- README/env/seed 默认值一致；schema 文档与 migration 120 自动校验一致。
 - mypy/TS/ESLint 达到计划中的 blocking 阈值，剩余 warning 有 owner 与期限。
 - 故障 runbook 与部署合规矩阵可由新运维人员按步骤 dry-run，且不含真实 secret/个人数据。
 
@@ -345,3 +345,9 @@ docker compose --profile real-e2e up --abort-on-container-exit --exit-code-from 
 - D5：public contributions requester SQL 过滤与 per-user active request cap；
 - D13：完整运行时环境变量 reference 或收窄 README 完整性声明；
 - D16：PracticeStarChart/PracticeQuadChart 统一 `chartTokens.js`。
+
+## 9. 执行状态（2026-08-26）
+
+- 三条红灯已完成：nginx/OAuth healthcheck、五个生产巨型文件拆分并通过 line guard、disposable-stack 真实全链路 E2E。
+- 黄色项中，D2、D3 后端回归、D4 两项、D6 healthcheck/runbook、D7、D8 line guard、D9、D11、D12、D14 已完成验证。
+- 两项仍保留为明确债务：mocked Playwright fixture/API 漂移，以及 mypy 551 条既有错误与未完成的 strict TypeScript 收敛；详见 `.tech-audit/debt.tsv`。它们不被 real-stack smoke 的通过结果覆盖。
