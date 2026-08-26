@@ -249,6 +249,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging: *default-logging
 
   # ── OAuth Gateway（ChatGPT MCP 连接器 OAuth 2.1 网关）──
@@ -277,6 +283,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging: *default-logging
 
 networks:
