@@ -1,9 +1,9 @@
 # Tech audit — 2026-08-26
 
-**Auditor**: tech-audit skill, under user's direction  
-**Scope**: full project cut, D1–D16  
-**Repo HEAD**: `7f300f21f81f32c164a521274ea1f93de970ec6a` (`docs(audit): record findings disposition`)  
-**Findings source**: `.tech-audit/work/2026-08-26/findings.tsv`  
+**Auditor**: tech-audit skill, under user's direction
+**Scope**: full project cut, D1–D16
+**Repo HEAD**: `7f300f21f81f32c164a521274ea1f93de970ec6a` (`docs(audit): record findings disposition`)
+**Findings source**: `.tech-audit/work/2026-08-26/findings.tsv`
 **Previous mechanical baseline**: `.tech-audit/work/2026-08-24/findings.tsv`
 
 > 审计期间保留了预先存在的未跟踪 `backups/`，没有纳入本次审计提交。审计只记录问题，没有修改业务代码。
