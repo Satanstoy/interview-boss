@@ -142,11 +142,13 @@ cd interview-boss
 cp backend/.env.example backend/.env
 ```
 
-编辑 `backend/.env`，至少填入两项（首次启动会创建种子管理员）：
+编辑 `backend/.env`，至少填入以下配置（首次启动会创建种子管理员）：
 
 ```env
 # ── 必填 ──
 OPENAI_API_KEY=sk-xxx                         # LLM API 密钥
+JWT_SECRET=replace-with-a-random-string-32+    # 生产必填；每个部署必须独立且持久化
+ADMIN_USERNAME=sj                              # 种子管理员用户名
 ADMIN_PASSWORD=your-secure-password            # 种子管理员密码（首次启动必填）
 
 # ── 可选（有默认值） ──
@@ -192,7 +194,7 @@ cd frontend && npm install && npm run dev   # 打开 http://localhost:3000
 | `OPENAI_BASE_URL` | LLM API 地址 | 空 |
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
 | `LLM_TIMEOUT` | LLM 超时（秒） | `120` |
-| `JWT_SECRET` | JWT 签名密钥 | 自动生成 |
+| `JWT_SECRET` | JWT 签名密钥（至少 32 字符） | 生产必填；部署脚本首次初始化时持久化生成 |
 | `ADMIN_USERNAME` | 种子管理员用户名 | `sj` |
 | `DEBUG` | 开启热重载和 Swagger 文档 | `false` |
 | `ALLOWED_ORIGINS` | CORS 允许来源（逗号分隔） | 空 |

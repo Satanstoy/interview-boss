@@ -65,8 +65,10 @@ ensure_runtime_secrets() {
   chmod 600 "$redis_secret_file"
 
   local oauth_secret=""
+  local jwt_secret=""
   if [ -f "$env_file" ]; then
     oauth_secret=$(awk -F= '$1 == "OAUTH_SECRET_KEY" { value=$2; sub(/^[[:space:]]+/, "", value); gsub(/^"|"$/, "", value); print value; exit }' "$env_file")
+    jwt_secret=$(awk -F= '$1 == "JWT_SECRET" { value=$2; sub(/^[[:space:]]+/, "", value); gsub(/^"|"$/, "", value); print value; exit }' "$env_file")
     chmod 600 "$env_file"
   fi
   if [ -f "$env_file" ] && [ -z "$oauth_secret" ]; then
@@ -79,6 +81,17 @@ ensure_runtime_secrets() {
     printf '\nOAUTH_SECRET_KEY=%s\n' "$generated_secret" >> "$env_file"
     chmod 600 "$env_file"
     log "已生成 OAuth 签名密钥并写入 backend/.env"
+  fi
+  if [ -f "$env_file" ] && [ -z "$jwt_secret" ]; then
+    umask 077
+    if command -v openssl >/dev/null 2>&1; then
+      generated_secret=$(openssl rand -hex 32)
+    else
+      generated_secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+    fi
+    printf '\nJWT_SECRET=%s\n' "$generated_secret" >> "$env_file"
+    chmod 600 "$env_file"
+    log "已生成 JWT 签名密钥并写入 backend/.env（仅首次部署）"
   fi
 }
 

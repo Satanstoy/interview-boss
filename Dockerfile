@@ -133,6 +133,8 @@ COPY --chown=appuser frontend/package.json ./backend/frontend/
 COPY --chown=appuser Dockerfile docker-compose.yml .dockerignore pyproject.toml uv.lock ./
 COPY --chown=appuser nginx/ ./nginx/
 COPY --chown=appuser deploy/ ./deploy/
+COPY --chown=appuser scripts/ ./scripts/
+COPY --chown=appuser docs/architecture/schema.md ./docs/architecture/schema.md
 
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
