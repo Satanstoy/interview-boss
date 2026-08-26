@@ -26,7 +26,7 @@ from tenacity import (
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
 from app.core.outbound_url import (
     assert_safe_outbound_url_sync,
-    build_pinned_http_transport,
+    build_pinned_async_http_transport,
 )
 from app.services.llm_usage import normalize_cache_usage
 
@@ -114,7 +114,7 @@ def _make_client(
     transport = None
     if base_url:
         assert_safe_outbound_url_sync(base_url)
-        transport = build_pinned_http_transport(base_url)
+        transport = build_pinned_async_http_transport(base_url)
     http_client = httpx.AsyncClient(
         transport=transport,
         follow_redirects=False,

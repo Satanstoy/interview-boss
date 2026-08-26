@@ -128,6 +128,44 @@ def _check_resolved(url: str) -> str:
     return url.strip()
 
 
+class _PinnedNetworkBackend(httpcore.NetworkBackend):
+    """Synchronous network backend restricted to pre-validated addresses."""
+
+    def __init__(self, addresses: tuple[str, ...]):
+        self._addresses = addresses
+        self._backend = httpcore.SyncBackend()
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:  # pragma: no cover - network-specific fallback
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OSError(f"no validated address available for {host}")
+
+    def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options=None):
+        raise OSError("Unix sockets are not valid outbound HTTP targets")
+
+    def sleep(self, seconds: float) -> None:
+        return self._backend.sleep(seconds)
+
+
 class _PinnedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
     """Connect to the addresses checked before the request was created.
 
@@ -179,8 +217,16 @@ class PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
         self._pool._network_backend = _PinnedAsyncNetworkBackend(addresses)
 
 
-def build_pinned_http_transport(url: str) -> PinnedAsyncHTTPTransport | None:
-    """Validate and build a transport that dials only the validated addresses."""
+class PinnedHTTPTransport(httpx.HTTPTransport):
+    """Synchronous httpx transport whose DNS result is pinned."""
+
+    def __init__(self, addresses: tuple[str, ...]):
+        super().__init__(trust_env=False)
+        self._pool._network_backend = _PinnedNetworkBackend(addresses)
+
+
+def build_pinned_async_http_transport(url: str) -> PinnedAsyncHTTPTransport | None:
+    """Build an async transport that dials only the validated addresses."""
     _parsed, addresses = _resolve_and_validate(url)
     if not addresses:
         # The disposable E2E provider is a Docker DNS name. It is explicitly
@@ -189,9 +235,17 @@ def build_pinned_http_transport(url: str) -> PinnedAsyncHTTPTransport | None:
     return PinnedAsyncHTTPTransport(addresses)
 
 
+def build_pinned_http_transport(url: str) -> PinnedHTTPTransport | None:
+    """Build a sync transport that dials only the validated addresses."""
+    _parsed, addresses = _resolve_and_validate(url)
+    if not addresses:
+        return None
+    return PinnedHTTPTransport(addresses)
+
+
 async def build_pinned_http_transport_async(url: str) -> PinnedAsyncHTTPTransport | None:
     """Async wrapper so DNS resolution never blocks the event loop."""
-    return await asyncio.to_thread(build_pinned_http_transport, url)
+    return await asyncio.to_thread(build_pinned_async_http_transport, url)
 
 
 async def assert_safe_outbound_url(url: str, *, resolve: bool = True) -> str:

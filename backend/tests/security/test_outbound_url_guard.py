@@ -67,7 +67,7 @@ def test_dns_result_is_checked_before_connect(monkeypatch):
 
 
 def test_pinned_transport_dials_only_the_validated_dns_answer(monkeypatch):
-    from app.core.outbound_url import build_pinned_http_transport
+    from app.core.outbound_url import build_pinned_async_http_transport
 
     calls = []
 
@@ -82,7 +82,7 @@ def test_pinned_transport_dials_only_the_validated_dns_answer(monkeypatch):
             return object()
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    transport = build_pinned_http_transport("https://provider.example/v1")
+    transport = build_pinned_async_http_transport("https://provider.example/v1")
     transport._pool._network_backend._backend = FakeNetworkBackend()
 
     asyncio.run(
@@ -105,13 +105,31 @@ def test_llm_clients_disable_redirects(monkeypatch):
 
     monkeypatch.setattr(llm, "AsyncOpenAI", DummyClient)
     monkeypatch.setattr(llm, "assert_safe_outbound_url_sync", lambda _url: None)
-    monkeypatch.setattr(llm, "build_pinned_http_transport", lambda _url: None)
+    monkeypatch.setattr(llm, "build_pinned_async_http_transport", lambda _url: None)
 
     llm._make_client("key", "https://provider.example/v1", 30, "openai")
 
     http_client = captured["http_client"]
     assert http_client.follow_redirects is False
     asyncio.run(http_client.aclose())
+
+
+def test_sync_pinned_transport_implements_httpx_sync_protocol(monkeypatch):
+    import httpx
+    from app.core.outbound_url import build_pinned_http_transport
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ],
+    )
+    transport = build_pinned_http_transport("https://provider.example/v1")
+
+    assert hasattr(transport, "handle_request")
+    with httpx.Client(transport=transport, follow_redirects=False) as client:
+        assert client._transport is transport
 
 
 def test_embedding_client_rejects_private_base_url(monkeypatch):
