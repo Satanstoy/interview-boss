@@ -40,6 +40,23 @@ def test_public_custom_url_is_allowed_without_provider_allowlist():
     )
 
 
+def test_disposable_stub_bypass_requires_explicit_test_environment(monkeypatch):
+    monkeypatch.setenv("E2E_STUB_PROVIDER", "1")
+    monkeypatch.setenv("ENV", "test")
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.20.0.8", 8080))],
+    )
+    assert asyncio.run(assert_safe_outbound_url("http://llm-stub:8080/v1")) == (
+        "http://llm-stub:8080/v1"
+    )
+
+    monkeypatch.setenv("ENV", "production")
+    with pytest.raises(OutboundURLBlocked):
+        asyncio.run(assert_safe_outbound_url("http://llm-stub:8080/v1"))
+
+
 def test_dns_result_is_checked_before_connect(monkeypatch):
     def fake_getaddrinfo(*_args, **_kwargs):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.8", 443))]

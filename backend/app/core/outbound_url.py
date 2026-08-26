@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import socket
 from urllib.parse import urlsplit
 
@@ -96,8 +97,19 @@ def _resolved_addresses(host: str, port: int | None) -> set[str]:
     return addresses
 
 
+def _is_disposable_e2e_stub(parsed) -> bool:
+    """Allow only the named local test provider in the disposable E2E stack."""
+    return (
+        os.environ.get("ENV", "").strip().lower() == "test"
+        and os.environ.get("E2E_STUB_PROVIDER", "") == "1"
+        and (parsed.hostname or "").rstrip(".").lower() == "llm-stub"
+    )
+
+
 def _check_resolved(url: str) -> str:
     parsed = _split_url(url)
+    if _is_disposable_e2e_stub(parsed):
+        return url.strip()
     try:
         addresses = _resolved_addresses(parsed.hostname, parsed.port)
     except OSError as exc:

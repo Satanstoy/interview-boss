@@ -254,6 +254,7 @@ const createPlaylist = async () => {
       <!-- 全局上传任务进度胶囊 -->
       <div v-if="activeJobs.length > 0" class="relative">
         <button
+          data-testid="job-progress-toggle"
           @click="showJobPanel = !showJobPanel"
           class="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-muted/50 hover:bg-muted transition text-xs"
         >
@@ -268,6 +269,7 @@ const createPlaylist = async () => {
         <Transition name="fade-slide">
           <div
             v-if="showJobPanel"
+            data-testid="job-progress-panel"
             class="absolute right-0 top-full z-50 mt-1 w-[min(24rem,calc(100vw-1rem))] rounded-xl border border-border bg-card shadow-lg overflow-hidden"
           >
             <div class="text-xs font-semibold text-foreground p-3 pb-2">处理进度</div>

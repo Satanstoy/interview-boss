@@ -53,8 +53,8 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 last_update = current_update
 
             if job["status"] in ("completed", "failed"):
-                if job["error"]:
-                    yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['error']}, ensure_ascii=False)}\n\n"
+                if job["last_error"]:
+                    yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['last_error']}, ensure_ascii=False)}\n\n"
                 elif job["result"]:
                     # 尝试解析 JSON result（submit_import 等任务会存 JSON）
                     try:
