@@ -20,7 +20,7 @@
 |---|---|---:|---:|---:|---:|
 | D1 | Code essentiality | ❌ | 1 | 0 | 0 |
 | D2 | Docs integrity | ⚠️ | 0 | 1 | 0 |
-| D3 | Tests as adversaries | ❌ | 1 | 1 | 0 |
+| D3 | Tests as adversaries | ❌ | 1 | 2 | 0 |
 | D4 | Security posture | ⚠️ | 0 | 2 | 0 |
 | D5 | Multi-tenant isolation | ⚠️ | 0 | 0 | 2 |
 | D6 | Operational readiness | ❌ | 1 | 1 | 0 |
@@ -34,14 +34,14 @@
 | D14 | Correctness & robustness | ⚠️ | 0 | 1 | 0 |
 | D15 | UX & interaction | ✅ | 0 | 0 | 0 |
 | D16 | UI & design-system craft | ⚠️ | 0 | 0 | 1 |
-| **Total** | | **❌** | **3** | **12** | **4** |
+| **Total** | | **❌** | **3** | **13** | **4** |
 
 ## Verification evidence
 
 - `bash deploy/tests/*.sh`: all four storage/lifecycle contract tests passed.
 - `ALL_PROXY= all_proxy= .venv/bin/pytest backend/tests -q --tb=no`: **37 failed, 2,799 passed, 4 skipped, 14 deselected, 29 warnings** in 13m27s. The first run without the override hit 23 collection errors because the local Python environment exposed `socks5h://127.0.0.1:7891`; the autouse cleanup in `backend/tests/conftest.py:25-34` runs after collection. The reported full-run count is from the no-proxy rerun.
 - `.venv/bin/ruff check backend/app`: passed. `.venv/bin/mypy backend/app`: failed with **551 errors in 92 files**.
-- `npm ci`: passed. `npm run build`: passed with large-chunk warnings. `npm run lint`: passed with 38 warnings. Default Playwright smoke: **1 passed**. The full mocked E2E suite was started separately; it is not counted as real full-stack evidence.
+- `npm ci`: passed. `npm run build`: passed with large-chunk warnings. `npm run lint`: passed with 38 warnings. Default Playwright smoke: **1 passed**. The full mocked Playwright suite: **174 failed, 250 passed**; representative failures were stale mock response shapes and post-login selectors, and it is not counted as real full-stack evidence.
 - `npm audit --registry=https://registry.npmjs.org --omit=dev`: no known production vulnerabilities. `.venv/bin/pip-audit`: no known vulnerabilities. `python3 backend/scripts/check_secrets.py`: no hardcoded secrets found.
 - Runtime: backend `GET /api/health` returned 200, OAuth `/health` returned 200, and the database reported `PRAGMA foreign_key_check = 0` with schema version 117. Compose nevertheless reports empty health state for nginx and OAuth because those services have no healthcheck definition.
 
@@ -52,9 +52,9 @@ Mechanical mapping used here: severity 4 = 🔴, 3 = 🟡, 0–2 = 🟢.
 | | This pass | 2026-08-24 | Delta |
 |---|---:|---:|---:|
 | 🔴 | 3 | 0 | +3 |
-| 🟡 | 12 | 0 | +12 |
+| 🟡 | 13 | 0 | +13 |
 | 🟢 | 4 | 5 | -1 |
-| Total | 19 | 5 | +14 |
+| Total | 20 | 5 | +15 |
 
 The increase is not evidence of a new regression by itself: this is the first full project cut in the current work window, and it records risks previously visible only as notes or runtime observations. The comparison TSV contains five lower-severity rows; the current pass adds direct runtime and source evidence.
 
@@ -92,6 +92,8 @@ The increase is not evidence of a new regression by itself: this is the first fu
 ### D3 — backend regression suite is not green
 
 The no-proxy full run produced 37 failures across bank, security, services, taxonomy, worker, and clustering tests. `scripts/check.sh:183-189` explicitly runs this suite through `run_nonblocking`, so the project can report a successful audit summary while the regression baseline is red.
+
+The full mocked Playwright run also completed red: 174 failures and 250 passes. `frontend/tests/e2e/visual-quality.spec.js:167-322` shows representative post-login/login-page assertions failing after the current mocked API shape no longer matches the rendered contract; `frontend/tests/e2e/full-flow.spec.js:1-5` confirms the suite is mock-driven. This is scored as test-fixture/contract drift, separate from the real-stack E2E gap.
 
 ### D4 — outbound URL DNS validation has a rebinding window
 
