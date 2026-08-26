@@ -147,7 +147,7 @@ At `backend/app/core/auth.py:24-43`, any exception while reading `.env` is swall
 ## Dimensions without current findings
 
 - **D10** is release-only in this cut; no release tag or launch decision was being audited, so no performance/cost claim is made.
-- **D15**: no current `window.confirm` usage was found; source scan found reduced-motion handling in eight UI locations, and the login smoke passed. Full UI E2E remains mocked and does not upgrade D3.
+- **D15**: no current `window.confirm` usage was found; source scan found reduced-motion handling in eight UI locations, the login smoke passed, and a waited 1280×720 browser capture rendered the login page. Full UI E2E remains mocked and does not upgrade D3.
 
 ## Triage
 
