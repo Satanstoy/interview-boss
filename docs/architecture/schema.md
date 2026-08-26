@@ -1,8 +1,8 @@
 # InterviewBoss SQLite Schema
 
 > Generated: 2026-08-26
-> Source migration commit: 6c4045bb
-> Latest migration: 119 (admin_audit_log)
+> Source migration commit: 31493b04
+> Latest migration: 120 (clear_db_confirmations)
 > foreign_key_check: 0
 > Source of truth: `backend/app/db/migrations/` applied to a fresh in-memory SQLite database.
 > Runtime: SQLite WAL with `PRAGMA foreign_keys=ON`; soft-deleted rows use `deleted_at IS NULL` filters where documented by the owning service.
@@ -127,8 +127,9 @@
 | 117 | `evaluation_resume_idempotency` | yes |
 | 118 | `jd_bonus` | yes |
 | 119 | `admin_audit_log` | yes |
+| 120 | `clear_db_confirmations` | yes |
 
-## Tables (87)
+## Tables (88)
 
 ### `admin_assistant_log`
 - Columns: `id`:INTEGER, `session_id`:TEXT, `admin_id`:INTEGER, `role`:TEXT, `content`:TEXT, `tool_trace`:TEXT, `created_at`:TEXT
@@ -184,6 +185,11 @@
 - Columns: `id`:TEXT, `conversation_id`:TEXT, `user_id`:INTEGER, `client_request_id`:TEXT, `fence`:INTEGER, `status`:TEXT, `user_message_id`:INTEGER, `assistant_message_id`:INTEGER, `cancel_reason`:TEXT, `error_code`:TEXT, `created_at`:TIMESTAMP, `finished_at`:TIMESTAMP, `request_fingerprint`:TEXT, `revision_of_message_id`:INTEGER, `harness_status`:TEXT, `terminal_reason`:TEXT, `session_version`:INTEGER, `ledger_version_at_start`:INTEGER, `turn_run_version`:INTEGER, `current_action_id`:TEXT, `current_attempt_no`:INTEGER, `latest_sequence`:INTEGER, `budget_snapshot_json`:TEXT, `context_pack_hash`:TEXT, `started_at`:TIMESTAMP, `revision_of_turn_id`:TEXT, `lease_owner`:TEXT, `lease_expires_at`:TIMESTAMP, `heartbeat_at`:TIMESTAMP, `stable_prefix_hash`:TEXT, `turn_base_snapshot_json`:TEXT
 - Foreign keys: `assistant_message_id` -> `chat_messages`.`id` (SET NULL); `user_message_id` -> `chat_messages`.`id` (SET NULL); `user_id` -> `users`.`id` (CASCADE); `conversation_id` -> `chat_conversations`.`id` (CASCADE)
 - Indexes: `idx_chat_turn_fence` (conversation_id, fence); `idx_chat_turn_harness_status` (conversation_id, harness_status, created_at); `idx_chat_turn_recovery` (harness_status, lease_expires_at, heartbeat_at); `idx_chat_turn_request_fingerprint` (conversation_id, request_fingerprint); `idx_chat_turn_revision_of_turn` (revision_of_turn_id); `idx_chat_turn_revision` (revision_of_message_id); `idx_chat_turn_running_conversation` UNIQUE partial (conversation_id); `idx_chat_turn_user_status` (user_id, status, created_at); `sqlite_autoindex_chat_turns_1` UNIQUE (id); `sqlite_autoindex_chat_turns_2` UNIQUE (conversation_id, client_request_id)
+
+### `clear_db_confirmations`
+- Columns: `token_hash`:TEXT, `admin_id`:INTEGER, `consumed_at`:TEXT
+- Foreign keys: none
+- Indexes: `idx_clear_db_confirmation_admin` (admin_id, consumed_at); `sqlite_autoindex_clear_db_confirmations_1` UNIQUE (token_hash)
 
 ### `cluster_review_state`
 - Columns: `cluster_id`:INTEGER, `current_version`:TEXT, `reviewed_version`:TEXT, `status`:TEXT, `priority`:INTEGER, `last_trigger_reason`:TEXT, `last_reviewed_at`:TEXT, `last_error`:TEXT, `created_at`:TEXT, `updated_at`:TEXT
