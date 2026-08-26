@@ -44,6 +44,10 @@ def _patch_config(monkeypatch, cfg):
         "app.services.llm.assert_safe_outbound_url_sync",
         lambda url: None,
     )
+    monkeypatch.setattr(
+        "app.services.llm.build_pinned_async_http_transport",
+        lambda url: None,
+    )
 
 
 def _fail_probe(mock_llm, exc):
