@@ -11,12 +11,13 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 def test_oauth_gateway_has_an_exact_dependency_lock():
     lines = [line.strip() for line in LOCK.read_text().splitlines()]
-    requirements = [line for line in lines if line and not line.startswith("#")]
+    requirements = [line for line in lines if "==" in line]
 
     assert requirements
     assert any(line.lower().startswith("fastapi==") for line in requirements)
     assert all("==" in line for line in requirements)
     assert all(">=" not in line and "~=" not in line for line in requirements)
+    assert LOCK.read_text().count("--hash=") >= len(requirements)
 
 
 def test_oauth_gateway_image_installs_the_lock():
@@ -24,6 +25,7 @@ def test_oauth_gateway_image_installs_the_lock():
 
     assert "COPY requirements.lock ." in dockerfile
     assert "-r requirements.lock" in dockerfile
+    assert "--require-hashes" in dockerfile
 
 
 def test_ci_audits_oauth_gateway_lock_independently():

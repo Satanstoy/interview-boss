@@ -54,6 +54,10 @@ class TestCheckSecrets:
         # iter_source_files 基于 PROJECT_ROOT 扫描，此处验证排除规则本身
         assert ".env" in checker.EXCLUDE_NAMES
 
+    def test_generated_test_results_are_excluded(self):
+        """Playwright 失败产物不是生产源码，不应让 secret gate 失真。"""
+        assert "test-results" in checker.EXCLUDE_DIRS
+
     def test_main_returns_zero_on_clean_repo(self):
         """对当前仓库运行 main() 应返回 0（已无硬编码密钥）"""
         rc = checker.main()

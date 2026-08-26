@@ -180,11 +180,10 @@ run_backend() {
       backend/tests/services/test_router_refactor.py \
       -q
 
-  # 全量关键子集已恢复为 0 failed，重新作为发布 blocking gate。
+  # 默认后端测试全集已恢复为 0 failed，作为发布 blocking gate。
   run_blocking "backend full tests" \
     compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
-      backend/tests/bank backend/tests/chat backend/tests/pipeline \
-      backend/tests/services backend/tests/security backend/tests/infra \
+      backend/tests \
       -q --tb=no
 
   local schema_source_commit

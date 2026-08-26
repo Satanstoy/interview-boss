@@ -11,6 +11,11 @@ def test_green_regression_suite_is_blocking():
 
     assert 'run_blocking "backend full tests"' in source
     assert 'run_nonblocking "backend full tests"' not in source
+    full_tests = source.split('run_blocking "backend full tests"', 1)[1].split(
+        "local schema_source_commit", 1
+    )[0]
+    assert "backend/tests" in full_tests
+    assert "backend/tests/bank backend/tests/chat" not in full_tests
 
 
 def test_frontend_lint_and_mypy_baseline_are_blocking():

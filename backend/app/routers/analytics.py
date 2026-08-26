@@ -1,14 +1,64 @@
+import hashlib
+import hmac
 import logging
+import secrets
+import sqlite3
+import time
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user, get_admin_user
+from app.core.auth import SECRET_KEY, get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_user_job_position
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
+
+_CLEAR_DB_CONFIRM_TTL_SECONDS = 300
+
+
+def _create_clear_db_token(admin_id: int, now: float | None = None) -> str:
+    """Create a short-lived, admin-bound confirmation token."""
+    issued_at = int(time.time() if now is None else now)
+    nonce = secrets.token_urlsafe(24)
+    payload = f"clear-db:{admin_id}:{issued_at}:{nonce}"
+    signature = hmac.new(
+        SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{issued_at}.{nonce}.{signature}"
+
+
+def _is_valid_clear_db_token(
+    token: str, admin_id: int, now: float | None = None
+) -> bool:
+    """Verify token integrity, audience and expiry without server-side state."""
+    try:
+        issued_text, nonce, signature = token.split(".", 2)
+        issued_at = int(issued_text)
+    except (AttributeError, ValueError):
+        return False
+
+    current_time = time.time() if now is None else now
+    if issued_at > current_time + 30 or current_time - issued_at > _CLEAR_DB_CONFIRM_TTL_SECONDS:
+        return False
+    payload = f"clear-db:{admin_id}:{issued_at}:{nonce}"
+    expected = hmac.new(
+        SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def _backup_sqlite_online(db_path: str, backup_path: str) -> None:
+    """Create a consistent SQLite snapshot, including committed WAL frames."""
+    source = sqlite3.connect(db_path, timeout=30)
+    destination = sqlite3.connect(backup_path)
+    try:
+        with destination:
+            source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
 
 
 async def _record_clear_db_audit(
@@ -307,10 +357,6 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
 @router.post("/api/analytics/clear-db/preview")
 async def preview_clear_db(admin: dict = Depends(get_admin_user)):
     """预览将删除的数据统计"""
-    import hashlib
-    import os
-    import time
-
     def _query():
         stats = {}
         tables = [
@@ -334,10 +380,7 @@ async def preview_clear_db(admin: dict = Depends(get_admin_user)):
 
     stats = await run_db(_query)
 
-    secret = os.getenv("JWT_SECRET", "")
-    token = hashlib.sha256(
-        f"{secret}:{time.time()}".encode()
-    ).hexdigest()
+    token = _create_clear_db_token(admin["id"])
 
     return {"stats": stats, "confirm_token": token}
 
@@ -346,7 +389,6 @@ async def preview_clear_db(admin: dict = Depends(get_admin_user)):
 async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_admin_user)):
     """清空所有数据库表（需要确认 token，执行前自动创建备份）"""
     import os
-    import shutil
     from app.core.config import DB_PATH
 
     if not confirm_token:
@@ -358,7 +400,7 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
         )
         raise HTTPException(status_code=400, detail="需要确认 token")
 
-    if len(confirm_token) < 64:
+    if not _is_valid_clear_db_token(confirm_token, admin["id"]):
         await _record_clear_db_audit(
             "rejected",
             admin,
@@ -374,7 +416,7 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
         metadata={"phase": "backup", "backup_file": os.path.basename(backup_path)},
     )
     try:
-        shutil.copy2(DB_PATH, backup_path)
+        await run_db(lambda: _backup_sqlite_online(DB_PATH, backup_path))
         logger.info(f"清空前已创建数据库备份: {backup_path}")
     except Exception as e:
         await _record_clear_db_audit(

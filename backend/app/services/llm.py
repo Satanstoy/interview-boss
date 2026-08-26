@@ -271,6 +271,8 @@ def clear_user_client_cache(user_id: int = None):
 
 
 from app.services.llm_status import (
+    _LLM_STATUS_CACHE_TTL,
+    _llm_status_cache,
     _api_format_label,
     _classify_probe_error,
     _probe_llm,

@@ -10,6 +10,7 @@ DOCKERFILE = ROOT / "Dockerfile"
 ENTRYPOINT = ROOT / "deploy" / "entrypoint.sh"
 NGINX_CONF = ROOT / "nginx" / "nginx.conf"
 COMPOSE = ROOT / "docker-compose.yml"
+DEPLOY = ROOT / "deploy" / "docker-deploy.sh"
 
 
 def test_app_runtime_drops_privileges_before_entrypoint():
@@ -42,3 +43,15 @@ def test_compose_ports_and_healthcheck_match_non_root_nginx():
 
     assert "127.0.0.1:8081:8080" in nginx["ports"]
     assert "http://127.0.0.1:8080/" in str(nginx["healthcheck"]["test"])
+
+
+def test_deploy_preflights_bind_mounted_data_for_appuser():
+    source = DEPLOY.read_text()
+
+    assert "ensure_runtime_data_dir" in source
+    assert "chown -R \"${APP_RUNTIME_UID}:${APP_RUNTIME_GID}\"" in source
+    assert 'write_probe="$data_dir/.write-test.$$"' in source
+    assert 'touch "$write_probe"' in source
+    assert source.index("ensure_runtime_data_dir") < source.index(
+        "docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway"
+    )

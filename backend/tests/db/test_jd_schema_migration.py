@@ -19,4 +19,4 @@ def test_jd_bonus_migration_is_registered_after_latest_migration():
 
     versions = [version for version, _, _ in _MIGRATIONS]
     assert 118 in versions
-    assert versions.index(118) == len(versions) - 1
+    assert versions.index(118) < versions.index(119)

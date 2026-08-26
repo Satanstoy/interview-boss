@@ -1,5 +1,6 @@
 """Test clear_db confirmation mechanism."""
 
+import sqlite3
 import pytest
 
 ADMIN = {"id": 1, "is_admin": 1, "username": "admin"}
@@ -71,7 +72,8 @@ def test_clear_with_valid_token_succeeds(client, test_db, tmp_path, monkeypatch)
     import app.core.config as config
 
     backup_source = tmp_path / "test.db"
-    backup_source.write_bytes(b"SQLite format 3\x00")
+    with sqlite3.connect(backup_source) as conn:
+        conn.execute("CREATE TABLE marker (value TEXT)")
     monkeypatch.setattr(config, "DB_PATH", str(backup_source))
 
     _override_admin(app)
@@ -102,3 +104,31 @@ def test_clear_with_short_token_returns_400(client, test_db):
         assert response.status_code == 400
     finally:
         _clear_overrides(app)
+
+
+def test_clear_with_wrong_long_token_returns_400(client, test_db):
+    """长度足够但不是 preview 签发的 token 也必须被拒绝。"""
+    from app.asgi import app
+
+    _override_admin(app)
+    try:
+        preview = client.post("/api/analytics/clear-db/preview", headers=CSRF_HEADERS)
+        assert preview.status_code == 200
+        response = client.post(
+            "/api/clear-db?confirm_token=" + "x" * 64,
+            headers=CSRF_HEADERS,
+        )
+    finally:
+        _clear_overrides(app)
+
+    assert response.status_code == 400
+
+
+def test_clear_token_is_bound_to_admin_and_expires():
+    from app.routers.analytics import _create_clear_db_token, _is_valid_clear_db_token
+
+    token = _create_clear_db_token(7, now=1_000)
+
+    assert _is_valid_clear_db_token(token, 7, now=1_299)
+    assert not _is_valid_clear_db_token(token, 8, now=1_299)
+    assert not _is_valid_clear_db_token(token, 7, now=1_301)

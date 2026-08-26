@@ -123,3 +123,18 @@ def test_embedding_client_rejects_private_base_url(monkeypatch):
 
     with pytest.raises(OutboundURLBlocked):
         embedding_service._get_siliconflow_client()
+
+
+def test_profile_upstream_probe_paths_use_pinned_transports():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    llm_source = (root / "backend/app/routers/profile_pkg/llm.py").read_text()
+    embedding_source = (root / "backend/app/routers/profile_pkg/embedding.py").read_text()
+
+    assert "build_pinned_http_transport_async" in llm_source
+    assert "follow_redirects=False" in llm_source
+    assert "trust_env=False" in llm_source
+    assert "build_pinned_http_transport(" in embedding_source
+    assert "follow_redirects=False" in embedding_source
+    assert "trust_env=False" in embedding_source

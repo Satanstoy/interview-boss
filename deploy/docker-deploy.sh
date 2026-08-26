@@ -27,6 +27,8 @@ BUILDKIT_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 BUILDKIT_BUILDER_DRIVER="${BUILDKIT_BUILDER_DRIVER:-docker-container}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 BACKUP_MIN_KEEP_FILES="${BACKUP_MIN_KEEP_FILES:-3}"
+APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"
+APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"
 
 # 镜像源策略：
 # - 默认复用缓存/稳定默认源，保持 Docker layer cache key 稳定。
@@ -93,6 +95,32 @@ ensure_runtime_secrets() {
     chmod 600 "$env_file"
     log "已生成 JWT 签名密钥并写入 backend/.env（仅首次部署）"
   fi
+}
+
+ensure_runtime_data_dir() {
+  local data_dir="$PROJECT_DIR/backend/data"
+  local current_owner write_probe
+
+  mkdir -p "$data_dir"
+  current_owner=$(stat -c '%u:%g' "$data_dir" 2>/dev/null || true)
+  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ] || [ ! -w "$data_dir" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+      chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
+    else
+      err "运行时数据目录不可由 appuser 写入: $data_dir（需要 UID:GID ${APP_RUNTIME_UID}:${APP_RUNTIME_GID}）"
+      return 1
+    fi
+  fi
+
+  write_probe="$data_dir/.write-test.$$"
+  if ! touch "$write_probe" 2>/dev/null; then
+    err "运行时数据目录写入检查失败: $data_dir（appuser 需要可写）"
+    return 1
+  fi
+  rm -f "$write_probe"
+  log "运行时数据目录权限通过: $data_dir (${APP_RUNTIME_UID}:${APP_RUNTIME_GID})"
 }
 
 # ── 检查 Docker 权限 ──
@@ -613,6 +641,7 @@ do_build() {
 # ── 启动核心服务 ──
 do_up() {
   log "启动核心服务（redis queue/cache、backend/nginx/oauth-gateway，不默认启动 worker）..."
+  ensure_runtime_data_dir
   docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway
   do_status
 }
@@ -655,6 +684,7 @@ do_update() {
   log "更新核心服务（不中断 Redis，不默认启动 worker）..."
 
   # 1. Pre-flight
+  ensure_runtime_data_dir
   ensure_disk_before_build
   save_old_image
 
@@ -715,6 +745,7 @@ do_frontend() {
 # ── Worker 按需挂载 ──
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
+  ensure_runtime_data_dir
   guarded_compose_build backend
   docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status

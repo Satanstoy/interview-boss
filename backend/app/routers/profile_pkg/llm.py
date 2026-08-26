@@ -3,7 +3,11 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
-from app.core.outbound_url import OutboundURLBlocked, validate_outbound_url_syntax
+from app.core.outbound_url import (
+    OutboundURLBlocked,
+    build_pinned_http_transport_async,
+    validate_outbound_url_syntax,
+)
 from app.db.connection import get_db_connection, run_db
 from app.services.encryption import encrypt_value, decrypt_value
 
@@ -267,11 +271,13 @@ async def list_available_models(user: dict = Depends(get_current_user)):
             else:
                 url = f"{base}/v1/models"
 
-        if provider != "anthropic":
-            from app.core.outbound_url import assert_safe_outbound_url
-
-            await assert_safe_outbound_url(url, resolve=True)
-        async with httpx.AsyncClient(timeout=10) as http_client:
+        transport = await build_pinned_http_transport_async(url)
+        async with httpx.AsyncClient(
+            timeout=10,
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+        ) as http_client:
             response = await http_client.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()

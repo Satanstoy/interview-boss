@@ -1,6 +1,6 @@
 """Clear-db operations must leave a durable administrative audit trail."""
 
-import shutil
+import sqlite3
 
 
 ADMIN = {"id": 1, "is_admin": 1, "username": "admin"}
@@ -38,7 +38,8 @@ def test_clear_db_success_is_audited_and_survives_business_table_cleanup(
     import app.core.config as config
 
     db_source = tmp_path / "test.db"
-    db_source.write_bytes(b"SQLite format 3\x00")
+    with sqlite3.connect(db_source) as conn:
+        conn.execute("CREATE TABLE marker (value TEXT)")
     monkeypatch.setattr(config, "DB_PATH", str(db_source))
 
     _override_admin(app)
@@ -76,11 +77,14 @@ def test_clear_db_backup_failure_is_audited(client, test_db, monkeypatch):
     def fail_copy(*_args, **_kwargs):
         raise OSError("backup unavailable")
 
-    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    import app.routers.analytics as analytics
+
+    monkeypatch.setattr(analytics, "_backup_sqlite_online", fail_copy)
     _override_admin(app)
     try:
+        preview = client.post("/api/analytics/clear-db/preview", headers=CSRF_HEADERS)
         response = client.post(
-            "/api/clear-db?confirm_token=" + "x" * 64,
+            "/api/clear-db?confirm_token=" + preview.json()["confirm_token"],
             headers=CSRF_HEADERS,
         )
     finally:
@@ -88,3 +92,20 @@ def test_clear_db_backup_failure_is_audited(client, test_db, monkeypatch):
 
     assert response.status_code == 500
     assert _audit_events(test_db)[-1]["status"] == "failure"
+
+
+def test_clear_db_online_backup_includes_wal_frames(tmp_path):
+    import app.routers.analytics as analytics
+
+    source = tmp_path / "source.db"
+    backup = tmp_path / "backup.db"
+    with sqlite3.connect(source) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE marker (value TEXT)")
+        conn.execute("INSERT INTO marker VALUES ('wal-value')")
+        conn.commit()
+
+        analytics._backup_sqlite_online(str(source), str(backup))
+
+    with sqlite3.connect(backup) as conn:
+        assert conn.execute("SELECT value FROM marker").fetchone()[0] == "wal-value"

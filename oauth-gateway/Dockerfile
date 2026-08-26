@@ -8,6 +8,7 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir --timeout 30 --retries 2 \
     -i ${PYPI_MIRROR} \
     --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') \
+    --require-hashes \
     -r requirements.lock
 
 COPY . .
