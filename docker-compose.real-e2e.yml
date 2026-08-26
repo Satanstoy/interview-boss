@@ -159,7 +159,7 @@ services:
       network: host
     image: interview-boss-nginx:real-e2e
     ports:
-      - "127.0.0.1:${REAL_STACK_PORT:-18081}:80"
+      - "127.0.0.1:${REAL_STACK_PORT:-18081}:8080"
     networks: [edge-network]
     depends_on:
       backend:
@@ -167,7 +167,7 @@ services:
       oauth-gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 3s
       timeout: 3s
       retries: 20

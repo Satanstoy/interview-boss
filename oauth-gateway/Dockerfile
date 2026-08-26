@@ -4,11 +4,11 @@ ARG PYPI_MIRROR=https://mirrors.cloud.tencent.com/pypi/simple/
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.lock .
 RUN pip install --no-cache-dir --timeout 30 --retries 2 \
     -i ${PYPI_MIRROR} \
     --trusted-host $(echo ${PYPI_MIRROR} | sed 's|https://||;s|/.*||') \
-    -r requirements.txt
+    -r requirements.lock
 
 COPY . .
 

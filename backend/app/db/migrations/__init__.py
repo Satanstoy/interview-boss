@@ -57,6 +57,7 @@ from app.db.migrations.question_bank import (
     _migration_063_answer_sources,
     _migration_118_jd_bonus,
 )
+from app.db.migrations.admin_audit import _migration_119_admin_audit_log
 from app.db.migrations.auth import (
     _migration_003_auth_tables,
     _migration_010_users_extra_columns,
@@ -331,6 +332,7 @@ _MIGRATIONS = [
     (116, "evaluation_resume", _migration_116_evaluation_resume),
     (117, "evaluation_resume_idempotency", _migration_117_evaluation_resume_idempotency),
     (118, "jd_bonus", _migration_118_jd_bonus),
+    (119, "admin_audit_log", _migration_119_admin_audit_log),
 ]
 
 

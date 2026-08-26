@@ -100,7 +100,7 @@ COPY --from=deps-builder --chown=appuser /app/.venv /app/.venv
 COPY --chown=appuser backend/ ./backend/
 COPY --chown=appuser evals/ ./evals/
 
-# Entrypoint（以 root 修复 bind mount 权限，然后切换到 appuser）
+# Entrypoint 只负责 exec；镜像本身以 appuser 启动，不能在运行时夺回 root。
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -109,6 +109,7 @@ ENV PYTHONPATH=/app/backend
 ENV REDIS_URL=redis://redis:6379/0
 ENV PATH="/app/.venv/bin:$PATH"
 
+USER appuser
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]
 
@@ -140,6 +141,7 @@ ENV PYTHONPATH=/app/backend
 ENV REDIS_URL=redis://redis:6379/0
 ENV PATH="/app/.venv/bin:$PATH"
 
+USER appuser
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 
@@ -147,5 +149,10 @@ CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 FROM nginx:1.29-alpine AS nginx-runtime
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-RUN chmod -R a+rX /usr/share/nginx/html
-EXPOSE 80
+RUN chmod -R a+rX /usr/share/nginx/html && \
+    mkdir -p /tmp/nginx/client_temp /tmp/nginx/proxy_temp /var/cache/nginx && \
+    chown -R nginx:nginx /tmp/nginx /var/cache/nginx
+USER nginx
+EXPOSE 8080
+ENTRYPOINT ["nginx"]
+CMD ["-g", "daemon off;"]

@@ -11,6 +11,29 @@ logger = logging.getLogger("interview-boss")
 router = APIRouter()
 
 
+async def _record_clear_db_audit(
+    status: str,
+    admin: dict,
+    *,
+    event_type: str = "clear_db",
+    metadata: dict | None = None,
+) -> None:
+    """Persist clear-db evidence without masking the original API result."""
+    try:
+        from app.services.admin_audit import record_admin_audit
+
+        await run_db(
+            lambda: record_admin_audit(
+                event_type,
+                status,
+                actor_id=admin.get("id"),
+                metadata=metadata,
+            )
+        )
+    except Exception:
+        logger.exception("无法写入 clear-db 审计记录")
+
+
 def _build_analytics_bank_filter(user: dict):
     """构建 analytics 查询的题库过滤条件（委托统一口径，默认 all）
 
@@ -327,16 +350,38 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
     from app.core.config import DB_PATH
 
     if not confirm_token:
+        await _record_clear_db_audit(
+            "rejected",
+            admin,
+            event_type="clear_db_confirmation",
+            metadata={"reason": "missing"},
+        )
         raise HTTPException(status_code=400, detail="需要确认 token")
 
     if len(confirm_token) < 64:
+        await _record_clear_db_audit(
+            "rejected",
+            admin,
+            event_type="clear_db_confirmation",
+            metadata={"reason": "invalid"},
+        )
         raise HTTPException(status_code=400, detail="无效的确认 token")
 
     backup_path = f"{DB_PATH}.bak.{int(__import__('time').time())}"
+    await _record_clear_db_audit(
+        "started",
+        admin,
+        metadata={"phase": "backup", "backup_file": os.path.basename(backup_path)},
+    )
     try:
         shutil.copy2(DB_PATH, backup_path)
         logger.info(f"清空前已创建数据库备份: {backup_path}")
     except Exception as e:
+        await _record_clear_db_audit(
+            "failure",
+            admin,
+            metadata={"phase": "backup", "error_type": type(e).__name__},
+        )
         logger.error(f"创建备份失败，拒绝清空操作: {e}")
         raise HTTPException(status_code=500, detail="备份创建失败，清空操作已中止")
 
@@ -387,12 +432,23 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
 
     try:
         await run_db(_clear)
-        return {
-            "status": "success",
-            "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）",
-        }
-    except Exception:
+    except Exception as exc:
+        await _record_clear_db_audit(
+            "failure",
+            admin,
+            metadata={"phase": "clear", "error_type": type(exc).__name__},
+        )
         raise HTTPException(status_code=500, detail="清空失败，请查看服务端日志")
+
+    await _record_clear_db_audit(
+        "success",
+        admin,
+        metadata={"phase": "clear", "backup_file": os.path.basename(backup_path)},
+    )
+    return {
+        "status": "success",
+        "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）",
+    }
 
 
 @router.post("/api/sync-db")

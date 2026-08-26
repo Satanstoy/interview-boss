@@ -16,7 +16,10 @@ from typing import Dict, List, Tuple
 import httpx
 import numpy as np
 
-from app.core.outbound_url import assert_safe_outbound_url_sync
+from app.core.outbound_url import (
+    assert_safe_outbound_url_sync,
+    build_pinned_http_transport,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -178,11 +181,16 @@ def _get_siliconflow_client():
     if cached is not None:
         return cached
     assert_safe_outbound_url_sync(_SILICONFLOW_BASE_URL)
+    transport = build_pinned_http_transport(_SILICONFLOW_BASE_URL)
     client = OpenAI(
         api_key=_SILICONFLOW_API_KEY,
         base_url=_SILICONFLOW_BASE_URL,
         timeout=float(os.environ.get("EMBEDDING_API_TIMEOUT", "60")),
-        http_client=httpx.Client(follow_redirects=False),
+        http_client=httpx.Client(
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+        ),
     )
     _SILICONFLOW_CLIENTS[key] = client
     return client

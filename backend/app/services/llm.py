@@ -24,7 +24,10 @@ from tenacity import (
     retry_if_exception_type,
 )
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
-from app.core.outbound_url import assert_safe_outbound_url_sync
+from app.core.outbound_url import (
+    assert_safe_outbound_url_sync,
+    build_pinned_http_transport,
+)
 from app.services.llm_usage import normalize_cache_usage
 
 logger = logging.getLogger("interview-boss")
@@ -447,9 +450,15 @@ def _make_client(
 ):
     """根据 provider 创建对应的 LLM 客户端。"""
     provider = _provider_for_api_format(api_format) or provider
+    transport = None
     if base_url:
         assert_safe_outbound_url_sync(base_url)
-    http_client = httpx.AsyncClient(follow_redirects=False)
+        transport = build_pinned_http_transport(base_url)
+    http_client = httpx.AsyncClient(
+        transport=transport,
+        follow_redirects=False,
+        trust_env=False,
+    )
     if provider == "anthropic":
         return AsyncAnthropic(
             api_key=api_key or None,

@@ -86,6 +86,20 @@ jobs:
             frontend/test-results
           if-no-files-found: ignore
 
+  oauth-gateway-dependencies:
+    name: OAuth gateway dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned audit tool
+        run: python -m pip install --disable-pip-version-check "pip-audit==2.10.1"
+      - name: Audit gateway lock independently
+        run: pip-audit -r oauth-gateway/requirements.lock
+
   # 容器镜像扫描（audit round-3 D8）：构建两个可部署镜像并扫 HIGH/CRITICAL 漏洞，
   # 另加 fs/IaC 扫描（uv.lock / package-lock.json / Dockerfile / compose）。
   # 当前遵循项目「audit 只报告不拦截」策略（exit-code 0）；存量清零后收紧为

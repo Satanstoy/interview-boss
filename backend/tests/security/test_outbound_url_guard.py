@@ -66,6 +66,34 @@ def test_dns_result_is_checked_before_connect(monkeypatch):
         asyncio.run(assert_safe_outbound_url("https://provider.example/v1"))
 
 
+def test_pinned_transport_dials_only_the_validated_dns_answer(monkeypatch):
+    from app.core.outbound_url import build_pinned_http_transport
+
+    calls = []
+
+    def fake_getaddrinfo(host, port, **_kwargs):
+        assert host == "provider.example"
+        assert port == 443
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
+
+    class FakeNetworkBackend:
+        async def connect_tcp(self, address, port, **_kwargs):
+            calls.append((address, port))
+            return object()
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    transport = build_pinned_http_transport("https://provider.example/v1")
+    transport._pool._network_backend._backend = FakeNetworkBackend()
+
+    asyncio.run(
+        transport._pool._network_backend.connect_tcp(
+            "provider.example", 443, timeout=1
+        )
+    )
+
+    assert calls == [("93.184.216.34", 443)]
+
+
 def test_llm_clients_disable_redirects(monkeypatch):
     from app.services import llm
 
@@ -77,6 +105,7 @@ def test_llm_clients_disable_redirects(monkeypatch):
 
     monkeypatch.setattr(llm, "AsyncOpenAI", DummyClient)
     monkeypatch.setattr(llm, "assert_safe_outbound_url_sync", lambda _url: None)
+    monkeypatch.setattr(llm, "build_pinned_http_transport", lambda _url: None)
 
     llm._make_client("key", "https://provider.example/v1", 30, "openai")
 

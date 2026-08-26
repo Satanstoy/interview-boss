@@ -37,7 +37,7 @@ def test_nginx_healthcheck_probes_local_http_entrypoint():
         "-q",
         "-O",
         "/dev/null",
-        "http://127.0.0.1/",
+        "http://127.0.0.1:8080/",
     ]
 
 
