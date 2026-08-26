@@ -423,9 +423,10 @@ import { useModelGuard } from '@/composables/useModelGuard.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { formatGroupTime, formatRelativeTime, createClientRequestId } from '@/utils/chatFormat.js'
 import { useChatFormat } from '@/composables/useChatFormat.js'
+import { useChatAttachments } from '@/composables/useChatAttachments.js'
+import { useThinkingTimer } from '@/composables/useThinkingTimer.js'
 import { promptSuggestions } from '@/constants/chatSuggestions.js'
 import { useChatInput } from '@/composables/useChatInput.js'
-import { upload } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -488,8 +489,6 @@ const conversations = ref([])
 const activeConversationId = ref(null)
 const messages = ref([])
 const inputText = ref('')
-const attachmentInput = ref(null)
-const attachmentLoading = ref(false)
 const isSending = ref(false)
 // Lock immediately on submit, including the async model check and delayed
 // conversation creation window where isSending has not started yet.
@@ -527,37 +526,6 @@ const headerTitleInput = ref(null)
 const pendingNewConversation = ref(null)
 const openingMessageText = ref('')
 
-async function handleAttachmentChange(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  if (!isPdf) {
-    toastError('目前仅支持 PDF 附件')
-    return
-  }
-
-  attachmentLoading.value = true
-  try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await upload('/api/chat/extract-pdf', formData)
-    const extractedText = String(response?.text || '').trim()
-    if (!extractedText) throw new Error('PDF 中没有可读取的文本')
-
-    const prefix = inputText.value.trim()
-    inputText.value = `${prefix ? `${prefix}\n\n` : ''}[附件：${file.name}]\n${extractedText}`
-    toastSuccess(`已读取 ${file.name}，发送前可以继续编辑`)
-    await nextTick()
-    autoResize()
-  } catch (error) {
-    toastError(error?.message || '附件读取失败，请重试')
-  } finally {
-    attachmentLoading.value = false
-  }
-}
-
 // Rename dialog state
 const showRenameDialog = ref(false)
 const renameDialogTitle = ref('')
@@ -568,8 +536,6 @@ const renameDialogCallback = ref(null)
 const isThinking = ref(false)
 const thinkingContent = ref('')
 const thinkingDuration = ref(0)
-const liveThinkingSeconds = ref(0)
-let thinkingTimer = null
 let activeRequestContext = null
 const activeTurnRun = ref(null)
 const editingTurnId = ref(null)
@@ -597,6 +563,7 @@ const activeConversationMode = computed(() =>
   activeConversation.value?.mode === 'jd_resume' ? 'JD 定制面试' : '自由练习'
 )
 
+const { liveThinkingSeconds, startThinkingTimer, stopThinkingTimer } = useThinkingTimer()
 const { renderStreamingContent, waitingText, displayThinkingDuration } = useChatFormat({
   streamingContent,
   processingSteps,
@@ -605,24 +572,6 @@ const { renderStreamingContent, waitingText, displayThinkingDuration } = useChat
   renderSafeMarkdown,
 })
 
-
-
-
-function startThinkingTimer() {
-  stopThinkingTimer()
-  liveThinkingSeconds.value = 0
-  const startedAt = Date.now()
-  thinkingTimer = window.setInterval(() => {
-    liveThinkingSeconds.value = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
-  }, 250)
-}
-
-function stopThinkingTimer() {
-  if (thinkingTimer) {
-    window.clearInterval(thinkingTimer)
-    thinkingTimer = null
-  }
-}
 
 // Message grouping by time
 const groupedMessages = computed(() => {
@@ -1483,6 +1432,10 @@ async function handleStop() {
 const { autoResize, resetInputHeight, onInputKeydown } = useChatInput({
   inputRef,
   onSend: handleSend,
+})
+const { attachmentInput, attachmentLoading, handleAttachmentChange } = useChatAttachments({
+  inputText,
+  autoResize,
 })
 
 
