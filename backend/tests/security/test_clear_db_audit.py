@@ -1,5 +1,6 @@
 """Clear-db operations must leave a durable administrative audit trail."""
 
+import json
 import sqlite3
 
 
@@ -56,6 +57,10 @@ def test_clear_db_success_is_audited_and_survives_business_table_cleanup(
     events = _audit_events(test_db)
     assert [event["status"] for event in events[-2:]] == ["started", "success"]
     assert all(event["actor_id"] == 1 for event in events[-2:])
+    success_metadata = json.loads(events[-1]["metadata"])
+    assert success_metadata["target_scope"] == "all_database_tables"
+    assert success_metadata["backup_sha256"]
+    assert success_metadata["affected_rows"] == {}
 
 
 def test_clear_db_confirmation_failure_is_audited(client, test_db):
@@ -92,6 +97,37 @@ def test_clear_db_backup_failure_is_audited(client, test_db, monkeypatch):
 
     assert response.status_code == 500
     assert _audit_events(test_db)[-1]["status"] == "failure"
+
+
+def test_clear_db_stops_before_backup_when_started_audit_fails(
+    client, test_db, monkeypatch
+):
+    from app.asgi import app
+    import app.routers.analytics as analytics
+
+    called = False
+
+    async def fail_audit(*_args, **_kwargs):
+        return False
+
+    def backup_should_not_run(*_args, **_kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(analytics, "_record_clear_db_audit", fail_audit)
+    monkeypatch.setattr(analytics, "_backup_sqlite_online", backup_should_not_run)
+    _override_admin(app)
+    try:
+        preview = client.post("/api/analytics/clear-db/preview", headers=CSRF_HEADERS)
+        response = client.post(
+            f"/api/clear-db?confirm_token={preview.json()['confirm_token']}",
+            headers=CSRF_HEADERS,
+        )
+    finally:
+        _clear_overrides(app)
+
+    assert response.status_code == 503
+    assert not called
 
 
 def test_clear_db_online_backup_includes_wal_frames(tmp_path):

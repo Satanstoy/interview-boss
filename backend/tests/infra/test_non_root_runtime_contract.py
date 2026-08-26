@@ -20,6 +20,8 @@ def test_app_runtime_drops_privileges_before_entrypoint():
         "FROM python-base AS test-runtime", 1
     )[0]
 
+    assert "useradd --uid 1000" in runtime
+    assert "--gid 1000" in runtime
     assert "USER appuser" in runtime
     assert "chown -R appuser:appuser /app/backend/data" not in entrypoint
     assert "runuser -u appuser" not in entrypoint
@@ -49,10 +51,22 @@ def test_deploy_preflights_bind_mounted_data_for_appuser():
     source = DEPLOY.read_text()
 
     assert "ensure_runtime_data_dir" in source
+    assert 'APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"' in source
+    assert 'APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"' in source
     assert "chown -R \"${APP_RUNTIME_UID}:${APP_RUNTIME_GID}\"" in source
+    assert 'db_path="$data_dir/interview-boss.db"' in source
+    assert 'run_as_runtime_user test -r "$db_path"' in source
+    assert 'run_as_runtime_user test -w "$db_path"' in source
     assert 'write_probe="$data_dir/.write-test.$$"' in source
     assert 'setpriv --reuid="${APP_RUNTIME_UID}"' in source
     assert 'touch "$write_probe"' in source
     assert source.index("ensure_runtime_data_dir") < source.index(
         "docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway"
     )
+
+    restart = source.split("do_restart()", 1)[1].split("# ── 查看状态", 1)[0]
+    worker_restart = source.split("do_worker_restart()", 1)[1].split(
+        "# ── Eval Worker", 1
+    )[0]
+    assert "ensure_runtime_data_dir" in restart
+    assert "ensure_runtime_data_dir" in worker_restart

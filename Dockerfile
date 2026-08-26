@@ -89,7 +89,8 @@ FROM python-base AS app-runtime
 WORKDIR /app
 
 # 非 root 用户（在 COPY 之前创建，这样 --chown 才能生效）
-RUN useradd --create-home --shell /bin/false appuser && \
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
     mkdir -p /app/backend/data && \
     chown -R appuser:appuser /app
 
@@ -120,7 +121,8 @@ CMD ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "800
 FROM python-base AS test-runtime
 WORKDIR /app
 
-RUN useradd --create-home --shell /bin/false appuser && \
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
     mkdir -p /app/backend/data && \
     chown -R appuser:appuser /app
 

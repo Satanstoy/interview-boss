@@ -29,6 +29,10 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 BACKUP_MIN_KEEP_FILES="${BACKUP_MIN_KEEP_FILES:-3}"
 APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"
 APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"
+if [ "$APP_RUNTIME_UID" != "1000" ] || [ "$APP_RUNTIME_GID" != "1000" ]; then
+  echo "[ERROR] APP_RUNTIME_UID/GID 必须匹配镜像 appuser 1000:1000" >&2
+  exit 1
+fi
 
 # 镜像源策略：
 # - 默认复用缓存/稳定默认源，保持 Docker layer cache key 稳定。
@@ -99,11 +103,14 @@ ensure_runtime_secrets() {
 
 ensure_runtime_data_dir() {
   local data_dir="$PROJECT_DIR/backend/data"
-  local current_owner write_probe
+  local current_owner db_path write_probe
 
   mkdir -p "$data_dir"
   current_owner=$(stat -c '%u:%g' "$data_dir" 2>/dev/null || true)
-  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ]; then
+  db_path="$data_dir/interview-boss.db"
+  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ] || {
+    [ -f "$db_path" ] && [ "$(stat -c '%u:%g' "$db_path" 2>/dev/null || true)" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ]
+  }; then
     if [ "$(id -u)" -eq 0 ]; then
       chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
     elif command -v sudo >/dev/null 2>&1; then
@@ -114,23 +121,33 @@ ensure_runtime_data_dir() {
     fi
   fi
 
+  run_as_runtime_user() {
+    if [ "$(id -u)" -eq "$APP_RUNTIME_UID" ]; then
+      "$@"
+    elif [ "$(id -u)" -eq 0 ] && command -v setpriv >/dev/null 2>&1; then
+      setpriv --reuid="${APP_RUNTIME_UID}" --regid="${APP_RUNTIME_GID}" --clear-groups -- "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -u "#${APP_RUNTIME_UID}" -g "#${APP_RUNTIME_GID}" -- "$@"
+    else
+      return 127
+    fi
+  }
+
   write_probe="$data_dir/.write-test.$$"
   rm -f "$write_probe" 2>/dev/null || true
-  if [ "$(id -u)" -eq "$APP_RUNTIME_UID" ]; then
-    touch "$write_probe" 2>/dev/null || true
-  elif [ "$(id -u)" -eq 0 ] && command -v setpriv >/dev/null 2>&1; then
-    setpriv --reuid="${APP_RUNTIME_UID}" --regid="${APP_RUNTIME_GID}" --clear-groups -- touch "$write_probe" 2>/dev/null || true
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo -u "#${APP_RUNTIME_UID}" -g "#${APP_RUNTIME_GID}" -- touch "$write_probe" 2>/dev/null || true
-  else
-    err "无法以 appuser 身份验证运行时数据目录: $data_dir（需要 setpriv 或 sudo）"
-    return 1
-  fi
+  run_as_runtime_user touch "$write_probe" 2>/dev/null || true
   if [ ! -e "$write_probe" ]; then
     err "运行时数据目录写入检查失败: $data_dir（appuser 需要可写）"
     return 1
   fi
   rm -f "$write_probe"
+
+  if [ -f "$db_path" ] && {
+    ! run_as_runtime_user test -r "$db_path" || ! run_as_runtime_user test -w "$db_path"
+  }; then
+    err "SQLite 数据库文件不可由 appuser 读写: $db_path"
+    return 1
+  fi
   log "运行时数据目录权限通过: $data_dir (${APP_RUNTIME_UID}:${APP_RUNTIME_GID})"
 }
 
@@ -667,6 +684,7 @@ do_down() {
 # ── 重启核心服务 ──
 do_restart() {
   log "重启核心服务..."
+  ensure_runtime_data_dir
   docker compose restart --wait --wait-timeout 30 redis redis-cache backend nginx oauth-gateway
   do_status
 }
@@ -771,6 +789,7 @@ do_worker_down() {
 
 do_worker_restart() {
   log "重建并重启 Worker..."
+  ensure_runtime_data_dir
   guarded_compose_build backend
   docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status

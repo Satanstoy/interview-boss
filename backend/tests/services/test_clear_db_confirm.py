@@ -125,10 +125,23 @@ def test_clear_with_wrong_long_token_returns_400(client, test_db):
 
 
 def test_clear_token_is_bound_to_admin_and_expires():
-    from app.routers.analytics import _create_clear_db_token, _is_valid_clear_db_token
+    from app.routers.analytics import (
+        _claim_clear_db_token,
+        _create_clear_db_token,
+        _is_valid_clear_db_token,
+    )
 
     token = _create_clear_db_token(7, now=1_000)
 
     assert _is_valid_clear_db_token(token, 7, now=1_299)
     assert not _is_valid_clear_db_token(token, 8, now=1_299)
     assert not _is_valid_clear_db_token(token, 7, now=1_301)
+
+
+def test_clear_token_is_single_use(test_db):
+    from app.routers.analytics import _claim_clear_db_token, _create_clear_db_token
+
+    token = _create_clear_db_token(7, now=1_000)
+
+    assert _claim_clear_db_token(token, 7, now=1_001)
+    assert not _claim_clear_db_token(token, 7, now=1_002)
