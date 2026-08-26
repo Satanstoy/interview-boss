@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.core.harness_registry import PROJECT_HARNESS_VERSION
+from app.evaluation.adapters import AdapterNotConfigured
+from app.evaluation.benchmark_catalog import BUILTIN_SUITES
 from app.evaluation.metric_registry import (
     TARGET_METRIC_DICTIONARY,
     build_metric_cards,
@@ -494,3 +497,219 @@ def _ab_harness_identity(row) -> tuple[Any, ...]:
     # fallback for old human-review data without pretending it is a project
     # registry snapshot.
     return row["simulator_harness_release_id"], None
+
+# Admin endpoint read models stay independent from FastAPI request wiring.
+
+
+def build_overview_read_model(conn):
+    counts = conn.execute(
+        "SELECT status, COUNT(*) AS count FROM eval_runs GROUP BY status"
+    ).fetchall()
+    latest = conn.execute(
+        "SELECT id, status, target_release_id, summary_json, created_at "
+        "FROM eval_runs ORDER BY id DESC LIMIT 10"
+    ).fetchall()
+    review_rows = conn.execute(
+        """
+        WITH review_groups AS (
+            SELECT
+                comparison_group,
+                run_a_id,
+                run_b_id,
+                COUNT(*) AS review_count,
+                SUM(CASE WHEN choice = 'a' THEN 1 ELSE 0 END) AS a_wins,
+                SUM(CASE WHEN choice = 'b' THEN 1 ELSE 0 END) AS b_wins,
+                SUM(CASE WHEN choice = 'tie' THEN 1 ELSE 0 END) AS ties,
+                SUM(CASE WHEN choice = 'both_fail' THEN 1 ELSE 0 END) AS both_fail,
+                MAX(created_at) AS last_review_at
+            FROM eval_human_reviews
+            GROUP BY comparison_group, run_a_id, run_b_id
+        ), run_scores AS (
+            SELECT run_id, AVG(score) AS avg_score
+            FROM eval_items
+            WHERE status = 'completed' AND score IS NOT NULL
+            GROUP BY run_id
+        )
+        SELECT
+            g.comparison_group,
+            g.run_a_id,
+            g.run_b_id,
+            a_target.release_key AS run_a_target_release_key,
+            b_target.release_key AS run_b_target_release_key,
+            g.review_count,
+            g.a_wins,
+            g.b_wins,
+            g.ties,
+            g.both_fail,
+            g.last_review_at,
+            a_scores.avg_score AS run_a_avg_score,
+            b_scores.avg_score AS run_b_avg_score
+        FROM review_groups g
+        JOIN eval_runs run_a ON run_a.id = g.run_a_id
+        JOIN eval_runs run_b ON run_b.id = g.run_b_id
+        JOIN eval_releases a_target ON a_target.id = run_a.target_release_id
+        JOIN eval_releases b_target ON b_target.id = run_b.target_release_id
+        LEFT JOIN run_scores a_scores ON a_scores.run_id = g.run_a_id
+        LEFT JOIN run_scores b_scores ON b_scores.run_id = g.run_b_id
+        ORDER BY g.last_review_at DESC
+        LIMIT 20
+        """
+    ).fetchall()
+    all_runs = conn.execute(
+        """
+        SELECT r.id, r.status, r.summary_json, tr.target_type, tr.release_key
+        FROM eval_runs r
+        JOIN eval_releases tr ON tr.id = r.target_release_id
+        ORDER BY r.id
+        """
+    ).fetchall()
+    quality_metadata = _run_quality_metadata(conn, [run["id"] for run in all_runs])
+    by_target: dict[str, dict[str, Any]] = {}
+    for run in all_runs:
+        tt = run["target_type"] or "未分类"
+        agg = by_target.setdefault(
+            tt,
+            {
+                "target_type": tt,
+                "target_release_key": run["release_key"],
+                "run_count": 0,
+                "passed_count": 0,
+                "failed_count": 0,
+                "pending_count": 0,
+                "distribution": {
+                    "total": 0,
+                    "passed": 0,
+                    "poor": 0,
+                    "failed": 0,
+                    "pending": 0,
+                },
+                "total_score_sum": 0.0,
+                "scored_run_count": 0,
+            },
+        )
+        agg["run_count"] += 1
+        metadata = quality_metadata.get(run["id"], {})
+        quality = metadata.get("quality_status", "pending")
+        if quality == "passed":
+            agg["passed_count"] += 1
+        elif quality == "failed":
+            agg["failed_count"] += 1
+        else:
+            agg["pending_count"] += 1
+        distribution = metadata.get("distribution", _empty_distribution())
+        for key in ("total", "passed", "poor", "failed", "pending"):
+            agg["distribution"][key] += distribution[key]
+        summary = _decode_json(run["summary_json"], {})
+        final_mean = (summary.get("metric_summary") or {}).get("score") or {}
+        final_mean = final_mean.get("final_mean")
+        if final_mean is not None:
+            agg["total_score_sum"] += float(final_mean)
+            agg["scored_run_count"] += 1
+    for agg in by_target.values():
+        agg["avg_score"] = (
+            round(agg["total_score_sum"] / agg["scored_run_count"], 3)
+            if agg["scored_run_count"]
+            else None
+        )
+        agg.pop("total_score_sum", None)
+        agg.pop("scored_run_count", None)
+    return {
+        "counts": {row["status"]: row["count"] for row in counts},
+        "latest_runs": [
+            {
+                "id": row["id"],
+                "status": row["status"],
+                "target_release_id": row["target_release_id"],
+                "summary": _decode_json(row["summary_json"], {}),
+                "created_at": row["created_at"],
+            }
+            for row in latest
+        ],
+        "human_reviews": {
+            "total": sum(row["review_count"] for row in review_rows),
+            "comparison_groups": [dict(row) for row in review_rows],
+        },
+        "by_target": sorted(by_target.values(), key=lambda x: x["target_type"]),
+    }
+
+
+def build_capabilities_read_model(conn, adapter_loader):
+    result = []
+    for spec in BUILTIN_SUITES:
+        target = conn.execute(
+            """
+            SELECT id, release_key, version, target_type, status,
+                   judge_model, manifest_digest
+            FROM eval_releases
+            WHERE release_type = 'target'
+              AND target_type = ?
+              AND status = 'published'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (spec["target_type"],),
+        ).fetchone()
+        evaluation = conn.execute(
+            """
+            SELECT id, release_key, version, target_type, status,
+                   judge_model, manifest_digest
+            FROM eval_releases
+            WHERE release_type = 'evaluation'
+              AND target_type = ?
+              AND status = 'published'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (spec["target_type"],),
+        ).fetchone()
+        harness = conn.execute(
+            "SELECT id, harness_key, version, status FROM harness_releases "
+            "WHERE target_type = ? AND version = ? AND status = 'published' "
+            "ORDER BY id DESC LIMIT 1",
+            (spec["target_type"], PROJECT_HARNESS_VERSION),
+        ).fetchone()
+        case_count = 0
+        if evaluation is not None:
+            case_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM eval_benchmark_cases c
+                JOIN eval_benchmark_suites s ON s.id = c.suite_id
+                WHERE s.release_id = ? AND c.active = 1
+                """,
+                (evaluation["id"],),
+            ).fetchone()[0]
+        adapter_available = True
+        adapter_name = spec["adapter"]
+        reason = None
+        try:
+            adapter = adapter_loader(spec["target_type"])
+            adapter_name = type(adapter).__name__
+        except AdapterNotConfigured as exc:
+            adapter_available = False
+            reason = str(exc)
+        if not target:
+            reason = reason or "没有已发布的被测版本"
+        elif not evaluation:
+            reason = reason or "没有已发布的完整评测版本"
+        elif not case_count:
+            reason = reason or "完整评测版本没有可执行 Case"
+        elif not adapter_available:
+            reason = reason or "没有注册评测 Adapter"
+        result.append(
+            {
+                "target_type": spec["target_type"],
+                "target_key": spec["target_key"],
+                "evaluation_key": spec["evaluation_key"],
+                "workflow": spec["workflow"],
+                "adapter": adapter_name,
+                "adapter_available": adapter_available,
+                "target_release": _capability_release(target, harness),
+                "evaluation_release": _capability_release(evaluation, harness),
+                "project_harness": dict(harness) if harness else None,
+                "case_count": int(case_count),
+                "can_run": bool(
+                    adapter_available and target and evaluation and case_count
+                ),
+                "reason": reason,
+            }
+        )
+    return {"targets": result}
