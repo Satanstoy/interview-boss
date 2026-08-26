@@ -631,17 +631,17 @@ class TestErrorReportLimits:
 
 
 class TestPublicTaxonomyNoOwnerId:
-    """公开分类列表不得返回 owner_id"""
+    """系统分类列表不得返回 owner_id，历史个人分类不公开"""
 
     @pytest.mark.asyncio
     async def test_public_list_hides_owner_id(self, client, test_db):
         from app.db.operations import get_public_shared_taxonomies
 
-        _ensure_user(test_db, 7)
+        test_db.execute("INSERT OR IGNORE INTO job_positions (name) VALUES (?)", ("后端",))
         test_db.execute(
             "INSERT INTO taxonomy (position_name, categories_json, source, owner_id, is_public) "
             "VALUES (?, ?, ?, ?, 1)",
-            ("后端", '[]', "user", 7),
+            ("后端", '[]', "system", None),
         )
         test_db.commit()
 
@@ -650,7 +650,7 @@ class TestPublicTaxonomyNoOwnerId:
 
         assert len(result) == 1
         assert "owner_id" not in result[0]
-        assert result[0]["owner_name"] == "user7"
+        assert result[0]["owner_name"] == "匿名"
 
 
 class TestSaveUserAnswerVisibility:

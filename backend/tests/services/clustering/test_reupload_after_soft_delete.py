@@ -67,17 +67,22 @@ def _insert_test_interview(owner_id=None, deleted_at=None):
 def _insert_test_questions_detail(owner_id=None, deleted_at=None):
     """插入测试 questions_detail 记录"""
     with get_db_connection() as conn:
+        interview = conn.execute(
+            "SELECT id FROM interview WHERE url = ? ORDER BY id DESC LIMIT 1",
+            (TEST_URL,),
+        ).fetchone()
+        interview_id = interview["id"] if interview else None
         if deleted_at:
             conn.execute(
-                "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, deleted_at, job_position) "
-                "VALUES (?, '测试公司', '一面', '测试题', '测试', '测试分类', '标签', '中等', ?, '')",
-                (TEST_URL, deleted_at)
+                "INSERT INTO questions_detail (interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, deleted_at, job_position) "
+                "VALUES (?, ?, '测试公司', '一面', '测试题', '测试', '测试分类', '标签', '中等', ?, '')",
+                (interview_id, TEST_URL, deleted_at)
             )
         else:
             conn.execute(
-                "INSERT INTO questions_detail (url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
-                "VALUES (?, '测试公司', '一面', '测试题', '测试', '测试分类', '标签', '中等', '')",
-                (TEST_URL,)
+                "INSERT INTO questions_detail (interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) "
+                "VALUES (?, ?, '测试公司', '一面', '测试题', '测试', '测试分类', '标签', '中等', '')",
+                (interview_id, TEST_URL)
             )
         conn.commit()
 

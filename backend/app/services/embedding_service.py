@@ -297,7 +297,13 @@ def encode_texts(texts: List[str]) -> np.ndarray:
             logger.warning(
                 "ONNX embedding unavailable, trying fallback backends: %s", exc
             )
-    if backend in {"auto"} and _SILICONFLOW_API_KEY:
+    # Offline mode is an explicit no-network contract: auto must go straight
+    # from unavailable ONNX to the deterministic local hash fallback.
+    if (
+        backend in {"auto"}
+        and _SILICONFLOW_API_KEY
+        and os.environ.get("EMBEDDING_OFFLINE", "0") != "1"
+    ):
         try:
             return _encode_texts_siliconflow(texts)
         except Exception as exc:

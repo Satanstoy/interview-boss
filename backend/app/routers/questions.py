@@ -82,7 +82,8 @@ def _split_join_and_where_params(from_clause: str, params: list):
 
 def _build_tag_filter_clause(tag: str | None, table_alias: str = "qb"):
     """Build an exact comma-separated tag filter while preserving OR semantics."""
-    tags = [item.strip() for item in (tag or "").split(",") if item.strip()]
+    tag_value = tag if isinstance(tag, str) else None
+    tags = [item.strip() for item in (tag_value or "").split(",") if item.strip()]
     if not tags:
         return "", []
 

@@ -65,9 +65,14 @@ def test_clear_without_token_returns_400(client, test_db):
     assert response.status_code == 400
 
 
-def test_clear_with_valid_token_succeeds(client, test_db):
+def test_clear_with_valid_token_succeeds(client, test_db, tmp_path, monkeypatch):
     """正确 token 清空成功"""
     from app.asgi import app
+    import app.core.config as config
+
+    backup_source = tmp_path / "test.db"
+    backup_source.write_bytes(b"SQLite format 3\x00")
+    monkeypatch.setattr(config, "DB_PATH", str(backup_source))
 
     _override_admin(app)
     try:

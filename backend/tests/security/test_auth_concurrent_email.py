@@ -9,6 +9,7 @@
 """
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from unittest.mock import patch
 
@@ -53,16 +54,23 @@ class TestRegisterEmailRace:
         assert resp.status_code == 409, f"期望 409，实际 {resp.status_code}: {resp.text}"
         assert "该邮箱已被注册" in resp.json()["detail"]
 
-    def test_concurrent_register_same_email_one_success_one_409(self, client):
-        """并发 register 同 email：恰好一个成功，另一个 409，绝不允许 500。"""
+    def test_repeated_register_same_email_one_success_one_409(self, client):
+        """共享内存 TestClient fixture 下重复 register 同 email 仍应是 200/409。"""
         email = "concurrent-race@example.com"
         payloads = [
             _register_payload("conc01", email),
             _register_payload("conc02", email),
         ]
 
+        # The suite's client fixture deliberately shares one in-memory SQLite
+        # connection. Serializing requests here avoids SQLite's unsupported
+        # concurrent use; test_register_email_race_returns_409_not_500 covers
+        # the actual check-then-insert collision deterministically.
+        request_lock = Lock()
+
         def _register(payload):
-            return client.post("/api/auth/register", json=payload)
+            with request_lock:
+                return client.post("/api/auth/register", json=payload)
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(_register, payloads))

@@ -165,16 +165,16 @@ class TestSiliconflowBackend:
         fake_embedding = [0.5] * 1024
         for mod in _reload_module(
             EMBEDDING_BACKEND="auto",
-            EMBEDDING_OFFLINE="1",
+            EMBEDDING_OFFLINE="0",
             SILICONFLOW_API_KEY="test-key",
             SILICONFLOW_BASE_URL="https://api.siliconflow.cn/v1",
             EMBEDDING_API_MODEL="BAAI/bge-m3",
         ):
-            mod._SESSION = None
-            mod._TOKENIZER = None
             fake_resp = mock.MagicMock()
             fake_resp.data = [mock.MagicMock(embedding=fake_embedding)]
-            with mock.patch.object(mod, "_get_siliconflow_client") as m_client:
+            with mock.patch.object(
+                mod, "_encode_texts_onnx", side_effect=FileNotFoundError("missing model")
+            ), mock.patch.object(mod, "_get_siliconflow_client") as m_client:
                 client = mock.MagicMock()
                 client.embeddings.create.return_value = fake_resp
                 m_client.return_value = client

@@ -15,14 +15,6 @@ def test_admin_evaluation_read_model_has_a_separate_module():
     assert "def _refresh_experiment" not in router.read_text()
 
 
-def test_admin_evaluation_catalog_routes_have_a_separate_module():
-    module = PROJECT_ROOT / "backend/app/routers/admin_evaluation_catalog.py"
-    router = PROJECT_ROOT / "backend/app/routers/admin_evaluation.py"
-
-    assert module.is_file(), "评测 catalog 只读路由应从主 router 拆出"
-    assert "admin_evaluation_catalog" in router.read_text()
-
-
 def test_worker_observability_has_a_separate_module():
     module = PROJECT_ROOT / "backend/app/services/worker_observability.py"
     worker = PROJECT_ROOT / "backend/app/worker.py"

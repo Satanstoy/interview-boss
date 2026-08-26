@@ -15,7 +15,7 @@ class TestBug006GenerateAnswerOwnership:
     """BUG-006: generate-answer 端点应校验题目可见性"""
 
     def test_bug006_should_use_build_bank_where_clause(self):
-        """generate_master_answer 应使用 _build_bank_where_clause 过滤可见性"""
+        """generate_master_answer 应使用统一题库可见性过滤"""
         with open(BACKEND_ROOT / 'app/routers/answers.py', 'r') as f:
             content = f.read()
 
@@ -29,9 +29,9 @@ class TestBug006GenerateAnswerOwnership:
         func_content = func_match.group(0)
 
         # 修复前：仅 SELECT question, ai_answer FROM question_bank WHERE id = ?
-        # 修复后：应使用 _build_bank_where_clause 或检查 owner_id/bank_mode
+        # 修复后：应使用统一 build_bank_where_clause 或检查 owner_id/bank_mode
         has_visibility_check = (
-            '_build_bank_where_clause' in func_content or
+            'build_bank_where_clause' in func_content or
             'bank_mode' in func_content or
             "owner_id" in func_content
         )
@@ -56,7 +56,7 @@ class TestBug006GenerateAnswerOwnership:
             func_content
         )
         # 如果存在这样的查询且没有可见性检查，则为 bug
-        has_visibility = '_build_bank_where_clause' in func_content or 'owner_id' in func_content
+        has_visibility = 'build_bank_where_clause' in func_content or 'owner_id' in func_content
         if bare_select and not has_visibility:
             assert False, "generate_master_answer 仅按 id 查询，无可见性过滤"
 
@@ -78,7 +78,7 @@ class TestBug007BatchGenerateAnswersOwnership:
         func_content = func_match.group(0)
 
         has_visibility_check = (
-            '_build_bank_where_clause' in func_content or
+            'build_bank_where_clause' in func_content or
             'bank_mode' in func_content or
             'owner_id' in func_content
         )
@@ -98,7 +98,7 @@ class TestBug007BatchGenerateAnswersOwnership:
         func_content = func_match.group(0)
 
         # 验证使用统一题库可见性过滤（内部覆盖 bank_mode / owner_id）
-        has_visibility = '_build_bank_where_clause' in func_content or (
+        has_visibility = 'build_bank_where_clause' in func_content or (
             'bank_mode' in func_content and 'owner_id' in func_content
         )
         assert has_visibility, "batch_generate_answers 应使用 bank_mode 和 owner_id 进行权限检查"
@@ -228,7 +228,7 @@ class TestIntegration:
         assert route_match, "应存在 generate-answer 路由"
         route_content = route_match.group(0)
 
-        has_check = '_build_bank_where_clause' in route_content or 'owner_id' in route_content
+        has_check = 'build_bank_where_clause' in route_content or 'owner_id' in route_content
         assert has_check, "generate-answer 端点应有可见性检查"
 
     def test_batch_generate_endpoint_requires_visibility_check(self):
@@ -244,7 +244,7 @@ class TestIntegration:
         assert route_match, "应存在 batch-generate-answers 路由"
         route_content = route_match.group(0)
 
-        has_check = '_build_bank_where_clause' in route_content or 'owner_id' in route_content
+        has_check = 'build_bank_where_clause' in route_content or 'owner_id' in route_content
         assert has_check, "batch-generate-answers 端点应有可见性检查"
 
     def test_evaluate_answer_endpoint_requires_visibility_check(self):

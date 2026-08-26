@@ -16,7 +16,7 @@ def test_builtin_catalog_publishes_each_target_and_matching_eval_release(test_db
 
     expected = {
         ("interview-agent@1.0", "target", "interview", "1.0", "published"),
-        ("interview-eval@1.1", "evaluation", "interview", "1.1", "published"),
+        ("interview-eval@1.2", "evaluation", "interview", "1.2", "published"),
         ("experience-extraction@1.0", "target", "experience_extraction", "1.0", "published"),
         ("experience-extraction-eval@1.0", "evaluation", "experience_extraction", "1.0", "published"),
         ("jd-extraction@1.0", "target", "jd_extraction", "1.0", "published"),

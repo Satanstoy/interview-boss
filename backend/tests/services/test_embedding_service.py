@@ -53,7 +53,7 @@ class TestEncodeTextsBackendBehavior:
         """Empty input returns correctly shaped empty array."""
         for mod in _reload_module():
             result = mod.encode_texts([])
-            assert result.shape == (0, mod._SILICONFLOW_DIMENSION)
+            assert result.shape == (0, mod.get_embedding_dimension())
 
     def test_unsupported_backend_raises(self):
         """Unknown backend value raises ValueError."""
