@@ -17,28 +17,38 @@ def _healthcheck(service_name: str) -> dict:
     healthcheck = _compose_services()[service_name].get("healthcheck")
     assert isinstance(healthcheck, dict), f"{service_name} 必须声明 healthcheck"
     assert healthcheck.get("disable") is not True, f"{service_name} 不得禁用 healthcheck"
-    for key in ("interval", "timeout", "retries", "start_period"):
+    assert isinstance(healthcheck.get("test"), list)
+    assert healthcheck["test"][0] == "CMD"
+    for key in ("interval", "timeout", "start_period"):
         assert key in healthcheck, f"{service_name} healthcheck 缺少 {key}"
+        value = healthcheck[key]
+        assert isinstance(value, str) and value[-1] in "smh"
+        assert float(value[:-1]) > 0
+    assert isinstance(healthcheck["retries"], int)
     assert healthcheck["retries"] >= 1
     return healthcheck
 
 
 def test_nginx_healthcheck_probes_local_http_entrypoint():
     healthcheck = _healthcheck("nginx")
-    command = " ".join(str(part) for part in healthcheck["test"])
+    assert healthcheck["test"] == [
+        "CMD",
+        "wget",
+        "-q",
+        "-O",
+        "/dev/null",
+        "http://127.0.0.1/",
+    ]
 
-    assert "127.0.0.1" in command or "localhost" in command
-    assert "http" in command
-    assert "/" in command
 
 
 def test_oauth_gateway_healthcheck_probes_health_endpoint():
     healthcheck = _healthcheck("oauth-gateway")
-    command = " ".join(str(part) for part in healthcheck["test"])
+    command = healthcheck["test"]
 
-    assert "127.0.0.1" in command or "localhost" in command
-    assert "/health" in command
-    assert "8082" in command
+    assert command[:3] == ["CMD", "python", "-c"]
+    assert "urllib.request.urlopen" in command[3]
+    assert "http://127.0.0.1:8082/health" in command[3]
 
 
 def test_edge_services_wait_for_healthy_backend():
