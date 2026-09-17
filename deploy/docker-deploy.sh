@@ -17,9 +17,10 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前硬性保留 6GB；构建后尽量恢复到 8GB。
+# 磁盘保护阈值（单位：MB）。构建前硬性保留 6GB；定时维护至少保留 1GB；构建后尽量恢复到 8GB。
 # 构建后低于硬阈值时返回失败，避免以“空间不足但仍成功”的状态继续部署。
 DEPLOY_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-6144}"
+DEPLOY_MAINTENANCE_MIN_FREE_MB="${DEPLOY_MAINTENANCE_MIN_FREE_MB:-1024}"
 DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-8192}"
 BUILDKIT_MAX_USED_SPACE="${BUILDKIT_MAX_USED_SPACE:-1536MB}"
 BUILDKIT_CACHE_MAX_AGE="${BUILDKIT_CACHE_MAX_AGE:-168h}"
@@ -429,7 +430,7 @@ prune_production_images() {
 }
 
 # 安全清理：BuildKit cache、测试资源、项目 stopped/orphan 资源。
-# 默认不清理宿主机 node_modules/.venv，除非 DEPLOY_PRUNE_HOST_ARTIFACTS=1 或传入 --aggressive。
+# 这个函数永远不删除宿主机 node_modules、.venv 或 Playwright 浏览器缓存。
 prune_unused_docker() {
   local aggressive="${1:-}"
   warn "安全清理本项目未使用资源（多项目安全，不使用全局 prune）..."
@@ -460,37 +461,15 @@ prune_unused_docker() {
   else
     local free_mb
     free_mb=$(root_free_mb)
-    if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    if [ "$aggressive" = "--aggressive" ]; then
+      prune_build_cache aggressive
+    elif [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
       prune_build_cache light
     else
       log "磁盘 ${free_mb}MB 高于目标 ${DEPLOY_TARGET_FREE_MB}MB，保留热 BuildKit 缓存"
     fi
   fi
 
-  # 4. 宿主机大文件目录（只报告，除非显式启用）
-  local host_free_mb
-  host_free_mb=$(root_free_mb)
-  if { [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; } \
-    && [ "$host_free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "磁盘低于目标，清理宿主机 node_modules 和 .venv..."
-    local pdir="$PROJECT_DIR"
-    if [ -d "$pdir/frontend/node_modules" ] && ! rm -rf -- "$pdir/frontend/node_modules"; then
-      warn "清理 frontend/node_modules 失败"
-    fi
-    if [ -d "$pdir/backend/.venv" ] && ! rm -rf -- "$pdir/backend/.venv"; then
-      warn "清理 backend/.venv 失败"
-    fi
-  elif [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; then
-    log "磁盘 ${host_free_mb}MB 未低于目标，保留 node_modules 和 .venv"
-  else
-    local pdir="$PROJECT_DIR"
-    local nm_size venv_size
-    nm_size=$(du -sh "$pdir/frontend/node_modules" 2>/dev/null | cut -f1 || echo "N/A")
-    venv_size=$(du -sh "$pdir/backend/.venv" 2>/dev/null | cut -f1 || echo "N/A")
-    log "宿主机目录（只报告，不清理；用 --aggressive 或 DEPLOY_PRUNE_HOST_ARTIFACTS=1 启用）："
-    log "  frontend/node_modules: $nm_size"
-    log "  backend/.venv:         $venv_size"
-  fi
 }
 
 ensure_disk_before_build() {
@@ -1137,11 +1116,9 @@ do_maintenance() {
   storage_cleanup_backups "$PROJECT_DIR"
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    warn "维护开始时已低于硬阈值，允许回收可重建的 node_modules/.venv"
-    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker --aggressive
-  else
-    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker
+    warn "维护开始时已低于硬阈值，只清理可回收的 Docker 资源，不删除宿主机开发依赖"
   fi
+  SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker
   if ! prune_build_cache light; then
     err "定时 BuildKit 过期缓存维护失败"
     return 1
@@ -1156,8 +1133,8 @@ do_maintenance() {
   show_disk_usage
 
   free_mb=$(root_free_mb)
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    err "维护后根分区仍只有 ${free_mb}MB，低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB"
+  if [ "$free_mb" -lt "$DEPLOY_MAINTENANCE_MIN_FREE_MB" ]; then
+    err "维护后根分区仍只有 ${free_mb}MB，低于维护最低线 ${DEPLOY_MAINTENANCE_MIN_FREE_MB}MB"
     return 1
   fi
   if [ "$mount_rc" -ne 0 ]; then
@@ -1189,10 +1166,6 @@ do_cleanup() {
   log "清理本项目资源（多项目安全）..."
   storage_cleanup_backups "$PROJECT_DIR"
   prune_unused_docker "$aggressive"
-  if ! prune_build_cache light; then
-    err "定向 BuildKit 过期缓存清理失败"
-    return 1
-  fi
   show_disk_usage
   log "清理完成"
 }
