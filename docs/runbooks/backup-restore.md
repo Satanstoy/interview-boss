@@ -16,6 +16,13 @@
 技术要点：SQLite 处于 WAL 模式，裸 cp 会漏掉 `-wal` 中未 checkpoint 的已提交事务，
 必须走 sqlite 在线备份 API（`do_backup` 内的 `backup_sqlite_wal`）。
 
+存储治理：备份、迁移前备份、评测产物和项目归档除时间/最少保留规则外，还受字节预算限制；
+默认单类备份/评测产物预算为 10GB、项目归档预算为 20GB，可通过
+`BACKUP_MAX_BYTES`、`EVALUATION_MAX_BYTES`、`PROJECT_ARCHIVE_MAX_BYTES` 调整。
+每日 storage-maintenance 会检查 `/data`：低于 20GB 记录预警，低于 10GB 使维护失败；
+若配置 `STORAGE_ALERT_WEBHOOK_URL`，会向 webhook 发送告警，并将 Prometheus 文本指标写入
+`STORAGE_METRICS_FILE`（默认 `/data/interview-boss/storage.prom`）。
+
 ## RPO / RTO
 
 - **RPO（可容忍数据丢失窗口）= 自上次备份起**。

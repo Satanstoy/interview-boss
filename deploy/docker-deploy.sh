@@ -28,6 +28,14 @@ BUILDKIT_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 BUILDKIT_BUILDER_DRIVER="${BUILDKIT_BUILDER_DRIVER:-docker-container}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 BACKUP_MIN_KEEP_FILES="${BACKUP_MIN_KEEP_FILES:-3}"
+BACKUP_MAX_BYTES="${BACKUP_MAX_BYTES:-10737418240}"
+MIGRATION_BACKUP_MAX_BYTES="${MIGRATION_BACKUP_MAX_BYTES:-10737418240}"
+LOCAL_BACKUP_MAX_BYTES="${LOCAL_BACKUP_MAX_BYTES:-10737418240}"
+EVALUATION_MAX_BYTES="${EVALUATION_MAX_BYTES:-10737418240}"
+PROJECT_ARCHIVE_MAX_BYTES="${PROJECT_ARCHIVE_MAX_BYTES:-21474836480}"
+DATA_HARD_MIN_FREE_MB="${DATA_HARD_MIN_FREE_MB:-10240}"
+DATA_WARN_FREE_MB="${DATA_WARN_FREE_MB:-20480}"
+STORAGE_METRICS_FILE="${STORAGE_METRICS_FILE:-/data/interview-boss/storage.prom}"
 APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"
 APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"
 if [ "$APP_RUNTIME_UID" != "1000" ] || [ "$APP_RUNTIME_GID" != "1000" ]; then
@@ -1061,6 +1069,13 @@ do_storage_check() {
   if storage_data_mount_available; then
     log "/data 真实挂载信息："
     findmnt -M /data -o TARGET,SOURCE,FSTYPE,OPTIONS
+    if ! storage_check_data_capacity; then
+      storage_emit_alert "critical" "/data 可用空间低于硬阈值，已阻止存储检查通过"
+      return 1
+    fi
+    if ! storage_write_metrics; then
+      warn "无法写入存储指标: $STORAGE_METRICS_FILE"
+    fi
     return 0
   fi
 
@@ -1103,6 +1118,12 @@ do_diagnose() {
   log "  BUILDKIT_BUILDER:          $BUILDKIT_BUILDER ($BUILDKIT_BUILDER_DRIVER)"
   log "  BACKUP_RETENTION_DAYS:    $BACKUP_RETENTION_DAYS / 7"
   log "  BACKUP_MIN_KEEP_FILES:    $BACKUP_MIN_KEEP_FILES / 3"
+  log "  BACKUP_MAX_BYTES:         $BACKUP_MAX_BYTES / 10737418240"
+  log "  EVALUATION_MAX_BYTES:     $EVALUATION_MAX_BYTES / 10737418240"
+  log "  PROJECT_ARCHIVE_MAX_BYTES:$PROJECT_ARCHIVE_MAX_BYTES / 21474836480"
+  log "  DATA_WARN_FREE_MB:        $DATA_WARN_FREE_MB / 20480"
+  log "  DATA_HARD_MIN_FREE_MB:    $DATA_HARD_MIN_FREE_MB / 10240"
+  log "  STORAGE_METRICS_FILE:     $STORAGE_METRICS_FILE"
   echo ""
   log "========== 诊断完成 =========="
 }
@@ -1110,10 +1131,14 @@ do_diagnose() {
 # ── 定时存储维护 ──
 do_maintenance() {
   local mount_rc=0
+  local cleanup_rc=0
   local free_mb
   log "执行 InterviewBoss 存储维护（备份、测试资源、BuildKit 缓存）..."
   do_storage_check || mount_rc=1
-  storage_cleanup_backups "$PROJECT_DIR"
+  if ! storage_cleanup_backups "$PROJECT_DIR"; then
+    cleanup_rc=1
+    storage_emit_alert "error" "备份/评测产物 retention 清理失败"
+  fi
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
     warn "维护开始时已低于硬阈值，只清理可回收的 Docker 资源，不删除宿主机开发依赖"
@@ -1139,6 +1164,18 @@ do_maintenance() {
   fi
   if [ "$mount_rc" -ne 0 ]; then
     err "/data 未挂载，维护已跳过 /data-backed 备份清理"
+    return 1
+  fi
+  if ! storage_check_data_capacity; then
+    storage_emit_alert "critical" "/data 维护后可用空间低于硬阈值"
+    return 1
+  fi
+  if ! storage_write_metrics; then
+    cleanup_rc=1
+    storage_emit_alert "error" "存储维护指标写入失败: $STORAGE_METRICS_FILE"
+  fi
+  if [ "$cleanup_rc" -ne 0 ]; then
+    err "存储 retention 或指标维护失败"
     return 1
   fi
   log "存储维护完成: ${free_mb}MB 可用"
