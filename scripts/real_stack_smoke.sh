@@ -25,7 +25,11 @@ ensure_real_stack_builder() {
     }
     return 0
   fi
-  docker buildx create --name "$REAL_STACK_BUILDER" --driver docker-container --driver-opt network=host >/dev/null
+
+  docker buildx create \
+    --name "$REAL_STACK_BUILDER" \
+    --driver docker-container \
+    --driver-opt network=host >/dev/null
 }
 
 copy_failure_artifacts() {
@@ -70,6 +74,5 @@ curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused
 
 cd "$PROJECT_DIR/frontend"
 REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
-  npx playwright test tests/e2e/real-stack-smoke.spec.js \
-  --config tests/playwright.config.js \
+  "$PROJECT_DIR/scripts/frontend-test.sh" tests/e2e/real-stack-smoke.spec.js \
   --timeout "${REAL_STACK_TEST_TIMEOUT:-120000}"
