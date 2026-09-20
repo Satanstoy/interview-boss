@@ -27,6 +27,8 @@ backend/data/
 
 # Node
 node_modules/
+# The development dependency wrapper links this path to the data-disk cache.
+frontend/node_modules
 
 # 构建产物
 frontend/dist/
