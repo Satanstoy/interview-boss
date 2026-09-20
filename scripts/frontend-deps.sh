@@ -39,15 +39,13 @@ root_free_mb=$(free_mb "$PROJECT_DIR")
 [ "${root_free_mb:-0}" -ge "$MIN_ROOT_FREE_MB" ] || \
   fail "根分区剩余 ${root_free_mb:-0}MB，低于前端依赖安装下限 ${MIN_ROOT_FREE_MB}MB"
 
-if [ -z "${FRONTEND_DEPS_CACHE_DIR+x}" ]; then
-  command -v findmnt >/dev/null 2>&1 || fail "需要 findmnt 来确认 /data 挂载"
-  cache_source=$(findmnt -no SOURCE --target "$CACHE_DIR" 2>/dev/null || true)
-  case "$cache_source" in
-    ''|/|/dev/vda*)
-      fail "共享前端依赖缓存必须位于独立数据盘: $CACHE_DIR"
-      ;;
-  esac
-fi
+command -v findmnt >/dev/null 2>&1 || fail "需要 findmnt 来确认 /data 挂载"
+cache_source=$(findmnt -no SOURCE --target "$CACHE_DIR" 2>/dev/null || true)
+case "$cache_source" in
+  ''|/|/dev/vda*)
+    fail "共享前端依赖缓存必须位于独立数据盘: $CACHE_DIR"
+    ;;
+esac
 
 mkdir -p "$CACHE_DIR"
 
