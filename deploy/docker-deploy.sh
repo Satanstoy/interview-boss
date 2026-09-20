@@ -33,8 +33,8 @@ MIGRATION_BACKUP_MAX_BYTES="${MIGRATION_BACKUP_MAX_BYTES:-10737418240}"
 LOCAL_BACKUP_MAX_BYTES="${LOCAL_BACKUP_MAX_BYTES:-10737418240}"
 EVALUATION_MAX_BYTES="${EVALUATION_MAX_BYTES:-10737418240}"
 PROJECT_ARCHIVE_MAX_BYTES="${PROJECT_ARCHIVE_MAX_BYTES:-21474836480}"
-DATA_HARD_MIN_FREE_MB="${DATA_HARD_MIN_FREE_MB:-10240}"
-DATA_WARN_FREE_MB="${DATA_WARN_FREE_MB:-20480}"
+DATA_HARD_MIN_FREE_MB="${DATA_HARD_MIN_FREE_MB:-}"
+DATA_WARN_FREE_MB="${DATA_WARN_FREE_MB:-}"
 STORAGE_METRICS_FILE="${STORAGE_METRICS_FILE:-/data/interview-boss/storage.prom}"
 APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"
 APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"
@@ -1121,8 +1121,13 @@ do_diagnose() {
   log "  BACKUP_MAX_BYTES:         $BACKUP_MAX_BYTES / 10737418240"
   log "  EVALUATION_MAX_BYTES:     $EVALUATION_MAX_BYTES / 10737418240"
   log "  PROJECT_ARCHIVE_MAX_BYTES:$PROJECT_ARCHIVE_MAX_BYTES / 21474836480"
-  log "  DATA_WARN_FREE_MB:        $DATA_WARN_FREE_MB / 20480"
-  log "  DATA_HARD_MIN_FREE_MB:    $DATA_HARD_MIN_FREE_MB / 10240"
+  if storage_data_mount_available; then
+    log "  DATA_WARN_FREE_MB:        ${DATA_WARN_FREE_MB:-$(storage_default_data_warn_mb)} (auto if blank)"
+    log "  DATA_HARD_MIN_FREE_MB:    ${DATA_HARD_MIN_FREE_MB:-$(storage_default_data_hard_min_mb)} (auto if blank)"
+  else
+    log "  DATA_WARN_FREE_MB:        ${DATA_WARN_FREE_MB:-auto (requires /data)}"
+    log "  DATA_HARD_MIN_FREE_MB:    ${DATA_HARD_MIN_FREE_MB:-auto (requires /data)}"
+  fi
   log "  STORAGE_METRICS_FILE:     $STORAGE_METRICS_FILE"
   echo ""
   log "========== 诊断完成 =========="
@@ -1173,6 +1178,12 @@ do_maintenance() {
   if ! storage_write_metrics; then
     cleanup_rc=1
     storage_emit_alert "error" "存储维护指标写入失败: $STORAGE_METRICS_FILE"
+  fi
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    storage_emit_alert "critical" "存储维护后根分区可用空间仍低于硬阈值: ${free_mb}MB"
+    err "存储维护后根分区可用空间仍低于硬阈值: ${free_mb}MB < ${DEPLOY_HARD_MIN_FREE_MB}MB"
+    return 1
   fi
   if [ "$cleanup_rc" -ne 0 ]; then
     err "存储 retention 或指标维护失败"

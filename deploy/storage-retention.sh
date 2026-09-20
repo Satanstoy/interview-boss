@@ -112,16 +112,41 @@ storage_data_free_mb() {
   df -Pm /data 2>/dev/null | awk 'NR == 2 {print $4}'
 }
 
+storage_default_data_hard_min_mb() {
+  local total_mb threshold
+  total_mb=$(storage_data_total_mb)
+  [[ "$total_mb" =~ ^[0-9]+$ && "$total_mb" -gt 1 ]] || return 1
+  threshold=$((total_mb / 10))
+  (( threshold < 1024 )) && threshold=1024
+  (( threshold >= total_mb )) && threshold=$((total_mb - 1))
+  printf '%s\n' "$threshold"
+}
+
+storage_default_data_warn_mb() {
+  local total_mb hard_mb threshold
+  total_mb=$(storage_data_total_mb)
+  hard_mb=$(storage_default_data_hard_min_mb) || return 1
+  threshold=$((total_mb / 5))
+  (( threshold <= hard_mb )) && threshold=$((hard_mb * 2))
+  (( threshold >= total_mb )) && threshold=$((total_mb - 1))
+  printf '%s\n' "$threshold"
+}
+
 storage_check_data_capacity() {
-  local free_mb warn_mb hard_mb
+  local free_mb total_mb warn_mb hard_mb
   storage_data_mount_available || return 1
   free_mb=$(storage_data_free_mb)
-  warn_mb="${DATA_WARN_FREE_MB:-20480}"
-  hard_mb="${DATA_HARD_MIN_FREE_MB:-10240}"
-  [[ "$free_mb" =~ ^[0-9]+$ && "$warn_mb" =~ ^[0-9]+$ && "$hard_mb" =~ ^[0-9]+$ ]] || {
+  total_mb=$(storage_data_total_mb)
+  warn_mb="${DATA_WARN_FREE_MB:-$(storage_default_data_warn_mb)}"
+  hard_mb="${DATA_HARD_MIN_FREE_MB:-$(storage_default_data_hard_min_mb)}"
+  [[ "$free_mb" =~ ^[0-9]+$ && "$total_mb" =~ ^[0-9]+$ && "$warn_mb" =~ ^[0-9]+$ && "$hard_mb" =~ ^[0-9]+$ ]] || {
     storage_retention_log "invalid /data capacity thresholds: warn=$warn_mb hard=$hard_mb"
     return 2
   }
+  if (( hard_mb >= total_mb || warn_mb >= total_mb )); then
+    storage_retention_log "capacity thresholds exceed /data size: total=${total_mb}MB warn=${warn_mb}MB hard=${hard_mb}MB"
+    return 2
+  fi
   if (( free_mb < hard_mb )); then
     storage_retention_log "ALERT: /data free space ${free_mb}MB is below hard threshold ${hard_mb}MB"
     return 2
@@ -178,8 +203,9 @@ storage_write_metrics() {
 
 storage_cleanup_project_archives() {
   local archive_dir="${PROJECT_ARCHIVE_DIR:-/data/projects/archive}"
+  local link_dir="${PROJECT_ARCHIVE_LINK_DIR:-/opt}"
   local rm_bin="${STORAGE_RM_BIN:-rm}"
-  local cutoff_epoch archive link target referenced archive_size
+  local cutoff_epoch archive link target referenced link_mtime archive_size
   local max_bytes="${PROJECT_ARCHIVE_MAX_BYTES:-21474836480}"
   local min_keep="${PROJECT_ARCHIVE_MIN_KEEP_FILES:-0}"
   local total_bytes=0 index=0
@@ -211,10 +237,23 @@ storage_cleanup_project_archives() {
     while IFS= read -r -d '' link; do
       target=$(readlink -f "$link" 2>/dev/null || true)
       if [[ "$target" == "$archive" ]]; then
-        referenced=1
-        break
+        link_mtime=$(stat -c %Y -- "$link" 2>/dev/null || echo 0)
+        if (( link_mtime >= cutoff_epoch )); then
+          referenced=1
+          break
+        fi
+        if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
+          storage_retention_log "would remove stale project archive link: $link"
+        elif "$rm_bin" -f -- "$link"; then
+          storage_retention_log "removed stale project archive link: $link"
+        else
+          storage_retention_log "WARNING: failed to remove stale project archive link: $link"
+          cleanup_rc=1
+          referenced=1
+          break
+        fi
       fi
-    done < <(find /opt -maxdepth 1 -type l -name 'interview-boss-backup-*' -print0 2>/dev/null)
+    done < <(find "$link_dir" -maxdepth 1 -type l -name 'interview-boss-backup-*' -print0 2>/dev/null)
     if (( referenced != 0 )); then
       index=$((index + 1))
       continue

@@ -6,12 +6,26 @@ COMPOSE_FILE="$PROJECT_DIR/docker-compose.real-e2e.yml"
 PROJECT="interview-boss-real-e2e-${BASHPID}-$(date +%s)"
 PORT="${REAL_STACK_PORT:-18081}"
 BASE_URL="http://127.0.0.1:${PORT}"
+REAL_STACK_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 TEMP_ARTIFACTS="$(mktemp -d "${TMPDIR:-/tmp}/interview-boss-real-stack.XXXXXX")"
 FINAL_ARTIFACT_ROOT="$PROJECT_DIR/test-results/real-stack"
 RUN_STATUS=0
 
 compose() {
   REAL_STACK_PORT="$PORT" docker compose --project-name "$PROJECT" -f "$COMPOSE_FILE" "$@"
+}
+
+ensure_real_stack_builder() {
+  local driver
+  if docker buildx inspect "$REAL_STACK_BUILDER" >/dev/null 2>&1; then
+    driver=$(docker buildx inspect "$REAL_STACK_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+    [ "$driver" = "docker-container" ] || {
+      printf 'Real-stack BuildKit builder has driver=%s, expected docker-container\n' "$driver" >&2
+      return 1
+    }
+    return 0
+  fi
+  docker buildx create --name "$REAL_STACK_BUILDER" --driver docker-container --driver-opt network=host >/dev/null
 }
 
 copy_failure_artifacts() {
@@ -47,7 +61,8 @@ command -v curl >/dev/null 2>&1
 command -v npm >/dev/null 2>&1
 
 compose config --quiet
-compose build backend worker nginx oauth-gateway llm-stub
+ensure_real_stack_builder
+compose build --builder "$REAL_STACK_BUILDER" backend worker nginx oauth-gateway llm-stub
 compose up -d --wait --wait-timeout 180
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
