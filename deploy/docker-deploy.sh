@@ -1061,10 +1061,18 @@ do_check() {
 
 # ── 检查磁盘和 /data 挂载 ──
 do_storage_check() {
-  local free_mb
+  local free_mb allow_root_low="${1:-0}" check_rc=0
   free_mb=$(root_free_mb)
   log "根分区可用空间: ${free_mb}MB"
   df -hT / /data 2>/dev/null || df -hT /
+
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    warn "根分区可用空间 ${free_mb}MB 低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB"
+    if [ "$allow_root_low" != "1" ]; then
+      storage_emit_alert "critical" "根分区可用空间低于硬阈值，已阻止存储检查通过"
+      check_rc=1
+    fi
+  fi
 
   if storage_data_mount_available; then
     log "/data 真实挂载信息："
@@ -1076,7 +1084,7 @@ do_storage_check() {
     if ! storage_write_metrics; then
       warn "无法写入存储指标: $STORAGE_METRICS_FILE"
     fi
-    return 0
+    return "$check_rc"
   fi
 
   warn "/data 未检测到真实挂载；禁止向 /data-backed 缓存/备份路径写入"
@@ -1139,7 +1147,7 @@ do_maintenance() {
   local cleanup_rc=0
   local free_mb
   log "执行 InterviewBoss 存储维护（备份、测试资源、BuildKit 缓存）..."
-  do_storage_check || mount_rc=1
+  do_storage_check 1 || mount_rc=1
   if ! storage_cleanup_backups "$PROJECT_DIR"; then
     cleanup_rc=1
     storage_emit_alert "error" "备份/评测产物 retention 清理失败"

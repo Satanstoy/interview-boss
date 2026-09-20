@@ -115,7 +115,11 @@ jobs:
           [ -f backend/.env ] || cp backend/.env.example backend/.env
           printf 'ci-placeholder-redis-password\n' > backend/.redis-password
       - name: Build deployable images (app-runtime + nginx)
-        run: docker compose build backend nginx
+        env:
+          CI_BUILDKIT_BUILDER: interview-boss-ci
+        run: |
+          docker buildx create --name "$CI_BUILDKIT_BUILDER" --driver docker-container --driver-opt network=host
+          docker compose build --builder "$CI_BUILDKIT_BUILDER" backend nginx
       - name: Trivy scan app image
         uses: aquasecurity/trivy-action@0.28.0
         with:

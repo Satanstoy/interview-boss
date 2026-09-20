@@ -100,7 +100,7 @@ storage_prune_file_family() {
 
 storage_cleanup_evaluations() {
   local directory="$1"
-  storage_prune_file_family "$directory" '*' "evaluation artifact" "" \
+  storage_prune_file_family "$directory" 'eval_*' "evaluation artifact" "" \
     "${EVALUATION_MAX_BYTES:-10737418240}"
 }
 
@@ -145,6 +145,10 @@ storage_check_data_capacity() {
   }
   if (( hard_mb >= total_mb || warn_mb >= total_mb )); then
     storage_retention_log "capacity thresholds exceed /data size: total=${total_mb}MB warn=${warn_mb}MB hard=${hard_mb}MB"
+    return 2
+  fi
+  if (( warn_mb < hard_mb )); then
+    storage_retention_log "capacity warning threshold is below hard threshold: warn=${warn_mb}MB hard=${hard_mb}MB"
     return 2
   fi
   if (( free_mb < hard_mb )); then
