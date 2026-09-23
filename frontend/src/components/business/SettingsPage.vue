@@ -56,9 +56,6 @@ watch(() => route.query.section, (value) => {
   if (value) activeSection.value = sectionFromQuery(value)
 }, { immediate: true })
 
-const currentSectionLabel = computed(
-  () => sections.value.find(s => s.id === activeSection.value)?.label || '设置',
-)
 </script>
 
 <template>
@@ -109,9 +106,6 @@ const currentSectionLabel = computed(
           <PanelLeft :size="14" />
           <span>设置菜单</span>
         </Button>
-        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {{ currentSectionLabel }}
-        </span>
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">

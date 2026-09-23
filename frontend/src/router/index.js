@@ -41,11 +41,13 @@ const routes = [
       {
         path: 'jd',
         name: 'jd',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/JdView.vue'),
       },
       {
         path: 'interview',
         name: 'interview',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/InterviewView.vue'),
       },
       {
@@ -56,21 +58,25 @@ const routes = [
       {
         path: 'practice/decks',
         name: 'practice-decks',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/PracticeDecksView.vue'),
       },
       {
         path: 'insights/overview',
         name: 'insights-overview',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/InsightsView.vue'),
       },
       {
         path: 'insights/readiness',
         name: 'insights-readiness',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/InsightsView.vue'),
       },
       {
         path: 'insights/reviews',
         name: 'insights-reviews',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/InsightsView.vue'),
       },
       {
@@ -81,6 +87,7 @@ const routes = [
       {
         path: 'import',
         name: 'import',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/ImportView.vue'),
       },
       {
@@ -91,6 +98,7 @@ const routes = [
       {
         path: 'settings',
         name: 'settings',
+        meta: { pageOwnsTitle: true },
         component: () => import('@/views/SettingsView.vue'),
       },
       {
@@ -105,7 +113,7 @@ const routes = [
       {
         path: 'admin/evals/results',
         name: 'admin-evals-results',
-        meta: { adminOnly: true },
+        meta: { adminOnly: true, pageOwnsTitle: true },
         component: () => import('@/views/admin/EvaluationResultsView.vue'),
       },
       {
@@ -117,7 +125,7 @@ const routes = [
       {
         path: 'admin/evals/experiments/:experimentId',
         name: 'admin-evals-experiment',
-        meta: { adminOnly: true },
+        meta: { adminOnly: true, pageOwnsTitle: true },
         component: () => import('@/views/admin/EvaluationExperimentView.vue'),
       },
       {
@@ -133,13 +141,13 @@ const routes = [
       {
         path: 'admin/evals/reviews',
         name: 'admin-evals-reviews',
-        meta: { adminOnly: true },
+        meta: { adminOnly: true, pageOwnsTitle: true },
         component: () => import('@/views/admin/EvaluationReviewsView.vue'),
       },
       {
         path: 'admin/evals/runs/:runId',
         name: 'admin-evals-run',
-        meta: { adminOnly: true },
+        meta: { adminOnly: true, pageOwnsTitle: true },
         component: () => import('@/views/admin/EvaluationRunView.vue'),
       },
     ],

@@ -17,6 +17,10 @@ const props = defineProps({
     type: String,
     required: true
   },
+  showCurrentPageLabel: {
+    type: Boolean,
+    default: true
+  },
   activeSeason: {
     type: String,
     default: null
@@ -178,7 +182,7 @@ const createPlaylist = async () => {
     </AppTooltip>
 
     <div class="flex h-8 min-w-0 shrink-0 items-center gap-2">
-      <span class="hidden h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground sm:flex">
+      <span v-if="showCurrentPageLabel" class="hidden h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground sm:flex">
         {{ activeTabLabel }}
       </span>
 

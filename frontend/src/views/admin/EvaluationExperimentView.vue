@@ -114,7 +114,7 @@ onUnmounted(() => {
 <template>
   <div class="h-full overflow-y-auto custom-scrollbar">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <EvaluationPageHeader :title="`测评实验 #${route.params.experimentId}`" description="这里汇总整体执行进度，并可进入任意目标查看 Case 证据。">
+      <EvaluationPageHeader :title="`测评实验 #${route.params.experimentId}`">
         <template #actions>
           <Button variant="ghost" @click="router.push('/admin/evals/experiments')"><ArrowLeft class="mr-1.5 size-4" />返回测评实验</Button>
           <Button variant="ghost" @click="load"><RefreshCw class="mr-1.5 size-4" />刷新</Button>

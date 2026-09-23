@@ -138,7 +138,6 @@ const handleGoToQuestion = (question) => {
   <div class="w-full space-y-8">
     <div>
       <h3 class="text-lg font-semibold text-foreground">面试偏好</h3>
-      <p class="text-sm text-muted-foreground mt-1">设置你的目标岗位和面试偏好</p>
     </div>
 
     <!-- Card 1: 目标岗位 -->

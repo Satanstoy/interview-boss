@@ -8,8 +8,7 @@
             <FileText class="size-5 text-white" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-foreground">面经库</h3>
-            <p class="text-caption text-muted-foreground">浏览和管理面试经验数据</p>
+            <h1 class="text-lg font-bold text-foreground">面经库</h1>
           </div>
         </div>
       </div>

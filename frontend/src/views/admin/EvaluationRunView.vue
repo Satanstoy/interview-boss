@@ -237,7 +237,7 @@ onUnmounted(() => {
   <div class="h-full overflow-y-auto custom-scrollbar custom-scrollbar-always">
     <div class="border-b border-border/60 bg-background">
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
-        <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`" description="查看每个 Case 的执行进度、业务结果和质量指标。">
+        <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`">
           <template #actions>
             <Button variant="ghost" @click="router.push('/admin/evals/results')"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
             <Button v-if="resumable" variant="outline" :disabled="resuming" @click="resume"><RefreshCw class="mr-1.5 size-4" />{{ resuming ? '正在续作...' : '续做未完成 Case' }}</Button>
