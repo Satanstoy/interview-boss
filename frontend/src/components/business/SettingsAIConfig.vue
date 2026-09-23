@@ -226,7 +226,6 @@ onMounted(loadConfig)
   <div class="w-full space-y-8">
     <div>
       <h3 class="text-lg font-semibold text-foreground">AI 配置</h3>
-      <p class="text-sm text-muted-foreground mt-1">配置大语言模型 API 连接参数</p>
     </div>
 
     <div class="rounded-xl border bg-card p-6 space-y-4">

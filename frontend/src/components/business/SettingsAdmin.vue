@@ -144,7 +144,6 @@ const onRebuild = () => {
     <!-- Header -->
     <div>
       <h3 class="text-lg font-semibold text-foreground">管理员设置</h3>
-      <p class="text-sm text-muted-foreground mt-1">管理系统级配置（仅管理员可见）</p>
     </div>
 
     <!-- Tab 切换：分类管理 / 聚合质量 -->

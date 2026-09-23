@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 async function openPreview(page, path, width = 1280) {
   await page.setViewportSize({ width, height: 900 })
-  await page.goto(`${path}?preview=1`)
+  await page.goto(`${path}${path.includes('?') ? '&' : '?'}preview=1`)
   await page.locator('main').waitFor()
 }
 
@@ -67,5 +67,36 @@ test.describe('页面标题与导航层级', () => {
     await expect(page.locator('button[aria-label="切换设置菜单"] + span')).toHaveCount(0)
     await page.getByRole('button', { name: '切换设置菜单' }).click()
     await expect(page.getByRole('button', { name: /面试偏好/ })).toBeVisible()
+  })
+
+  test('设置栏目不显示复述标题的通用副标题', async ({ page }) => {
+    await openPreview(page, '/settings?section=ai')
+
+    await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toBeVisible()
+    await expect(page.getByText('配置大语言模型 API 连接参数', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/settings?section=admin')
+    await expect(page.getByRole('heading', { name: '管理员设置', exact: true })).toBeVisible()
+    await expect(page.getByText('管理系统级配置（仅管理员可见）', { exact: true })).toHaveCount(0)
+  })
+
+  test('导入页标题下不重复罗列表单已展示的输入方式', async ({ page }) => {
+    await openPreview(page, '/import')
+
+    await expect(page.getByRole('heading', { name: '导入', exact: true })).toBeVisible()
+    await expect(page.getByText('粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。', { exact: true })).toHaveCount(0)
+  })
+
+  test('聊天和编码空状态不重复说明开始方式', async ({ page }) => {
+    await openPreview(page, '/chat')
+    await page.getByRole('button', { name: '更多操作' }).first().click()
+    await page.getByRole('menuitem', { name: '删除' }).click()
+    await page.getByRole('button', { name: '确定', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '开始模拟面试', exact: true })).toBeVisible()
+    await expect(page.getByText('选择一种方式开始练习', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/coding')
+    await expect(page.getByRole('heading', { name: '开始编码练习', exact: true })).toBeVisible()
+    await expect(page.getByText('从题目列表选择一道题开始练习', { exact: true })).toHaveCount(0)
   })
 })

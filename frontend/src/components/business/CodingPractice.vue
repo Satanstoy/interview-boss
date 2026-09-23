@@ -187,7 +187,6 @@
         <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
           <div>
             <h2 class="text-base font-semibold text-foreground">开始编码练习</h2>
-            <p class="mt-1">从题目列表选择一道题开始练习</p>
           </div>
           <Button variant="outline" class="h-10 gap-1.5 md:hidden" @click="sidebarCollapsed = false">
             <PanelLeft :size="14" />选择题目

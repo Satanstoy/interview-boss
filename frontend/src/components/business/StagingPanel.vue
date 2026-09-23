@@ -268,8 +268,6 @@ defineExpose({ onSubmit, isSubmitting })
           {{ activeJobCount }} 个任务处理中
         </Badge>
       </div>
-      <p class="mt-1 text-xs text-muted-foreground">粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。</p>
-
       <!-- 后台任务实时进度列表 -->
       <div v-if="visibleJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
         <div

@@ -6,7 +6,6 @@
       <MessageSquare :size="40" class="text-primary" />
     </div>
     <h2 class="mb-2 text-center text-2xl font-bold text-foreground sm:mb-3 sm:text-3xl">开始模拟面试</h2>
-    <p class="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-lg">选择一种方式开始练习</p>
     <div class="grid w-full max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4">
       <button v-for="suggestion in promptSuggestions" :key="suggestion.text"
         class="group flex min-h-16 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-all hover:border-border hover:bg-accent/50 sm:p-4"
