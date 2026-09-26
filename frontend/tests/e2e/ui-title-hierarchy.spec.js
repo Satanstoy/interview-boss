@@ -39,6 +39,35 @@ test.describe('页面标题与导航层级', () => {
     await expect(page.getByText('先看哪些 Case 没达标，再进入评测详情查看执行表现和业务结果。', { exact: true })).toHaveCount(0)
   })
 
+  for (const width of [390, 700]) {
+    test(`评测结果页在 ${width}px 只显示一个页面主标题`, async ({ page }) => {
+      await openPreview(page, '/admin/evals/results', width)
+
+      await expect(page.getByRole('heading', { name: '评测结果', exact: true })).toBeVisible()
+      await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+      await expect(page.locator('main > header').getByText('评测结果', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+    })
+  }
+
+  test('评测详情页不显示固定面包屑且返回按钮指向评测结果', async ({ page }) => {
+    await openPreview(page, '/admin/evals/runs/12')
+
+    await expect(page.getByRole('heading', { name: '评测详情 #12', exact: true })).toBeVisible()
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+    await page.getByRole('button', { name: '返回评测结果' }).click()
+    await expect(page).toHaveURL(/\/admin\/evals\/results/)
+  })
+
+  test('测评实验详情页不显示固定面包屑且返回按钮指向测评实验', async ({ page }) => {
+    await openPreview(page, '/admin/evals/experiments/77')
+
+    await expect(page.getByRole('heading', { name: '测评实验 #77', exact: true })).toBeVisible()
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+    await page.getByRole('button', { name: '返回测评实验' }).click()
+    await expect(page).toHaveURL(/\/admin\/evals\/experiments(\?|$)/)
+  })
+
   test('题单管理页不显示练习页专用的全局题单控件', async ({ page }) => {
     await openPreview(page, '/practice/decks')
 

@@ -1,3 +1,12 @@
+/**
+ * 预览模式（?preview=1）下保留预览参数。
+ * 路由守卫对 admin 路由要求 is_admin，而预览模式会把当前用户置为非管理员预览用户，
+ * 丢掉 preview 参数后返回类操作会被重定向到题库页。
+ */
+export function evalRouteLocation(path, query = {}) {
+  return query.preview === '1' ? { path, query: { preview: '1' } } : path
+}
+
 export const STATUS_LABELS = {
   created: '待调度',
   queued: '排队中',

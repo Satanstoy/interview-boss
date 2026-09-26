@@ -242,6 +242,10 @@ async function mockEvaluationApis(page) {
     }
     return route.fulfill({ json: { experiments: [experimentCreated ? { ...activeExperimentPayload, id: 77 } : activeExperimentPayload] } })
   })
+  // 进行中的测评改用 /active（fetchActiveEvaluations），返回 items 而不是 experiments
+  await page.route('**/api/admin/evals/active', route => route.fulfill({
+    json: { items: [experimentCreated ? { ...activeExperimentPayload, id: 77 } : activeExperimentPayload] },
+  }))
   await page.route('**/api/admin/evals/experiments/77', route => route.fulfill({ json: experimentPayload }))
   await page.route('**/api/admin/evals/benchmarks', route => route.fulfill({ json: benchmarksPayload }))
   await page.route('**/api/admin/evals/harness-releases', route => route.fulfill({ json: harnessesPayload }))
@@ -469,6 +473,8 @@ test.describe('评测中心可读性', () => {
     await page.goto('/admin/evals/reviews?preview=1')
     await expect(page.getByRole('heading', { name: '人工 A/B：核对版本差异' })).toBeVisible()
     await expect(page.locator('[aria-label="评测流程"]')).toHaveCount(0)
-    await expect(page.getByText('先定位同一个完整评测版本下的两条 Run')).toBeVisible()
+    // 2026-09-23 spec：移除标题下的泛化预告句与固定面包屑
+    await expect(page.getByText('先定位同一个完整评测版本下的两条 Run')).toHaveCount(0)
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
   })
 })

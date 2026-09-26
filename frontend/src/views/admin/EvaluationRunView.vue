@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cancelEvaluationRun, fetchEvaluationEvidence, fetchEvaluationRun, restartEvaluationRun, resumeEvaluationRun, retryFailedEvaluationRun, streamEvaluationRun } from '@/services/evaluationApi.js'
 import { normalizeCaseEvidenceForLegacyPanel } from '@/services/evaluationSchemas.js'
-import { casePrioritySort, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
+import { casePrioritySort, evalRouteLocation, qualityStatusLabel, runDistribution, statusClass, statusLabel } from './evaluationShared.js'
 import EvaluationPageHeader from './EvaluationPageHeader.vue'
 import EvalProgressBar from '@/components/business/EvalProgressBar.vue'
 import { Badge } from '@/components/ui/badge'
@@ -239,7 +239,7 @@ onUnmounted(() => {
       <div class="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
         <EvaluationPageHeader :title="`评测详情 #${route.params.runId}`">
           <template #actions>
-            <Button variant="ghost" @click="router.push('/admin/evals/results')"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
+            <Button variant="ghost" @click="router.push(evalRouteLocation('/admin/evals/results', route.query))"><ArrowLeft class="mr-1.5 size-4" />返回评测结果</Button>
             <Button v-if="resumable" variant="outline" :disabled="resuming" @click="resume"><RefreshCw class="mr-1.5 size-4" />{{ resuming ? '正在续作...' : '续做未完成 Case' }}</Button>
             <Button v-if="run?.status === 'expired'" variant="outline" :disabled="restarting" @click="restart"><RefreshCw class="mr-1.5 size-4" />{{ restarting ? '正在重启...' : '重启评测' }}</Button>
             <Button v-if="run && terminal && run.failed_items > 0" variant="outline" :disabled="retrying" @click="retryFailed">{{ retrying ? '正在重新排队...' : '重跑失败 Case' }}</Button>
