@@ -243,7 +243,13 @@ rollback_backend() {
   if [ -n "$OLD_BACKEND_IMAGE" ]; then
     warn "Rolling back backend to previous image..."
     docker tag "$OLD_BACKEND_IMAGE" interview-boss-app:rollback 2>/dev/null || true
-    docker compose up -d --no-deps --wait --wait-timeout 30 backend 2>/dev/null || true
+    # compose 固定按 interview-boss-app:local 启动（docker-compose.yml:29），
+    # 只打 :rollback 标签不会生效，必须把上一版镜像恢复到 :local 再 up，回滚才真正落地。
+    if docker tag "$OLD_BACKEND_IMAGE" interview-boss-app:local 2>/dev/null; then
+      docker compose up -d --no-deps --wait --wait-timeout 30 backend 2>/dev/null || true
+    else
+      err "回滚失败：无法把 $OLD_BACKEND_IMAGE 恢复为 interview-boss-app:local"
+    fi
     err "Rollback attempted. Check status with: $0 status"
   else
     err "No previous image available for rollback"
@@ -286,12 +292,22 @@ ensure_buildkit_builder() {
 prune_build_cache() {
   local mode="${1:-light}"
   local filter_args=(--filter "until=${BUILDKIT_CACHE_MAX_AGE}")
-  local builder_driver
+  local builder_driver probe_attempt
   if ! docker buildx inspect "$BUILDKIT_BUILDER" >/dev/null 2>&1; then
     log "InterviewBoss 专用 BuildKit builder 尚未创建，跳过其缓存清理"
     return 0
   fi
-  builder_driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+  # docker buildx inspect 的 stdout 接管道时会间歇性返回 255（本机实测约 50%，重定向到文件则为 0）。
+  # 在 set -euo pipefail 下这行赋值一旦失败会静默终止整个部署脚本（exit 255、无任何报错）。
+  # 缓存清理是最佳努力：读不到驱动就跳过本轮清理，磁盘兜底由 ensure_disk_before_build 的硬阈值负责。
+  for probe_attempt in 1 2; do
+    builder_driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}') && break
+    builder_driver=""
+  done
+  if [ -z "$builder_driver" ]; then
+    warn "读取 InterviewBoss BuildKit builder 驱动失败，跳过本轮缓存清理"
+    return 0
+  fi
   if [ "$builder_driver" != "$BUILDKIT_BUILDER_DRIVER" ]; then
     err "拒绝清理非隔离 BuildKit builder: $BUILDKIT_BUILDER (driver=$builder_driver)"
     return 1
@@ -469,10 +485,11 @@ prune_unused_docker() {
   else
     local free_mb
     free_mb=$(root_free_mb)
+    # 清理失败不中止部署：这里只是回收空间，够不够由 ensure_disk_before_build 的硬阈值复核。
     if [ "$aggressive" = "--aggressive" ]; then
-      prune_build_cache aggressive
+      prune_build_cache aggressive || warn "BuildKit 缓存清理失败（继续部署）"
     elif [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-      prune_build_cache light
+      prune_build_cache light || warn "BuildKit 缓存清理失败（继续部署）"
     else
       log "磁盘 ${free_mb}MB 高于目标 ${DEPLOY_TARGET_FREE_MB}MB，保留热 BuildKit 缓存"
     fi
