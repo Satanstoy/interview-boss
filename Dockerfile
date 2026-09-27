@@ -91,8 +91,8 @@ WORKDIR /app
 # 非 root 用户（在 COPY 之前创建，这样 --chown 才能生效）
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
-    mkdir -p /app/backend/data && \
-    chown -R appuser:appuser /app
+    mkdir -p /app/backend/data /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser/.cache
 
 # 从 builder 复制 Python 依赖（--chown 避免后续 chown -R 的 overlayfs copy-up）
 COPY --from=deps-builder --chown=appuser /app/.venv /app/.venv
@@ -123,8 +123,8 @@ WORKDIR /app
 
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
-    mkdir -p /app/backend/data && \
-    chown -R appuser:appuser /app
+    mkdir -p /app/backend/data /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser/.cache
 
 COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
 

@@ -28,6 +28,16 @@ def test_app_runtime_drops_privileges_before_entrypoint():
     assert entrypoint.strip().endswith('exec "$@"')
 
 
+def test_app_runtime_prepares_writable_uv_cache_parent_for_bind_mounts():
+    dockerfile = DOCKERFILE.read_text()
+    runtime = dockerfile.split("FROM python-base AS app-runtime", 1)[1].split(
+        "FROM python-base AS test-runtime", 1
+    )[0]
+
+    assert "mkdir -p /app/backend/data /home/appuser/.cache" in runtime
+    assert "chown -R appuser:appuser /app /home/appuser/.cache" in runtime
+
+
 def test_nginx_runtime_is_unprivileged_and_uses_writable_runtime_paths():
     dockerfile = DOCKERFILE.read_text()
     nginx_runtime = dockerfile.split("FROM nginx:1.29-alpine AS nginx-runtime", 1)[1]
@@ -53,7 +63,7 @@ def test_deploy_preflights_bind_mounted_data_for_appuser():
     assert "ensure_runtime_data_dir" in source
     assert 'APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"' in source
     assert 'APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"' in source
-    assert "chown -R \"${APP_RUNTIME_UID}:${APP_RUNTIME_GID}\"" in source
+    assert 'chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}"' in source
     assert 'db_path="$data_dir/interview-boss.db"' in source
     assert 'run_as_runtime_user test -r "$db_path"' in source
     assert 'run_as_runtime_user test -w "$db_path"' in source
@@ -65,8 +75,6 @@ def test_deploy_preflights_bind_mounted_data_for_appuser():
     )
 
     restart = source.split("do_restart()", 1)[1].split("# ── 查看状态", 1)[0]
-    worker_restart = source.split("do_worker_restart()", 1)[1].split(
-        "# ── Eval Worker", 1
-    )[0]
+    worker_restart = source.split("do_worker_restart()", 1)[1].split("# ── Eval Worker", 1)[0]
     assert "ensure_runtime_data_dir" in restart
     assert "ensure_runtime_data_dir" in worker_restart
