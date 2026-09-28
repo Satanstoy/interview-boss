@@ -455,8 +455,9 @@ prune_build_cache() {
     err "无法读取 BuildKit 缓存用量，拒绝在未知状态下继续"
     return 1
   fi
-  if [ "$before_mb" -le "$cap_mb" ]; then
-    log "BuildKit 缓存 ${before_mb}MB 未超上限 ${cap_mb}MB，无需清理"
+  local limit_mb=$((cap_mb + BUILDKIT_CACHE_SLACK_MB))
+  if [ "$before_mb" -le "$limit_mb" ]; then
+    log "BuildKit 缓存 ${before_mb}MB 在上限 ${cap_mb}MB + 容差 ${BUILDKIT_CACHE_SLACK_MB}MB 内，无需清理"
     return 0
   fi
 
@@ -476,7 +477,6 @@ prune_build_cache() {
     err "清理后无法读取 BuildKit 缓存用量，无法校验"
     return 1
   fi
-  local limit_mb=$((cap_mb + BUILDKIT_CACHE_SLACK_MB))
   if [ "$after_mb" -gt "$limit_mb" ]; then
     err "清理后 BuildKit 缓存仍为 ${after_mb}MB > 上限 ${cap_mb}MB（容差 ${BUILDKIT_CACHE_SLACK_MB}MB）"
     return 1
@@ -644,8 +644,9 @@ ensure_build_space() {
     cache_mb=""
   fi
 
-  if [ -n "$cache_mb" ] && [ "$cap_mb" -gt 0 ] && [ "$cache_mb" -gt "$cap_mb" ]; then
-    log "[$stage] BuildKit 缓存 ${cache_mb}MB 超上限 ${cap_mb}MB"
+  if [ -n "$cache_mb" ] && [ "$cap_mb" -gt 0 ] \
+    && [ "$cache_mb" -gt "$((cap_mb + BUILDKIT_CACHE_SLACK_MB))" ]; then
+    log "[$stage] BuildKit 缓存 ${cache_mb}MB 超上限 ${cap_mb}MB + 容差 ${BUILDKIT_CACHE_SLACK_MB}MB"
     need=1
   fi
   if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then

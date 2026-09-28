@@ -1,0 +1,13 @@
+3	D15	frontend/src/layouts/AuthenticatedLayout.vue:560	上传刷新不定位记录或重置面经页码	完成结果提供定位链接并重置页码	0.5d	certain
+3	D15	frontend/src/composables/useMasterBankData.js:75	只获取最早100条面经再本地排序	服务端过滤排序分页并消费total	1d	certain
+3	D4	backend/app/routers/submit.py:215	普通用户分享未进入已有审核流	共用提交策略并持久传递审核意图	1d	certain
+3	D10	backend/app/core/config.py:198	私人Key静默回退系统且公共阶段Key不统一	显式凭据作用域付款方预算与配置错误	2d	certain
+3	D9	backend/app/agents/submit/persist_personal.py:111	私人命中公共题未持久化引用关系	新增带owner和版本的原题规范题映射	3d	certain
+3	D14	backend/app/services/clustering/matcher.py:764	匹配调用失败被归为不匹配	区分判断失败与真正无匹配	1d	certain
+3	D14	backend/app/services/pipeline/queue.py:253	全局单批调度未续调剩余owner队列	完成后续调及定时扫描无job队列	2d	certain
+3	D14	backend/app/agents/submit/graph.py:146	重试从头运行且写库入队非原子	稳定import_id持久阶段检查点和事务outbox	4d	certain
+3	D14	backend/app/agents/submit/graph.py:164	同用户同秒上传复用checkpoint标识	使用唯一job或import标识	0.5d	certain
+3	D15	frontend/src/composables/useSubmitJobs.js:161	SSE静默结束不重连且恢复失败清空本地任务	终态感知重连心跳快照及缓存保留	2d	certain
+3	D15	frontend/src/composables/useSubmitJobs.js:139	导入完成冒充全流程完成	关联聚类答案子任务及常驻结果历史	2d	certain
+3	D14	backend/app/services/pipeline/queue.py:103	处理超时按创建时间回收	处理租约心跳和fencing校验	2d	certain
+2	D14	backend/app/routers/bank_build.py:42	pending事件协议与错误重试分类不一致	统一状态快照和retryable错误语义	1d	certain
