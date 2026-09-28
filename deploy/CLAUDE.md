@@ -30,7 +30,8 @@
 - 当前生产 Nginx 配置在 `nginx/nginx.conf`：静态文件根目录 `/usr/share/nginx/html`，`/api/` 和 `/mcp` 反代到 `backend:8000`，SSE/MCP 路径关闭 proxy buffering/cache/gzip
 - Nginx 静态资源权限必须可被 worker 读取：Dockerfile 的 nginx-runtime 阶段在复制 dist 后执行 `chmod -R a+rX /usr/share/nginx/html`；`frontend` 快速部署也必须在 `docker cp` 后执行同样 chmod，避免宿主机 `0600` 图片进入容器后变成 403
 - `./deploy/docker-deploy.sh frontend` 用于 Docker 已运行时快速发布前端；脚本在 `docker cp frontend/dist/.` 后必须修正 `/usr/share/nginx/html` 权限为 `a+rX`，避免 Nginx 因宿主构建产物权限导致 403
-- 磁盘保护阈值：构建前硬性下限与目标空间统一为 `DEPLOY_HARD_MIN_FREE_MB=DEPLOY_TARGET_FREE_MB=4096` MB（2026-09-28 由 6144 / 8192 下调，可用同名环境变量覆盖）；BuildKit 最大缓存 `BUILDKIT_MAX_USED_SPACE=1536MB`；缓存年龄上限 `BUILDKIT_CACHE_MAX_AGE=168h`（7 天）
+- 磁盘保护阈值：构建前硬性下限与目标空间统一为 `DEPLOY_HARD_MIN_FREE_MB=DEPLOY_TARGET_FREE_MB=4096` MB（2026-09-28 由 6144 / 8192 下调，可用同名环境变量覆盖）；BuildKit 最大缓存 `BUILDKIT_MAX_USED_SPACE=1536MB`
+- BuildKit 缓存守卫（2026-09-28 加固）：触发条件是「缓存超 `BUILDKIT_MAX_USED_SPACE` 或根盘低于 `DEPLOY_TARGET_FREE_MB`」，收敛**不带年龄过滤** —— 旧 light 模式的 `--filter until=168h` 对刚用过的缓存永远清 0（实测 `Total: 0B` 而缓存 3.0GB），正是缓存涨到 2x cap 的根因。清理后必须读回 `df` + `buildx du` 校验，不达标即 `storage_emit_alert` 并拒绝继续；读不到 / 清不动一律返回非 0，**不再有 `return 0` 的静默跳过**。全部入口（build / update / worker-up / worker-restart / test / cleanup / storage-maintenance）共用 `ensure_build_space` 关卡；`storage-self-check` 可做秒级预检；指标写在 `STORAGE_METRICS_FILE` 同目录的 `interview-boss-build.prom`
 - 构建前高于目标时保留热缓存；低于目标但不低于硬阈值时只做轻量定向清理；低于硬阈值直接拒绝构建。构建后同样检查，清理失败或仍低于硬阈值会返回非零状态，阻止继续部署
 - BuildKit 清理显式使用 `BUILDKIT_BUILDER=interview-boss` 专用 builder；定时维护只清理该 builder，避免回收其他 Docker project 的构建缓存。只有磁盘低于硬阈值时才允许无 `until` 的应急清理
 - `prune_unused_docker` 只清理带明确 project/label 的测试资源和 InterviewBoss stopped/orphan 容器，不使用全局 image prune；宿主机 `node_modules`/`.venv` 只报告，除非 `DEPLOY_PRUNE_HOST_ARTIFACTS=1` 或 `cleanup --aggressive`
