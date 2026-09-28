@@ -8,8 +8,10 @@ The original service re-exports these names for existing callers and tests.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
+import re
 import time
 from urllib.parse import urlsplit
 
@@ -20,6 +22,82 @@ _SUPPORTED_API_FORMATS = ("chat", "responses", "anthropic")
 _API_FORMAT_CACHE_TTL = 600
 _PROBE_TIMEOUT = 15
 _api_format_cache: dict[tuple, tuple[str, float]] = {}
+
+# --------------- OpenCode 会话头与 base_url 归一化 ---------------
+#
+# SDK 总会在 base_url 后再拼一次协议路径：OpenAI SDK 拼 /chat/completions
+# （responses 模式拼 /responses），Anthropic SDK 拼 /v1/messages。而 provider
+# 文档列出的是"完整端点 URL"，直接粘贴会被二次拼接 —— 例如
+# https://opencode.ai/zen/go/v1/chat/completions 会打到 .../chat/completions/chat/completions。
+_PROTOCOL_SUFFIX_RE = re.compile(r"/(?:chat/completions|responses|messages)/?$", re.IGNORECASE)
+_ANTHROPIC_BASE_SUFFIX_RE = re.compile(r"/(?:v1/messages|v1)/?$", re.IGNORECASE)
+# OpenCode 网关域名：仅对它注入会话头，避免把 api_key 的哈希指纹送给第三方
+_OPENCODE_HOST = "opencode.ai"
+
+
+def _normalise_llm_base_url(base_url: str | None, provider: str = "openai") -> str | None:
+    """剥掉 SDK 会重新拼接的后缀，得到 SDK 期望的 base URL。
+
+    provider 决定剥哪一套后缀：anthropic 的 SDK 拼的是 ``/v1/messages``，所以
+    以 ``/v1`` 结尾同样要剥，否则必然产生 ``/v1/v1/messages``。
+    """
+    if not base_url:
+        return base_url
+    stripped = str(base_url).rstrip("/")
+    pattern = _ANTHROPIC_BASE_SUFFIX_RE if provider == "anthropic" else _PROTOCOL_SUFFIX_RE
+    normalised = pattern.sub("", stripped)
+    return normalised or base_url
+
+
+def _is_opencode_host(base_url: str | None) -> bool:
+    """是否为 OpenCode 网关（精确域名或其子域），拒绝后缀伪造。"""
+    hostname = _provider_hostname(base_url)
+    return bool(hostname) and (
+        hostname == _OPENCODE_HOST or hostname.endswith(f".{_OPENCODE_HOST}")
+    )
+
+
+def _models_list_url(base_url: str | None) -> str:
+    """构造模型列表端点 URL。
+
+    先用 ``_normalise_llm_base_url`` 剥掉协议后缀：用户按文档粘贴的
+    ``.../zen/go/v1/chat/completions`` 若不剥离会拼成
+    ``.../chat/completions/v1/models`` → 404，模型下拉框直接空掉。
+    """
+    base = (_normalise_llm_base_url(base_url) or (base_url or "")).rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/models"
+    return f"{base}/v1/models"
+
+
+def _opencode_session_id(base_url: str | None, api_key: str | None) -> str:
+    """生成稳定的会话标识，用于 ``x-opencode-session`` 路由与 prompt cache。
+
+    只按协议后缀归一化（不区分 provider），使 ``.../v1`` 与
+    ``.../v1/chat/completions`` 等粘贴形式落到同一 session；输出为 32 位十六进制，
+    不泄露 api_key 本身。
+    """
+    seed = f"{_normalise_llm_base_url(base_url) or ''}|{api_key or ''}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+def _opencode_session_headers(base_url: str | None, api_key: str | None) -> dict:
+    """OpenCode 端点需要的请求头；其它 provider 返回空字典。"""
+    if not _is_opencode_host(base_url):
+        return {}
+    return {"x-opencode-session": _opencode_session_id(base_url, api_key)}
+
+
+def _is_missing_session_error(exc: Exception) -> bool:
+    """OpenCode Go 缺少 ``x-opencode-session`` 时的 400，属于配置问题而非协议错配。"""
+    if getattr(exc, "status_code", None) != 400:
+        return False
+    body = getattr(exc, "body", None)
+    if body is None:
+        response = getattr(exc, "response", None)
+        body = getattr(response, "text", None) if response is not None else None
+    text = str(body or "").lower()
+    return "missingsessionid" in text or "x-opencode-session" in text
 
 
 def _provider_hostname(base_url: str | None) -> str:
@@ -61,7 +139,11 @@ def _endpoint_api_format_hint(base_url: str | None, model: str | None = None) ->
     """仅从明确的 endpoint/provider 线索推断格式，不把普通域名当作事实。"""
     lower = (base_url or "").lower().rstrip("/")
     path = urlsplit(lower if "://" in lower else f"//{lower}").path
-    if _provider_hostname(base_url) == "api.anthropic.com" or "/anthropic" in path or "/messages" in path:
+    if (
+        _provider_hostname(base_url) == "api.anthropic.com"
+        or "/anthropic" in path
+        or "/messages" in path
+    ):
         return "anthropic"
     if "/responses" in path:
         return "responses"
@@ -111,9 +193,7 @@ def clear_api_format_cache(base_url: str | None = None, model: str | None = None
         _api_format_cache.clear()
         return
     for key in list(_api_format_cache):
-        if (base_url is None or key[1] == base_url) and (
-            model is None or key[2] == model
-        ):
+        if (base_url is None or key[1] == base_url) and (model is None or key[2] == model):
             _api_format_cache.pop(key, None)
 
 
@@ -127,6 +207,21 @@ _PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
             "max_output_tokens": 4096,
             "api_formats": ["chat", "responses"],
             "prompt_cache_key": False,
+        },
+    ),
+    (
+        "opencode.ai",
+        {
+            # 2026-09-27 实测：hy3 拒绝 response_format（400），mimo/glm/kimi 才支持
+            # → 必须保持 False，统一走 prompt 指令降级。
+            "json_mode": False,
+            # 网关硬上限 131072（262144 会被 400 拒绝，且 BadRequestError 不在重试
+            # 白名单里，超限即硬失败）。取 32768 覆盖常规长输出与思考预算，
+            # 同时给 grok/gpt/deepseek 等无法验证的模型留足余量
+            # （其 /responses 端点当时区域不可用）。
+            "max_output_tokens": 32768,
+            "api_formats": ["chat", "responses", "anthropic"],
+            "prompt_cache_key": True,
         },
     ),
     (
@@ -170,10 +265,7 @@ def get_provider_capabilities(base_url: str = None) -> dict:
 
 def _has_named_provider_capability(base_url: str | None) -> bool:
     hostname = _provider_hostname(base_url)
-    return any(
-        prefix != "*" and hostname == prefix
-        for prefix, _caps in _PROVIDER_CAPABILITIES
-    )
+    return any(prefix != "*" and hostname == prefix for prefix, _caps in _PROVIDER_CAPABILITIES)
 
 
 def get_provider_formats(base_url: str = None) -> list[str]:
@@ -181,9 +273,7 @@ def get_provider_formats(base_url: str = None) -> list[str]:
     return list(get_provider_capabilities(base_url).get("api_formats", ["chat"]))
 
 
-def _api_format_cache_key(
-    api_key: str | None, base_url: str | None, model: str | None
-) -> tuple:
+def _api_format_cache_key(api_key: str | None, base_url: str | None, model: str | None) -> tuple:
     return (api_key or "", base_url or "", model or "")
 
 
@@ -196,9 +286,7 @@ def _cache_api_format(
     )
 
 
-def _cached_api_format(
-    api_key: str | None, base_url: str | None, model: str | None
-) -> str | None:
+def _cached_api_format(api_key: str | None, base_url: str | None, model: str | None) -> str | None:
     cached = _api_format_cache.get(_api_format_cache_key(api_key, base_url, model))
     if not cached:
         return None
@@ -209,18 +297,30 @@ def _cached_api_format(
 
 
 def _is_endpoint_mismatch(exc: Exception) -> bool:
-    """只有明确的路由不存在错误才允许探测下一个协议。"""
+    """只有明确的协议错配/路由不存在错误才允许探测下一个协议。"""
     status_code = getattr(exc, "status_code", None)
-    if status_code not in (404, 405, 415):
+    if status_code not in (400, 404, 405, 415):
         return False
     body = getattr(exc, "body", None)
     if body is None:
         response = getattr(exc, "response", None)
         body = getattr(response, "text", None) if response is not None else None
     body_text = str(body or "").lower()
+    if status_code == 400:
+        # OpenCode Go 对"模型不支持该协议"返回 400 ModelProtocolUnsupported
+        # （如 grok/gpt 打在 chat 端点上）→ 属于协议错配，应继续探测。
+        # 其余 400（认证、参数、MissingSessionID）仍是致命错误。
+        return "modelprotocolunsupported" in body_text
     model_not_found = "model" in body_text and any(
         marker in body_text
-        for marker in ("not found", "not_found", "does not exist", "doesn't exist", "unknown", "invalid")
+        for marker in (
+            "not found",
+            "not_found",
+            "does not exist",
+            "doesn't exist",
+            "unknown",
+            "invalid",
+        )
     )
     return not model_not_found
 
@@ -254,6 +354,7 @@ async def resolve_api_format_async(
     _return_probe_error: bool = False,
 ) -> str | tuple[str, Exception | None, bool]:
     """解析协议：显式配置 → 缓存 → endpoint hint → 最小探测 → Chat。"""
+
     def result(api_format: str, probe_error: Exception | None = None, probed: bool = False):
         if _return_probe_error:
             return api_format, probe_error, probed
@@ -304,9 +405,7 @@ async def resolve_api_format_async(
     return result("chat", last_mismatch, probed=last_mismatch is not None)
 
 
-def resolve_api_format(
-    base_url: str = None, user_id: int = None, llm_scope: str = "user"
-) -> str:
+def resolve_api_format(base_url: str = None, user_id: int = None, llm_scope: str = "user") -> str:
     """同步解析协议，供非 async 调用方复用同一能力矩阵。"""
     explicit = _explicit_api_format(base_url, user_id, llm_scope)
     if explicit:

@@ -25,6 +25,7 @@ from app.services.llm_protocol import (
     _detect_provider,
     _endpoint_api_format_hint,
     _is_endpoint_mismatch,
+    _is_missing_session_error,
     _normalise_api_format,
     _provider_for_api_format,
     _SUPPORTED_API_FORMATS,
@@ -64,9 +65,8 @@ def get_user_llm_config(user_id):
 # --------------- 模型可用性状态探测 ---------------
 
 _LLM_STATUS_CACHE_TTL = 120  # 探测结果缓存秒数
-_llm_status_cache: dict[
-    int, tuple
-] = {}  # user_id -> (配置指纹, connected, error, 探测时间戳)
+_llm_status_cache: dict[int, tuple] = {}  # user_id -> (配置指纹, connected, error, 探测时间戳)
+
 
 def clear_llm_status_cache(user_id: int = None):
     """清除用户模型状态探测缓存（配置更新后调用）"""
@@ -83,9 +83,7 @@ def _classify_probe_error(exc: Exception) -> str:
         return "认证失败：请检查 API Key 是否正确"
     if status_code == 429:
         return "请求过于频繁：请稍后重试"
-    if isinstance(exc, AuthenticationError) or isinstance(
-        exc, anthropic_mod.AuthenticationError
-    ):
+    if isinstance(exc, AuthenticationError) or isinstance(exc, anthropic_mod.AuthenticationError):
         return "认证失败：请检查 API Key 是否正确"
     if isinstance(exc, RateLimitError) or isinstance(exc, anthropic_mod.RateLimitError):
         return "请求过于频繁：请稍后重试"
@@ -95,10 +93,10 @@ def _classify_probe_error(exc: Exception) -> str:
         or isinstance(exc, asyncio.TimeoutError)
     ):
         return "模型服务响应超时：请稍后重试"
-    if isinstance(exc, APIConnectionError) or isinstance(
-        exc, anthropic_mod.APIConnectionError
-    ):
+    if isinstance(exc, APIConnectionError) or isinstance(exc, anthropic_mod.APIConnectionError):
         return "无法连接模型服务：请检查 Base URL"
+    if _is_missing_session_error(exc):
+        return "接口缺少会话标识：OpenCode Go 端点要求 x-opencode-session 请求头"
     if status_code == 404:
         return "模型服务未找到：请检查 Base URL 和模型名称"
     if status_code in (405, 415):
@@ -287,9 +285,7 @@ async def _probe_resolved(client, model, timeout, base_url, provider, user_id=No
 
 async def _probe_llm(user_id: int) -> tuple:
     """向用户配置的模型发最小请求验证可用性，返回 (connected, error)。"""
-    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(user_id)
     return await _probe_resolved(resolved_client, model, timeout, base_url, provider, user_id)
 
 
@@ -309,7 +305,9 @@ async def check_global_llm_status() -> dict:
     api_format = (
         configured_format
         if configured_format != "auto"
-        else override_format if override_format != "auto" else None
+        else override_format
+        if override_format != "auto"
+        else None
     )
     provider = _provider_for_api_format(api_format) or _detect_provider(base_url)
     client = _make_client(

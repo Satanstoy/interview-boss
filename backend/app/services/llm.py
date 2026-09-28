@@ -55,7 +55,10 @@ from app.services.llm_protocol import (
     _explicit_api_format,
     _has_named_provider_capability,
     _is_endpoint_mismatch,
+    _is_opencode_host,
     _normalise_api_format,
+    _normalise_llm_base_url,
+    _opencode_session_headers,
     _probe_api_format,
     _provider_for_api_format,
     _provider_hostname,
@@ -72,9 +75,58 @@ from app.services.llm_protocol import (
 
 
 def _is_mimo(base_url: str | None) -> bool:
-    """判断是否为 mimo（小米）OpenAI 兼容端点：默认开启深度思考且不支持自定义
-    temperature；关闭思考可显著提速并让 temperature 真正生效。"""
+    """是否为 xiaomimimo 官方 OpenAI 兼容端点（该端点自带 thinking 参数）。"""
     return bool(base_url and "mimo" in base_url.lower())
+
+
+# zen/go 上实测确认「接受 thinking.disabled」的模型前缀（2026-09-28）。
+_THINKING_DISABLE_MODEL_PREFIXES = ("mimo-", "kimi-", "minimax-", "deepseek-v4-pro")
+
+
+def _supports_thinking_disable(base_url: str | None, model: str | None) -> bool:
+    """该端点+模型能否用 thinking 参数关闭深度思考。
+
+    只认两类确证信号：
+
+    1. 端点自带该参数（xiaomimimo 官方端点）。
+    2. OpenCode Go 上实测接受该参数的模型前缀。
+
+    刻意**不**按「模型是否产出 reasoning」推断 —— 两者是独立维度：
+    ``glm-5.3-flash``/``glm-5.1`` 默认 reasoning_tokens=256（确实在用深度思考），
+    但传本参数会 400 ``invalid_request_error: thinking``。若按"有 thinking 就发"，
+    探测到 reasoning 后的下一次调用必然硬失败，而 BadRequestError 不在重试白名单里。
+
+    未知一律不发：宁可多想一会儿，也不要 400。
+    """
+    if _is_mimo(base_url):
+        return True
+    if not _is_opencode_host(base_url):
+        return False
+    name = (model or "").strip().lower()
+    return any(name.startswith(prefix) for prefix in _THINKING_DISABLE_MODEL_PREFIXES)
+
+
+def _resolve_thinking(
+    user_id: int | None = None, thinking: bool | None = None, llm_scope: str = "user"
+) -> bool:
+    """解析本次调用是否保留深度思考。
+
+    优先级：显式 ``thinking`` → global scope 恒关 → 用户配置 ``llm_thinking``
+    → 任何异常兜底关闭（宁可快，不要因为读配置失败就卡住思考）。
+    """
+    if thinking is not None:
+        return bool(thinking)
+    try:
+        # user_id 为 None 时 get_user_llm_config 查不到行（user_id IS NULL 不匹配）
+        # 恒返回 None → False，直接短路等价且不必把 None 塞进 int 参数。
+        if llm_scope == "global" or user_id is None:
+            return False
+        from app.core.config import get_user_llm_config
+
+        user_cfg = get_user_llm_config(user_id)
+        return bool((user_cfg or {}).get("thinking"))
+    except Exception:
+        return False
 
 
 def _json_mode_override() -> str:
@@ -111,6 +163,14 @@ def _make_client(
 ):
     """根据 provider 创建对应的 LLM 客户端。"""
     provider = _provider_for_api_format(api_format) or provider
+    # 会话头必须按原始 base_url 计算：归一化会改变 URL，导致同一端点的
+    # 两种粘贴形式得到不同 session id，丢失路由与 prompt cache。
+    default_headers = _opencode_session_headers(base_url, api_key)
+    normalised = _normalise_llm_base_url(
+        base_url, "anthropic" if provider == "anthropic" else "openai"
+    )
+    if normalised is not None:
+        base_url = normalised
     transport = None
     if base_url:
         assert_safe_outbound_url_sync(base_url)
@@ -126,12 +186,14 @@ def _make_client(
             base_url=base_url or None,
             timeout=timeout,
             http_client=http_client,
+            default_headers=default_headers or None,
         )
     return AsyncOpenAI(
         api_key=api_key or None,
         base_url=base_url or None,
         timeout=timeout,
         http_client=http_client,
+        default_headers=default_headers or None,
     )
 
 
@@ -197,9 +259,7 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     else:
         cfg = get_user_llm_config(user_id)
     if not cfg:
-        raise HTTPException(
-            status_code=400, detail="请先在设置中配置 LLM 密钥才能使用 AI 功能"
-        )
+        raise HTTPException(status_code=400, detail="请先在设置中配置 LLM 密钥才能使用 AI 功能")
 
     api_key = cfg["api_key"]
     base_url = cfg["base_url"]
@@ -210,7 +270,9 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     client_api_format = (
         configured_format
         if configured_format != "auto"
-        else override_format if override_format != "auto" else None
+        else override_format
+        if override_format != "auto"
+        else None
     )
     provider = _provider_for_api_format(client_api_format) or _detect_provider(base_url)
 
@@ -307,6 +369,7 @@ from app.services.llm_converters import (
     make_tool_result_message,
 )
 
+
 async def _llm_with_tools_call(
     resolved_client,
     model,
@@ -323,6 +386,7 @@ async def _llm_with_tools_call(
     prompt_cache_key=None,
     prompt_cache_options=None,
     api_format: str | None = None,
+    thinking: bool = False,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     api_format = api_format or resolve_api_format(base_url, user_id)
@@ -369,9 +433,7 @@ async def _llm_with_tools_call(
         caps = get_provider_capabilities(base_url)
         if not system_text:
             system_text = "\n\n".join(
-                str(msg.get("content") or "")
-                for msg in messages
-                if msg.get("role") == "system"
+                str(msg.get("content") or "") for msg in messages if msg.get("role") == "system"
             )
         input_items = _convert_messages_to_responses_input(messages, system_text)
         call_kwargs = dict(
@@ -391,6 +453,9 @@ async def _llm_with_tools_call(
             call_kwargs["prompt_cache_key"] = prompt_cache_key
         if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
             call_kwargs["prompt_cache_options"] = prompt_cache_options
+        if not thinking and _supports_thinking_disable(base_url, model):
+            # 与 raw_llm_call 对齐：mimo 关思考 → reasoning.effort=none
+            call_kwargs["reasoning"] = {"effort": "none"}
         response = await resolved_client.responses.create(**call_kwargs)
 
         tool_calls = _extract_responses_tool_calls(response)
@@ -424,6 +489,10 @@ async def _llm_with_tools_call(
         call_kwargs["prompt_cache_key"] = prompt_cache_key
     if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
         call_kwargs["prompt_cache_options"] = prompt_cache_options
+    if not thinking and _supports_thinking_disable(base_url, model):
+        # mimo 默认开启深度思考：关掉才能提速并让 temperature 真正生效，
+        # 否则 reasoning 会吃光 max_tokens 预算（与 _call_llm_with_retry 对齐）。
+        call_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     response = await resolved_client.chat.completions.create(**call_kwargs)
 
     msg = response.choices[0].message
@@ -458,9 +527,7 @@ async def llm_with_tools(
             "usage": {"input_tokens": int | None, ...},  # token/cache usage
         }
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
     model = kwargs.pop("model", None) or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -470,18 +537,21 @@ async def llm_with_tools(
         provider=provider,
         user_id=user_id,
     )
-    max_tokens = kwargs.get("max_tokens", 4096)
+    # 能力矩阵作为默认值，而不是硬编码 4096 —— ReAct 主循环不传 max_tokens，
+    # 思考开启时 4096 预算会被 reasoning 吃光导致截断/空响应。
+    max_tokens = kwargs.get("max_tokens", get_provider_capabilities(base_url)["max_output_tokens"])
     temperature = kwargs.get("temperature", 0.7)
     tool_choice = kwargs.get("tool_choice")
     cache_control = kwargs.get("cache_control")
     prompt_cache_key = kwargs.get("prompt_cache_key")
     prompt_cache_options = kwargs.get("prompt_cache_options")
+    # ReAct 主循环不传 thinking → 按用户 llm_thinking 配置解析（默认关闭），
+    # 让"关闭深度思考"开关对 agent 主链路同样生效。
+    thinking = _resolve_thinking(user_id, kwargs.get("thinking"))
 
     # Anthropic 需要预先转换消息格式
     if api_format == "anthropic":
-        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(
-            messages
-        )
+        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(messages)
         return await _llm_with_tools_call(
             resolved_client,
             model,
@@ -498,6 +568,7 @@ async def llm_with_tools(
             prompt_cache_key=prompt_cache_key,
             prompt_cache_options=prompt_cache_options,
             api_format=api_format,
+            thinking=thinking,
         )
 
     return await _llm_with_tools_call(
@@ -516,6 +587,7 @@ async def llm_with_tools(
         prompt_cache_key=prompt_cache_key,
         prompt_cache_options=prompt_cache_options,
         api_format=api_format,
+        thinking=thinking,
     )
 
 
@@ -576,9 +648,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
     for msg in messages:
         if msg["role"] == "system":
             system_text += (
-                msg["content"]
-                if isinstance(msg["content"], str)
-                else str(msg["content"])
+                msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
             ) + "\n"
         elif msg["role"] in ("user", "assistant"):
             content = msg["content"]
@@ -590,11 +660,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
                         anthropic_blocks.append({"type": "text", "text": block["text"]})
                     elif block.get("type") == "image_url":
                         url_data = block.get("image_url", {})
-                        url = (
-                            url_data.get("url", "")
-                            if isinstance(url_data, dict)
-                            else url_data
-                        )
+                        url = url_data.get("url", "") if isinstance(url_data, dict) else url_data
                         if url.startswith("data:"):
                             # data URI：解析 media_type 和 base64
                             header, b64data = url.split(",", 1)
@@ -611,9 +677,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
                             )
                         else:
                             # 普通 URL（Anthropic 不直接支持 URL，转为 text 提示）
-                            anthropic_blocks.append(
-                                {"type": "text", "text": f"[图片链接: {url}]"}
-                            )
+                            anthropic_blocks.append({"type": "text", "text": f"[图片链接: {url}]"})
                 content = anthropic_blocks
             anthropic_messages.append({"role": msg["role"], "content": content})
     return system_text.strip(), anthropic_messages
@@ -634,9 +698,7 @@ async def _call_anthropic(
     # 如果需要 JSON 输出，在 system 提示中追加指令（Anthropic 不支持 response_format）
     effective_system = system_msg
     if response_format and response_format.get("type") == "json_object":
-        effective_system += (
-            "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-        )
+        effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
 
     body = dict(
         model=model,
@@ -724,9 +786,7 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
             for block in content:
                 block_type = block.get("type")
                 if block_type in ("text", "input_text"):
-                    response_content.append(
-                        {"type": "input_text", "text": block.get("text", "")}
-                    )
+                    response_content.append({"type": "input_text", "text": block.get("text", "")})
                 elif block_type in ("image_url", "input_image"):
                     image = block.get("image_url") or block.get("url")
                     detail = block.get("detail")
@@ -739,9 +799,7 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
                     response_content.append(image_item)
                 else:
                     # 保留未知内容的可读文本，避免静默丢失用户输入。
-                    response_content.append(
-                        {"type": "input_text", "text": str(block)}
-                    )
+                    response_content.append({"type": "input_text", "text": str(block)})
         items.append(
             {
                 "type": "message",
@@ -842,9 +900,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
     kwargs 使用 OpenAI 格式（model, messages, temperature, response_format 等）。
     返回 LLM 输出文本。
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -933,17 +989,14 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         ):
             if key in kwargs and kwargs[key] is not None:
                 body[key] = kwargs[key]
-        if (
-            kwargs.get("response_format")
-            and kwargs["response_format"].get("type") == "json_object"
-        ):
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
             body["text"] = {"format": {"type": "json_object"}}
-        if _is_mimo(base_url) and not kwargs.get("thinking"):
+        if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
             body["reasoning"] = {"effort": "none"}
         response = await resolved_client.responses.create(**body)
         return _extract_responses_text(response)
 
-    if _is_mimo(base_url) and not kwargs.get("thinking"):
+    if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
         # mimo 默认开启深度思考：长输出任务（rerank/结构化）会被思考吃光
         # max_tokens 预算导致空响应（2026-08-06 实测）→ 默认关闭，与 _call_llm_with_retry 对齐
         extra_body = dict(kwargs.get("extra_body") or {})
@@ -985,14 +1038,14 @@ async def _call_llm_with_retry(
               传 True 保留思考；None（默认）时按用户配置的 llm_thinking 决定。
     """
     if llm_scope == "global":
-        resolved_client, resolved_model, timeout, base_url, provider = (
-            _resolve_client_and_model(user_id, llm_scope="global")
+        resolved_client, resolved_model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id, llm_scope="global"
         )
     else:
         # Preserve the historical one-argument resolver contract for all
         # ordinary user-scoped callers and their test doubles.
-        resolved_client, resolved_model, timeout, base_url, provider = (
-            _resolve_client_and_model(user_id)
+        resolved_client, resolved_model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id
         )
     if model:
         resolved_model = model
@@ -1018,17 +1071,7 @@ async def _call_llm_with_retry(
             response_format=response_format,
         )
 
-    if thinking is None:
-        try:
-            if llm_scope == "global":
-                thinking = False
-            else:
-                from app.core.config import get_user_llm_config
-
-                user_cfg = get_user_llm_config(user_id)
-                thinking = bool((user_cfg or {}).get("thinking"))
-        except Exception:
-            thinking = False
+    thinking = _resolve_thinking(user_id, thinking, llm_scope)
 
     if api_format == "responses":
         caps = get_provider_capabilities(base_url)
@@ -1045,9 +1088,7 @@ async def _call_llm_with_retry(
         # json_mode=false 时降级：prompt 指令 + 无 text.format
         effective_system = system_msg
         if response_format and response_format.get("type") == "json_object":
-            effective_system += (
-                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-            )
+            effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         return await _call_responses(
             resolved_client,
             resolved_model,
@@ -1074,7 +1115,7 @@ async def _call_llm_with_retry(
             kwargs["messages"][0]["content"] = (
                 f"{system_msg}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
             )
-    if not thinking and _is_mimo(base_url):
+    if not thinking and _supports_thinking_disable(base_url, resolved_model):
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     kwargs["max_tokens"] = caps["max_output_tokens"]
 
@@ -1090,13 +1131,9 @@ async def _call_llm_with_retry(
         f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
     ),
 )
-async def _call_llm_with_retry_messages(
-    messages: list, user_id: int = None, **kwargs
-) -> str:
+async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **kwargs) -> str:
     """带重试的 LLM 调用，支持 multimodal messages（图片+文本），自动适配 OpenAI / Anthropic"""
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -1150,24 +1187,15 @@ async def _call_llm_with_retry_messages(
         input_items = _convert_messages_to_responses_input(messages, system_text)
         kwargs.pop("messages", None)
         kwargs["input"] = input_items or " "
-        kwargs["instructions"] = (
-            kwargs.get("instructions") or system_text.strip() or None
-        )
-        kwargs["max_output_tokens"] = kwargs.pop(
-            "max_tokens", caps["max_output_tokens"]
-        )
-        if (
-            kwargs.get("response_format")
-            and kwargs["response_format"].get("type") == "json_object"
-        ):
+        kwargs["instructions"] = kwargs.get("instructions") or system_text.strip() or None
+        kwargs["max_output_tokens"] = kwargs.pop("max_tokens", caps["max_output_tokens"])
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
             kwargs["text"] = {"format": {"type": "json_object"}}
         kwargs.pop("response_format", None)
         response = await resolved_client.responses.create(**kwargs)
         return _extract_responses_text(response)
 
-    response = await resolved_client.chat.completions.create(
-        messages=messages, **kwargs
-    )
+    response = await resolved_client.chat.completions.create(messages=messages, **kwargs)
     return response.choices[0].message.content.strip()
 
 
@@ -1181,9 +1209,7 @@ async def stream_llm_messages(
                        用于支持 DeepSeek 等模型的 reasoning_content。默认 False（向后兼容，yield str）。
         model: 可选，覆盖用户默认模型。
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
     if kwargs.get("model"):
         model = kwargs.pop("model")
     api_format = await resolve_api_format_async(
@@ -1201,16 +1227,12 @@ async def stream_llm_messages(
         response_format = kwargs.get("response_format")
         effective_system = system_text or "你是一个后端和算法面试指导专家。"
         if response_format and response_format.get("type") == "json_object":
-            effective_system += (
-                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-            )
+            effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         stream_kwargs = dict(
             model=model,
             system=effective_system,
             messages=anthropic_msgs,
-            max_tokens=kwargs.get(
-                "max_tokens", kwargs.get("max_output_tokens", 4096)
-            ),
+            max_tokens=kwargs.get("max_tokens", kwargs.get("max_output_tokens", 4096)),
             temperature=kwargs.get("temperature", 0.7),
         )
         for key in (
@@ -1272,9 +1294,9 @@ async def stream_llm_messages(
             if msg.get("role") in ("system", "developer")
         ).strip()
         kwargs.pop("messages", None)
-        kwargs["input"] = kwargs.pop(
-            "input", None
-        ) or _convert_messages_to_responses_input(messages, "")
+        kwargs["input"] = kwargs.pop("input", None) or _convert_messages_to_responses_input(
+            messages, ""
+        )
         kwargs.setdefault("instructions", system_text or None)
         kwargs["max_output_tokens"] = kwargs.pop(
             "max_output_tokens", kwargs.pop("max_tokens", caps["max_output_tokens"])

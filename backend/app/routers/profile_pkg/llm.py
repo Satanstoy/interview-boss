@@ -243,6 +243,7 @@ async def list_available_models(user: dict = Depends(get_current_user)):
 
     from app.core.config import get_user_llm_config
     from app.services.llm import _detect_provider
+    from app.services.llm_protocol import _models_list_url
 
     cfg = get_user_llm_config(user["id"])
     if not cfg or not cfg.get("api_key"):
@@ -264,12 +265,9 @@ async def list_available_models(user: dict = Depends(get_current_user)):
             url = "https://api.anthropic.com/v1/models"
         else:
             headers = {"Authorization": f"Bearer {api_key}"}
-            base = base_url.rstrip("/")
-            # base_url 可能已含 /v1 后缀（OpenAI 兼容 API 的标准做法），避免拼成 /v1/v1/models
-            if base.endswith("/v1"):
-                url = f"{base}/models"
-            else:
-                url = f"{base}/v1/models"
+            # 可能含 /v1 或文档给的完整端点后缀（.../v1/chat/completions），
+            # 统一交给 _models_list_url 归一再拼 /models
+            url = _models_list_url(base_url)
 
         transport = await build_pinned_http_transport_async(url)
         async with httpx.AsyncClient(

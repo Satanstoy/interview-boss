@@ -12,6 +12,8 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
+from app.services.llm_protocol import _normalise_llm_base_url, _opencode_session_headers
+
 from .types import CandidateLLMConfig, JudgeLLMConfig
 
 
@@ -23,13 +25,16 @@ def _call_openai_compatible_chat(
     max_tokens: int = 1400,
 ) -> str:
     """Call an OpenAI-compatible chat API and return the assistant text."""
-    url = f"{config.base_url.rstrip('/')}/chat/completions"
-    body = json.dumps({
-        "model": config.model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
+    base_url = _normalise_llm_base_url(config.base_url) or config.base_url
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    body = json.dumps(
+        {
+            "model": config.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+    ).encode()
 
     request = urllib.request.Request(
         url,
@@ -37,6 +42,8 @@ def _call_openai_compatible_chat(
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {config.api_key}",
+            # OpenCode Go 等网关要求稳定 session id；其它端点返回空字典
+            **_opencode_session_headers(config.base_url, config.api_key),
         },
         method="POST",
     )
@@ -86,9 +93,13 @@ def _ensure_internal_e2e_token(internal_username: str) -> str:
 
     fallback_username = "__interview_eval_e2e__"
     with get_db_connection() as conn:
-        row = conn.execute("SELECT id FROM users WHERE username = ?", (internal_username,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM users WHERE username = ?", (internal_username,)
+        ).fetchone()
         if not row:
-            row = conn.execute("SELECT id FROM users WHERE username = ?", (fallback_username,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM users WHERE username = ?", (fallback_username,)
+            ).fetchone()
         if row:
             user_id = int(row["id"] if hasattr(row, "keys") else row[0])
         else:
@@ -98,7 +109,9 @@ def _ensure_internal_e2e_token(internal_username: str) -> str:
             )
             conn.commit()
             user_id = int(cursor.lastrowid)
-    return create_access_token({"user_id": user_id, "username": fallback_username}, expires_delta=timedelta(hours=2))
+    return create_access_token(
+        {"user_id": user_id, "username": fallback_username}, expires_delta=timedelta(hours=2)
+    )
 
 
 def _resolve_token(args: Any) -> str:
