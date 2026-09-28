@@ -269,10 +269,33 @@ show_disk_usage() {
   docker system df 2>/dev/null || true
 }
 
+# 读取 buildx builder 的 driver 名。
+# 2026-09-28 实测：docker buildx inspect 的 stdout 接管道时约 40% 概率返回空
+# （30 次复现 12 次），重定向到文件 30/30 稳定。磁盘保护依赖读取结果：读空会
+# 静默跳过缓存清理，进而让构建后检查拒绝部署，因此必须先落盘再解析，
+# 不要改回管道写法。
+_buildx_driver() {
+  local builder="$1"
+  local probe_file driver attempt
+  probe_file=$(mktemp 2>/dev/null) || return 1
+  for attempt in 1 2; do
+    if docker buildx inspect "$builder" >"$probe_file" 2>/dev/null; then
+      driver=$(awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}' "$probe_file")
+      if [ -n "$driver" ]; then
+        rm -f "$probe_file"
+        printf '%s\n' "$driver"
+        return 0
+      fi
+    fi
+  done
+  rm -f "$probe_file"
+  return 1
+}
+
 ensure_buildkit_builder() {
   local driver
   if docker buildx inspect "$BUILDKIT_BUILDER" >/dev/null 2>&1; then
-    driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+    driver=$(_buildx_driver "$BUILDKIT_BUILDER" || true)
     if [ "$driver" != "$BUILDKIT_BUILDER_DRIVER" ]; then
       err "BuildKit builder $BUILDKIT_BUILDER 的 driver=$driver，不符合隔离要求（需要 $BUILDKIT_BUILDER_DRIVER）"
       return 1
@@ -293,18 +316,14 @@ ensure_buildkit_builder() {
 prune_build_cache() {
   local mode="${1:-light}"
   local filter_args=(--filter "until=${BUILDKIT_CACHE_MAX_AGE}")
-  local builder_driver probe_attempt
+  local builder_driver
   if ! docker buildx inspect "$BUILDKIT_BUILDER" >/dev/null 2>&1; then
     log "InterviewBoss 专用 BuildKit builder 尚未创建，跳过其缓存清理"
     return 0
   fi
-  # docker buildx inspect 的 stdout 接管道时会间歇性返回 255（本机实测约 50%，重定向到文件则为 0）。
-  # 在 set -euo pipefail 下这行赋值一旦失败会静默终止整个部署脚本（exit 255、无任何报错）。
-  # 缓存清理是最佳努力：读不到驱动就跳过本轮清理，磁盘兜底由 ensure_disk_before_build 的硬阈值负责。
-  for probe_attempt in 1 2; do
-    builder_driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}') && break
-    builder_driver=""
-  done
+  # 驱动读取统一走 _buildx_driver（落盘解析，规避 inspect 管道的空输出缺陷）。
+  # 缓存清理是最佳努力：读不到驱动就跳过本轮清理，磁盘兜底由硬阈值负责。
+  builder_driver=$(_buildx_driver "$BUILDKIT_BUILDER" || true)
   if [ -z "$builder_driver" ]; then
     warn "读取 InterviewBoss BuildKit builder 驱动失败，跳过本轮缓存清理"
     return 0
