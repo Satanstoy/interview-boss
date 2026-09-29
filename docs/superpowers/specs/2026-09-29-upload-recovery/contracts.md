@@ -47,7 +47,7 @@
 
 新增nullable字段：`root_import_id FK upload_imports`、`upload_attempt_id FK upload_attempts`、`work_key TEXT`、`lease_generation INTEGER NOT NULL DEFAULT 0`。旧jobs允许上述引用为NULL。
 
-v2 work_key例：`extract:document:v1`、`classify:document:v1`、`cluster:root:v1`、`answer:public:456:v1`。每个root/job_type/work_key最多一个pending/queued/running job，使用partial unique index兜底，retry可新建failed历史行之后的尝试。
+v2 work_key例：`credential_preflight:initial:v1`、`credential_preflight:public:v1`、`extract:document:v1`、`classify:document:v1`、`cluster:root:v1`、`answer:public:456:v1`。每个root/job_type/work_key最多一个pending/queued/running job，使用partial unique index兜底，retry可新建failed历史行之后的尝试。
 
 `parent_job_id`继续用于运行血缘，不能再作为整个任务族唯一去重依据。批量共享job无法用一个root表达多根任务时，本期禁止新v2批次跨root合并；保留旧批次逻辑仅消费root_import_id IS NULL的遗留队列，避免错误归属。
 
@@ -57,7 +57,7 @@ jobs本身是事务outbox：创建实体/步骤结果时同事务INSERT pending 
 
 字段：`id PK, import_id FK, stage TEXT, unit_key TEXT, input_version INTEGER, pipeline_version TEXT NOT NULL, status TEXT, result_json TEXT, output_hash TEXT, error_code TEXT, retryable INTEGER, job_id FK jobs, created_at, updated_at`。
 
-UNIQUE(import_id,stage,unit_key,input_version)。同一root的pipeline_version固定；pipeline_version列用于校验，不在普通恢复时改变。stage：`extract/classify/persist/resolve/answer/review/publish`；unit_key：`document`或`detail:<id>`或`canonical:<scope>:<id>`。
+UNIQUE(import_id,stage,unit_key,input_version)。同一root的pipeline_version固定；pipeline_version列用于校验，不在普通恢复时改变。stage：`credential_preflight/extract/classify/persist/resolve/answer/review/publish`；unit_key：`initial:<scope>`或`public:<scope>`（预检）、`document`、`detail:<id>`或`canonical:<scope>:<id>`。
 
 status：`pending/running/succeeded/skipped/failed/needs_action`。skipped必须有reason。result_json存结构化中间产物，不只保存百分比；extract保留完整提取题目和稳定ordinal；classify保留逐ordinal分类及taxonomy_version；persist保存interview_id与ordinal→detail_id映射。
 
@@ -89,7 +89,7 @@ status：`pending/running/succeeded/skipped/failed/needs_action`。skipped必须
 
 新增`upload_llm_calls(id PK, root_import_id FK, stage, unit_key, call_key UNIQUE, credential_scope, payer_type, payer_user_id nullable, provider, model, config_fingerprint, status, input_tokens nullable, output_tokens nullable, started_at, finished_at, error_code nullable)`。
 
-call_key识别一次物理外部尝试；重试是新call_key并记录关联步骤。status包括reserved/succeeded/failed/unknown。只记录配置指纹，不记录Key或原始认证头。
+call_key识别一次物理外部尝试；重试是新call_key并记录关联步骤。status包括reserved/succeeded/failed/unknown。只记录配置指纹，不记录Key或原始认证头。供应商可用性预检的最小ping也写此账本，stage=`credential_preflight`、tokens按实记、payer与预检scope一致，不能绕过配额；配置缺失时不发网络请求、不虚构调用记录。
 
 user调用使用现有每日调用配额，先增加不自行commit的事务接口，允许配额预留和call记录原子提交。禁止在外层业务事务里调用当前会内部commit的`_increment_usage`。global调用记system，不伪装成管理员私人消费；增加按system+day的调用计数，复用同样的原子预算判断。
 
@@ -103,21 +103,24 @@ v1建议配置：UPLOAD_MAX_LLM_CALLS_PER_IMPORT=200；UPLOAD_SYSTEM_DAILY_CALL_
 
 1. 校验认证、target枚举、岗位、输入类型、文件数量/MIME/字节上限；非法值返回明确400/413，不静默改target。
 2. 对图片分块读取并累计大小；先检查可用的UploadFile.size；不能先读完整大文件再拒绝。不支持格式明确报错，不能跳过所有文件后仍创建空任务。
-3. 服务端计算policy与request_hash。Key缺失不阻止保存合法原稿，但标needs_action，不投递LLM工作。
-4. BEGIN IMMEDIATE：查幂等键；新建根任务、attempt、第一步job及payload；无Key时只建根任务/阻塞步骤；COMMIT。
-5. 返回202含import_id、job_id（可能null）、status、revision、status_url。ARQ不可用仍返回已接受，显示queued；不能返回“上传失败”诱导重复提交。
+3. 服务端计算policy与request_hash，不做任何模型处理。通过policy确定必须预检scope：私人目标为提交者user；公共目标必须包括global/system；普通用户公共申请若私人暂存阶段需要user模型，还要包括提交者user。个人scope必须由严格的本人配置读取器解析；禁止使用缺失时回退global的通用配置函数。
+4. BEGIN IMMEDIATE：查幂等键；新建根任务、attempt、payload和唯一的`credential_preflight` job；COMMIT。此时不得派发提取/分类/聚类工作。重复同键请求返回同一root和预检job，不另发探测。
+5. `credential_preflight`先用短事务按scope预留配额并写`reserved`调用账本，COMMIT后在事务外执行最小连通性ping；不得持SQLite写锁等待网络。每次结果再用短事务更新调用账本状态并保存每scope预检结果/配置指纹：全部通过才原子创建首个业务job；任一失败则root进入needs_action、记录阻塞scope和允许动作，且不创建业务处理job。ping响应丢失记`unknown`，不能当作免费或已成功。普通用户公共上传因global失败时显示等待管理员修复，不能要求用户改个人Key。
+6. 返回202含稳定import_id、job_id、status、revision和status_url。任务处于配置预检时可以queued/running；预检失败时返回可恢复needs_action。ARQ不可用仍保留任务，不返回“上传失败”诱导用户生成另一幂等键。
 
 ### 2.2 步骤执行和fencing
 
 1. 根据job_id原子claim，lease_generation递增，得到本次唯一fence；holder不能只用PID。
 2. 读取根输入、scope和成功检查点；核实当前实体仍可处理；根据持久授权决定公共写入，不信任旧payload.is_admin。
-3. 取得需要的scope租约；调用前凭据预检和预算预留；无Key/401进入needs_action。
+3. 取得policy要求的scope租约；业务模型job开始前确认该阶段scope预检成功、配置指纹未变；预检最多复用120秒，指纹改变或超时则重新预检。任何user→global或global→user处理阶段切换必须重新预检，不受120秒缓存影响。预检必须实际验证正确provider/model连通可用，不能把配置字段非空当成可用。scope配置缺失、无效、解密失败、鉴权失败或模型不可用时进入needs_action，保留已完成成果且不运行后续工作。不能切换到其他scope兜底。探测的最小ping记录为独立账本调用并计入相应scope预算。
 4. 事务外调用模型；由独立心跳续job/scope lease，间隔30秒；建议lease=120秒，测试用可注入时钟。
 5. BEGIN IMMEDIATE：检查job_id、generation、有效租约、scope lease、输入版本和删除标记。任意不匹配ROLLBACK，旧worker不得写业务表。
 6. 同事务写本步骤成果、下游pending工作、聚合revision，再标本job完成；COMMIT后通知ARQ。
 7. 异常统一分类；自动重试不超过3次物理尝试/步骤，第1、2次失败后分别退避30、60秒（第3次失败后不再排下一次）；401/权限/输入/额度不自动重试。
 
 固定语义：阶段成功与下游安排不存在“保存成功但没有任何后续任务记录”的缝隙。提取后保存检查点即允许进程重启；LangGraph MemorySaver只作单次运行缓存，不能作为恢复依据。thread_id使用import_id+attempt_no+job_id，不使用秒时间戳。
+
+普通用户share任务有scope边界：提交时先预检目标global/system公共模型，且在私人暂存/分类/匹配前预检并使用提交者user scope；管理员批准审核投影后，公共聚类/标签按global/system scope重新预检和记账。不能沿用提交时的global预检结果，也不能在任何global预检失败时回退到提交者配置。管理员直接公共导入从首个模型阶段起使用global/system scope；管理员私人导入使用管理员自己的user scope。用户scope预检不能使用`get_user_llm_config`这类缺省时回退global的通用读取路径；必须覆盖真实上传默认解析器在user配置缺失、global有效时仍阻断的回归。
 
 ### 2.3 匹配与写入
 
@@ -260,7 +263,7 @@ EOF且根任务不是completed/failed/partial_failed/needs_action/waiting_review
 
 | code | 自动重试 | 根状态/动作 |
 |---|---|---|
-| MODEL_AUTH_INVALID / MODEL_CONFIG_MISSING | 否 | needs_action，修复对应scope配置 |
+| MODEL_AUTH_INVALID / MODEL_CONFIG_MISSING | 否 | needs_action；user scope返回`configure_user_model`；global scope的管理员任务返回`configure_system_model`；普通用户公共任务返回`wait_for_global_model`和`retry_after_configuration`，不能引导用户修改私人Key来绕过 |
 | PERMISSION_REVOKED / SOURCE_DELETED | 否 | needs_action，解释权限/源状态，不擅自恢复删除 |
 | QUOTA_EXCEEDED | 否 | needs_action，显示reset_at或预算调整入口 |
 | UPSTREAM_RATE_LIMIT / UPSTREAM_TIMEOUT / UPSTREAM_UNAVAILABLE | 最多3次 | 退避queued；耗尽后failed/partial_failed |

@@ -26,9 +26,24 @@ Given P1有121条授权面经，另有U2私人面经和P2记录。When请求crea
 
 ### AC-004 → UR-004：费用与配置
 
-U1没有Key而系统Key有效：合法上传原稿被接受，root needs_action，模型调用数=0。补个人Key后恢复同root。A/share每个阶段只调用global，A/private只调用user。个人配置解密异常不得fallback。额度耗尽停止新调用且保留成果；恢复不能绕过当天配额。模型超时记录unknown而非假定免费。
+上传处理开始前，服务端必须根据认证主体和目标库解析必须预检的scope；每个工作阶段开始前，再根据审核状态解析该阶段唯一的调用scope。任务先持久化原稿和`credential_preflight`步骤，再由后端用最小ping验证所选provider/model实际可连接；不能只检查“存在一段Key”、不能只测配置表，也不能拿另一scope配置代测。私人预检必须走严格的本人配置解析，不能调用会在缺少用户Key时返回global配置的通用读取器。预检结果绑定provider/model/config_fingerprint，不存Key、认证头或敏感错误正文。每次ping作为独立调用记账；常规自动化测试只使用本地stub，不连接真实供应商。
 
-测试：`backend/tests/services/test_upload_credentials.py`、`test_upload_llm_accounting.py`。模型adapter记录实际scope和call_key。
+覆盖以下scope矩阵：
+
+| 操作 | 处理阶段 | 必须预检及记账的配置 |
+|---|---|---|
+| U1/private | 提交预检及私人提取、分类、匹配、答案 | U1 的 user 配置 |
+| A/private | 提交预检及私人提取、分类、匹配、答案 | A 的 user 配置 |
+| A/share | 提交预检及公共导入全阶段 | global/system 公共配置 |
+| U1/share | 提交前目标库预检 | global/system 公共配置 |
+| U1/share | 私人暂存及审核前的私人处理 | U1 的 user 配置；提交启动前也必须预检 |
+| U1/share | 批准审核投影后的公共聚类/标签 | global/system 公共配置，必须重新预检 |
+
+每格都要验证“正确scope连通→只使用该scope”和“正确scope缺失/401/模型404/不可连通、另一scope有效→仍阻断”的正反例。包括管理员私人配置缺失但global有效、管理员公共配置缺失但其个人配置有效，两个方向都不得fallback。公共目标的global预检失败时，即使是普通用户分享且user配置有效，也必须在开始提取前停为needs_action；原稿、同一root和失败预检记录保留，不派发提取/分类等模型工作，并显示这是待管理员修复的系统配置阻塞。修复正确scope后从同一root恢复，只处理未完成阶段。普通用户share在审核后必须重新探测global；探测失败时不得调用用户Key或发布未处理题目。个人配置解密异常不得fallback。额度耗尽停止新调用且保留成果；恢复不能绕过当天配额。模型调用超时记录unknown而非假定免费。
+
+端到端验收还必须证明生产解析路径的负向反例：数据库中U1没有私人配置而global配置有效时，真实`resolve_upload_credentials(..., credential_scope="user")`及上传入口均返回user scope的needs_action，不读取/使用global模型。仅向resolver注入`user_config_loader`的单元测试不够，因为它绕过了默认配置读取器。
+
+测试：`backend/tests/services/test_upload_credentials.py`、`test_upload_llm_accounting.py`、新增`backend/tests/pipeline/test_upload_credential_preflight.py`。覆盖实际默认user配置读取器与真实上传入口；本地stub provider控制ping成功/401/404/超时。adapter/调用账本记录预检和模型处理的scope、payer、config_fingerprint、call_key；断言失败的预检不创建业务处理job。不得连接真实供应商或依赖真实密钥。
 
 ### AC-005 → UR-005：私人引用与归属
 
@@ -150,7 +165,7 @@ AC-028属于隔离集成E2E，不宣称验证真实供应商模型质量。另�
 
 **Then** 测试必须用真实临时SQLite中的记录和实际授权读取API，逐项断言以下数据链：
 
-1. 一次客户端幂等键只对应一个稳定`import_id`；根任务、attempt和job归属一致，任务policy记录U1、share意图、私人预处理scope及审核要求，不能靠客户端`is_admin`或目标字段推导权限。调用账本证明审核前由U1的user scope付费，审核批准后的公共处理使用global/system scope；不得在测试trace或日志输出Key。
+1. 一次客户端幂等键只对应一个稳定`import_id`；根任务、attempt和job归属一致，任务policy记录U1、share意图、私人预处理scope及审核要求，不能靠客户端`is_admin`或目标字段推导权限。持久化`credential_preflight` job先探测目标global/system配置及U1的user配置；两者成功才创建提取job。调用账本和预检记录证明审核前私人阶段由U1付费；管理员批准后公共工作开始前重新探测global/system scope并由其付费。单独注入“初始global无效、U1有效”时必须停在needs_action且没有提取/分类等处理job；修复后从同一root恢复。后续再注入global失效时必须停止公共工作，不fallback；不得在测试trace或日志输出Key。
 2. 5道输入题分别保留唯一且稳定的ordinal；提取结果、分类检查点、私人`questions_detail`、`question_resolutions`能按ordinal一一追溯。每题的`cat1`、`cat2`和标签必须等于stub的预期值；已匹配公共题的私人resolution指向公共canonical，但不得修改公共来源、频次或内容。
 3. 管理员批准前，私人面经和审核快照存在，公共读取接口看不到该申请的待发布内容，公共canonical数量不因私人预处理增加。审核投影的脱敏字段和修改题干成为后续公共处理的唯一输入；不得从原始snapshot回填已清空字段。
 4. 公共处理时，4个保留的审核item与公共detail、当前有效public resolution及公共canonical一一对应；scope、题目文本、分类和标签与获批投影及stub结果一致。被排除的ordinal不进入公共处理或清单；未完成resolution的题不标记published。
@@ -164,7 +179,7 @@ AC-028属于隔离集成E2E，不宣称验证真实供应商模型质量。另�
 以下命令在实现了对应新测试后执行；新文件不存在表示步骤没完成，不能直接删掉命令。
 
 ```bash
-.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_policy.py backend/tests/services/test_upload_credentials.py backend/tests/services/test_upload_llm_accounting.py
+.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_policy.py backend/tests/pipeline/test_upload_credential_preflight.py backend/tests/services/test_upload_credentials.py backend/tests/services/test_upload_llm_accounting.py
 .venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_stage_recovery.py backend/tests/services/test_upload_leases.py backend/tests/pipeline/test_upload_retry_family.py
 .venv/bin/python -m pytest -q backend/tests/services/test_question_resolutions.py backend/tests/services/test_upload_matching_outcomes.py backend/tests/pipeline/test_upload_queue_reconciliation.py
 .venv/bin/python -m pytest -q backend/tests/services/test_public_contributions_materialize.py backend/tests/services/test_public_contribution_recovery.py backend/tests/services/test_public_contribution_transitions.py backend/tests/security/test_upload_task_privacy.py

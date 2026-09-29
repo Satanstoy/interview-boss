@@ -25,7 +25,7 @@
 | F01 | UR-001 结果定位 | AC-001 | In progress | 阶段I（location 接口 passed；前端切页高亮未做） | `test_interview_server_pagination.py` 7 passed |
 | F02 | UR-002 服务端分页 | AC-002 | passed（后端） | 阶段I | `test_interview_server_pagination.py` 7 passed（121 条同时间戳、跨页不重不漏） |
 | F03 | UR-003 四格提交策略 | AC-003 | In progress | 阶段A（policy 部分 passed） | `backend/tests/pipeline/test_upload_policy.py` 30 passed |
-| F04 | UR-004 凭据显式 scope | AC-004 | passed（后端） | 阶段C | 缺 Key→needs_action 0 调用、修复后同 root 恢复：`test_upload_acceptance.py` 21 passed |
+| F04 | UR-004 凭据显式 scope + 提交前配置预检 | AC-004 | 未通过；注入resolver的隔离单测通过，真实默认解析路径存在fallback风险 | 阶段C | 旧证据不覆盖默认配置读取：新增AC-004矩阵、实际上传入口和连通性预检均待实现/运行 |
 | F05 | UR-005 原题 resolution | AC-005 | passed | 阶段E | `test_question_resolutions.py` 6 passed |
 | F06 | UR-006 匹配三态 | AC-006 | passed | 阶段E | `test_upload_matching_outcomes.py` 8 passed |
 | F07 | UR-007 队列续调 | AC-007 | passed | 阶段E | `test_upload_queue_reconciliation.py` 5 passed + 每分钟对账 cron |
@@ -126,10 +126,12 @@
 
 ### 阶段C：凭据、预算与记账（进行中）
 
-- [x] user 缺 Key 而 global 有效 → `MODEL_CONFIG_MISSING`（scope=user、action=configure_user_model），
-      **0 次系统配置读取**（测试断言 global_loader 未被调用）。
+- [x] 注入 user/global loader 时，user 缺 Key 而 global 有效 → `MODEL_CONFIG_MISSING`（scope=user、action=configure_user_model），不调用注入的global_loader。
+- [ ] 修复并验证生产默认路径：`_default_user_loader`当前使用的`get_user_llm_config`会在本人缺Key时回退global；实际上传必须改用strict user-only读取，且在global有效的反例中仍阻断。
 - [x] user 配置解密失败同样不回退，且错误信息不泄露配置内容。
 - [x] global scope 不借用用户私钥（user_loader 未被调用）；非法 scope 直接 ValueError。
+- [ ] 新增持久化`credential_preflight` job；private目标探测user、public目标先探测global；U1/share还需探测首阶段user；任一必需scope失败时不派发提取job。
+- [ ] 最小provider/model ping、scope账本/配额和审核后global重新探测待实现；需通过stub测试401、404、超时、配置变更及从原root恢复。
 - [x] 解析结果只暴露 `config_fingerprint`，`api_key` 不进 repr/model_dump（测试断言）。
 - [x] `llm_quota.reserve_call` 事务内预留（不 commit）；旧 `_increment_usage` wrapper 保持 commit 语义
       （`test_llm_quota.py`/`test_llm_quota_concurrency.py` 回归通过）。

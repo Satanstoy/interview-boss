@@ -92,9 +92,14 @@
 
 **文件**：upload_credentials.py、llm_quota.py、submit.py、upload_lifecycle.py、upload_imports.py、asgi.py。
 
-- [ ] 写user缺Key但global有效的测试，期望needs_action且0外部调用。
+- [ ] 写private目标下user缺Key但global有效的测试，期望needs_action且0外部调用。
 - [ ] 在本链路新增strict resolver；保留其他调用方现有fallback，不全局替换。
 - [ ] 写解密失败和401按scope报错测试，再实现错误映射。
+- [ ] user scope默认解析器改为只读本人`user_llm_config`；禁止使用缺Key后回退global的通用`get_user_llm_config`。加真实默认路径反例：U1无Key而global有效，user scope仍needs_action。注意当前`backend/app/core/config.py:get_user_llm_config`明确会回退global。
+- [ ] 接受任务事务持久化原稿和`credential_preflight` job；worker事务外对所需scope发最小provider/model ping，成功后才原子排提取job，失败则needs_action并保留原稿/预检记录。
+- [ ] private目标探测提交者user配置；public目标必须探测global/system配置。普通用户share首个私人暂存阶段若需要user配置，则global和user两边都通过后才能派发提取job。审核批准后重新探测global。
+- [ ] 复用`backend/app/services/llm_status.py`的低层最小ping机制，但把输入改为严格`ResolvedCredential`；不能直接使用`check_llm_status`作为上传user预检，因为它调用可能回退global的配置读取器。global探测由worker/server内部调用，不要求普通用户拥有管理员路由权限。
+- [ ] 将每个provider/model ping作为独立调用账本记录并计入正确scope预算；预检结果绑定provider/model/config_fingerprint。增加`backend/tests/pipeline/test_upload_credential_preflight.py`，本地stub覆盖成功、401、404、超时、scope错配、配置更新后重新探测。
 - [ ] 提取quota不commit核心；旧check_and_record wrapper继续负责原有commit，跑原配额回归。
 - [ ] 写账本+配额预留原子性及unknown调用测试，实现事务记录。
 - [ ] 写分块文件上限、非图片拒绝、空文件列表测试，修接受入口校验。
