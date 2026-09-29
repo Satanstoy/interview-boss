@@ -29,7 +29,15 @@ def test_schema_freshness_check_passes():
         cwd=ROOT,
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "ADMIN_PASSWORD": "schema-test-password"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "ADMIN_PASSWORD": "schema-test-password",
+            # 干净环境下 git 需要显式信任该仓库（否则 dubious ownership，
+            # 生成的 source commit 变成 unknown，检查必然失败）
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(ROOT),
+        },
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

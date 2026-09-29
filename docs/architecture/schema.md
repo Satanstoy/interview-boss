@@ -1,8 +1,8 @@
 # InterviewBoss SQLite Schema
 
-> Generated: 2026-08-26
-> Source migration commit: 31493b04
-> Latest migration: 120 (clear_db_confirmations)
+> Generated: 2026-09-29
+> Source migration commit: aa59b461
+> Latest migration: 122 (upload_resolution)
 > foreign_key_check: 0
 > Source of truth: `backend/app/db/migrations/` applied to a fresh in-memory SQLite database.
 > Runtime: SQLite WAL with `PRAGMA foreign_keys=ON`; soft-deleted rows use `deleted_at IS NULL` filters where documented by the owning service.
@@ -128,8 +128,10 @@
 | 118 | `jd_bonus` | yes |
 | 119 | `admin_audit_log` | yes |
 | 120 | `clear_db_confirmations` | yes |
+| 121 | `upload_recovery_core` | yes |
+| 122 | `upload_resolution` | yes |
 
-## Tables (88)
+## Tables (94)
 
 ### `admin_assistant_log`
 - Columns: `id`:INTEGER, `session_id`:TEXT, `admin_id`:INTEGER, `role`:TEXT, `content`:TEXT, `tool_trace`:TEXT, `created_at`:TEXT
@@ -142,9 +144,9 @@
 - Indexes: `idx_admin_audit_event` (event_type, created_at)
 
 ### `analysis_queue`
-- Columns: `id`:INTEGER, `interview_id`:INTEGER, `status`:TEXT, `created_at`:TIMESTAMP, `processed_at`:TIMESTAMP, `question_detail_id`:INTEGER, `owner_id`:INTEGER, `contribution_request_id`:INTEGER
-- Foreign keys: `owner_id` -> `users`.`id` (SET NULL); `question_detail_id` -> `questions_detail`.`id` (CASCADE); `interview_id` -> `interview`.`id` (CASCADE)
-- Indexes: `idx_analysis_queue_contribution` (contribution_request_id, status); `idx_aq_interview` (interview_id); `idx_aq_owner` (owner_id); `idx_aq_question_detail` (question_detail_id); `idx_aq_status_created` (status, created_at); `idx_aq_status` (status); `uq_analysis_queue_detail_scope` UNIQUE partial (interview_id, question_detail_id, expr:-2)
+- Columns: `id`:INTEGER, `interview_id`:INTEGER, `status`:TEXT, `created_at`:TIMESTAMP, `processed_at`:TIMESTAMP, `question_detail_id`:INTEGER, `owner_id`:INTEGER, `contribution_request_id`:INTEGER, `root_import_id`:TEXT, `job_id`:INTEGER, `lease_generation`:INTEGER, `locked_until`:TEXT, `claimed_at`:TEXT, `pipeline_version`:TEXT
+- Foreign keys: `owner_id` -> `users`.`id` (SET NULL); `question_detail_id` -> `questions_detail`.`id` (CASCADE); `interview_id` -> `interview`.`id` (CASCADE); `root_import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `idx_analysis_queue_contribution` (contribution_request_id, status); `idx_aq_interview` (interview_id); `idx_aq_owner` (owner_id); `idx_aq_question_detail` (question_detail_id); `idx_aq_status_created` (status, created_at); `idx_aq_status` (status); `uq_analysis_queue_detail_scope` UNIQUE partial (interview_id, question_detail_id, expr:-2); `uq_analysis_queue_v2_work` UNIQUE partial (root_import_id, question_detail_id, expr:-2, expr:-2)
 
 ### `assistant_generations`
 - Columns: `id`:TEXT, `user_id`:INTEGER, `conversation_id`:TEXT, `turn_id`:TEXT, `message_id`:INTEGER, `parent_generation_id`:TEXT, `source_turn_id`:TEXT, `contract_hash`:TEXT, `evidence_refs_json`:TEXT, `visible`:INTEGER, `created_at`:TIMESTAMP
@@ -387,9 +389,9 @@
 - Indexes: `idx_job_positions_active` (is_deleted, name); `sqlite_autoindex_job_positions_1` UNIQUE (name)
 
 ### `jobs`
-- Columns: `id`:INTEGER, `job_type`:TEXT, `status`:TEXT, `progress_current`:INTEGER, `progress_total`:INTEGER, `progress_message`:TEXT, `result`:TEXT, `created_by`:INTEGER, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `completed_at`:TIMESTAMP, `attempts`:INTEGER, `available_at`:TEXT, `locked_until`:TEXT, `arq_job_id`:TEXT, `worker_id`:TEXT, `last_error`:TEXT, `started_at`:TEXT, `idempotency_key`:TEXT, `parent_job_id`:INTEGER, `progress_phase`:TEXT
-- Foreign keys: `created_by` -> `users`.`id` (NO ACTION)
-- Indexes: `idx_jobs_creator_type_status` (created_by, job_type, status); `idx_jobs_dispatch` (job_type, status, available_at, locked_until); `idx_jobs_parent` (parent_job_id, created_at); `idx_jobs_status` (status); `idx_jobs_type` (job_type); `uq_jobs_idempotency` UNIQUE partial (job_type, idempotency_key)
+- Columns: `id`:INTEGER, `job_type`:TEXT, `status`:TEXT, `progress_current`:INTEGER, `progress_total`:INTEGER, `progress_message`:TEXT, `result`:TEXT, `created_by`:INTEGER, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `completed_at`:TIMESTAMP, `attempts`:INTEGER, `available_at`:TEXT, `locked_until`:TEXT, `arq_job_id`:TEXT, `worker_id`:TEXT, `last_error`:TEXT, `started_at`:TEXT, `idempotency_key`:TEXT, `parent_job_id`:INTEGER, `progress_phase`:TEXT, `root_import_id`:TEXT, `upload_attempt_id`:INTEGER, `work_key`:TEXT, `lease_generation`:INTEGER
+- Foreign keys: `created_by` -> `users`.`id` (NO ACTION); `upload_attempt_id` -> `upload_attempts`.`id` (NO ACTION); `root_import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `idx_jobs_creator_type_status` (created_by, job_type, status); `idx_jobs_dispatch` (job_type, status, available_at, locked_until); `idx_jobs_parent` (parent_job_id, created_at); `idx_jobs_status` (status); `idx_jobs_type` (job_type); `idx_jobs_v2_root` (root_import_id); `uq_jobs_idempotency` UNIQUE partial (job_type, idempotency_key); `uq_jobs_v2_work_active` UNIQUE partial (root_import_id, job_type, work_key)
 
 ### `llm_usage`
 - Columns: `id`:INTEGER, `user_id`:INTEGER, `day`:TEXT, `call_count`:INTEGER, `total_tokens`:INTEGER, `updated_at`:TEXT
@@ -447,7 +449,7 @@
 - Indexes: `idx_public_contribution_items_status` (request_id, status, ordinal); `sqlite_autoindex_public_contribution_items_1` UNIQUE (request_id, ordinal)
 
 ### `public_contribution_requests`
-- Columns: `id`:INTEGER, `source_type`:TEXT, `source_id`:INTEGER, `requester_id`:INTEGER, `status`:TEXT, `snapshot_json`:TEXT, `review_json`:TEXT, `public_interview_id`:INTEGER, `public_jd_id`:INTEGER, `reviewed_by`:INTEGER, `reviewed_at`:TIMESTAMP, `error_message`:TEXT, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP
+- Columns: `id`:INTEGER, `source_type`:TEXT, `source_id`:INTEGER, `requester_id`:INTEGER, `status`:TEXT, `snapshot_json`:TEXT, `review_json`:TEXT, `public_interview_id`:INTEGER, `public_jd_id`:INTEGER, `reviewed_by`:INTEGER, `reviewed_at`:TIMESTAMP, `error_message`:TEXT, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `revision`:INTEGER, `review_projection_json`:TEXT, `projection_hash`:TEXT
 - Foreign keys: `public_jd_id` -> `jd`.`id` (NO ACTION); `public_interview_id` -> `interview`.`id` (NO ACTION); `reviewed_by` -> `users`.`id` (NO ACTION); `requester_id` -> `users`.`id` (NO ACTION)
 - Indexes: `idx_public_contribution_request_owner` (requester_id, created_at); `idx_public_contribution_request_status` (status, source_type, updated_at); `uq_public_contribution_active_source` UNIQUE partial (source_type, source_id, requester_id)
 
@@ -491,6 +493,11 @@
 - Foreign keys: `position_id` -> `job_positions`.`id` (CASCADE); `question_id` -> `question_bank`.`id` (CASCADE)
 - Indexes: `idx_qp_position_question` (position_id, question_id); `idx_qp_position` (position_id); `sqlite_autoindex_question_position_1` UNIQUE (question_id, position_id)
 
+### `question_resolutions`
+- Columns: `id`:INTEGER, `detail_id`:INTEGER, `occurrence_scope`:TEXT, `occurrence_owner_id`:INTEGER, `canonical_id`:INTEGER, `canonical_scope`:TEXT, `status`:TEXT, `taxonomy_version`:TEXT, `pipeline_version`:TEXT, `input_version`:INTEGER, `confidence`:REAL, `decided_at`:TEXT, `invalidated_at`:TEXT, `reason`:TEXT
+- Foreign keys: `canonical_id` -> `question_bank`.`id` (NO ACTION); `occurrence_owner_id` -> `users`.`id` (NO ACTION); `detail_id` -> `questions_detail`.`id` (NO ACTION)
+- Indexes: `idx_question_resolution_canonical` (canonical_id); `uq_question_resolution_current` UNIQUE partial (detail_id)
+
 ### `question_sources`
 - Columns: `id`:INTEGER, `question_bank_id`:INTEGER, `url`:TEXT, `company`:TEXT, `round`:TEXT, `created_at`:TIMESTAMP, `deleted_at`:TIMESTAMP
 - Foreign keys: `question_bank_id` -> `question_bank`.`id` (CASCADE)
@@ -502,9 +509,9 @@
 - Indexes: `idx_question_variant_owners_qb` (question_bank_id); `sqlite_autoindex_question_variant_owners_1` UNIQUE (normalized_question)
 
 ### `questions_detail`
-- Columns: `id`:INTEGER, `interview_id`:INTEGER, `question`:TEXT, `cat1`:TEXT, `cat2`:TEXT, `tags`:TEXT, `difficulty`:TEXT, `diff_tag`:TEXT, `answer`:TEXT, `url`:TEXT, `source`:TEXT, `owner_id`:INTEGER, `status`:TEXT, `deleted_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `company`:TEXT, `round`:TEXT, `job_position`:TEXT, `question_type`:TEXT, `dimension`:TEXT
-- Foreign keys: none
-- Indexes: `idx_qd_interview_question_type` (interview_id, question_type); `idx_qd_question` (question); `idx_qd_url` (url)
+- Columns: `id`:INTEGER, `interview_id`:INTEGER, `question`:TEXT, `cat1`:TEXT, `cat2`:TEXT, `tags`:TEXT, `difficulty`:TEXT, `diff_tag`:TEXT, `answer`:TEXT, `url`:TEXT, `source`:TEXT, `owner_id`:INTEGER, `status`:TEXT, `deleted_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `company`:TEXT, `round`:TEXT, `job_position`:TEXT, `question_type`:TEXT, `dimension`:TEXT, `import_id`:TEXT, `source_ordinal`:INTEGER
+- Foreign keys: `import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `idx_qd_interview_question_type` (interview_id, question_type); `idx_qd_question` (question); `idx_qd_url` (url); `uq_questions_detail_import_ordinal` UNIQUE partial (import_id, source_ordinal)
 
 ### `refresh_tokens`
 - Columns: `id`:INTEGER, `user_id`:INTEGER, `jti`:TEXT, `expires_at`:TEXT, `created_at`:TIMESTAMP, `remember`:INTEGER, `ip_address`:TEXT, `user_agent`:TEXT, `family_id`:TEXT
@@ -520,6 +527,31 @@
 - Columns: `id`:INTEGER, `position_name`:TEXT, `categories_json`:TEXT, `is_default`:INTEGER, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `source`:TEXT, `owner_id`:INTEGER, `is_public`:INTEGER, `tags_json`:TEXT
 - Foreign keys: none
 - Indexes: `idx_taxonomy_position_owner` UNIQUE (position_name, source, owner_id); `uq_taxonomy_public` UNIQUE partial (position_name, source)
+
+### `upload_attempts`
+- Columns: `id`:INTEGER, `import_id`:TEXT, `attempt_no`:INTEGER, `status`:TEXT, `requested_by`:INTEGER, `created_at`:TEXT, `completed_at`:TEXT
+- Foreign keys: `requested_by` -> `users`.`id` (NO ACTION); `import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `uq_upload_attempts_import_no` UNIQUE (import_id, attempt_no); `uq_upload_attempts_one_active` UNIQUE partial (import_id)
+
+### `upload_imports`
+- Columns: `id`:TEXT, `requester_id`:INTEGER, `idempotency_key`:TEXT, `request_hash`:TEXT, `target_intent`:TEXT, `source_type`:TEXT, `resolved_type`:TEXT, `position_id`:INTEGER, `position_name`:TEXT, `input_version`:INTEGER, `pipeline_version`:TEXT, `policy_json`:TEXT, `payload_json`:TEXT, `status`:TEXT, `current_attempt_no`:INTEGER, `interview_id`:INTEGER, `contribution_request_id`:INTEGER, `revision`:INTEGER, `error_code`:TEXT, `error_message`:TEXT, `created_at`:TEXT, `updated_at`:TEXT, `completed_at`:TEXT, `payload_expires_at`:TEXT
+- Foreign keys: `requester_id` -> `users`.`id` (NO ACTION)
+- Indexes: `idx_upload_imports_requester` (requester_id, created_at); `sqlite_autoindex_upload_imports_1` UNIQUE (id); `uq_upload_imports_idempotency` UNIQUE (requester_id, idempotency_key)
+
+### `upload_llm_calls`
+- Columns: `id`:INTEGER, `root_import_id`:TEXT, `stage`:TEXT, `unit_key`:TEXT, `call_key`:TEXT, `credential_scope`:TEXT, `payer_type`:TEXT, `payer_user_id`:INTEGER, `provider`:TEXT, `model`:TEXT, `config_fingerprint`:TEXT, `status`:TEXT, `input_tokens`:INTEGER, `output_tokens`:INTEGER, `started_at`:TEXT, `finished_at`:TEXT, `error_code`:TEXT
+- Foreign keys: `payer_user_id` -> `users`.`id` (NO ACTION); `root_import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `idx_upload_llm_calls_root` (root_import_id, stage); `sqlite_autoindex_upload_llm_calls_1` UNIQUE (call_key)
+
+### `upload_scope_leases`
+- Columns: `scope_key`:TEXT, `holder_token`:TEXT, `generation`:INTEGER, `locked_until`:TEXT
+- Foreign keys: none
+- Indexes: `sqlite_autoindex_upload_scope_leases_1` UNIQUE (scope_key)
+
+### `upload_stage_results`
+- Columns: `id`:INTEGER, `import_id`:TEXT, `stage`:TEXT, `unit_key`:TEXT, `input_version`:INTEGER, `pipeline_version`:TEXT, `status`:TEXT, `result_json`:TEXT, `output_hash`:TEXT, `error_code`:TEXT, `retryable`:INTEGER, `job_id`:INTEGER, `created_at`:TEXT, `updated_at`:TEXT
+- Foreign keys: `import_id` -> `upload_imports`.`id` (NO ACTION)
+- Indexes: `uq_upload_stage_result` UNIQUE (import_id, stage, unit_key, input_version)
 
 ### `user_interview_distribution_preferences`
 - Columns: `user_id`:INTEGER, `job_position`:TEXT, `mode`:TEXT, `target_question_count`:INTEGER, `custom_distribution`:TEXT, `selected_experience_id`:INTEGER, `style_strength`:TEXT, `updated_at`:TIMESTAMP
