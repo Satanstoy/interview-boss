@@ -613,7 +613,7 @@ class TestSubmitNodes:
         assert len(result["extracted_data"]["具体题目清单"]) == 3
         assert result["extraction_quality"] >= 7.0
 
-    def test_extract_node_blacklist_filter(self, mock_db):
+    def test_extract_node_keeps_marked_questions(self, mock_db):
         """验证提取黑名单过滤（精确匹配）"""
         from app.agents.submit.extract import extract_node
 
@@ -653,10 +653,16 @@ class TestSubmitNodes:
             }
             result = asyncio.run(extract_node(state))
 
+        # AC-019：黑名单只标记不丢题，完整清单必须保留（含技术题与 HR 题）
         questions = result["extracted_data"]["具体题目清单"]
-        assert "自我介绍" not in questions  # 精确匹配黑名单
-        assert "反问" not in questions  # 精确匹配黑名单
+        assert "自我介绍" in questions
+        assert "反问" in questions
         assert "Redis持久化" in questions
+        marks = result["extracted_data"]["题目标记"]
+        assert marks, "HR 类表述应带待确认标记"
+        counts = result["extracted_data"]["提取计数"]
+        assert counts["retained"] == len(questions)
+        assert counts["retained"] + counts["excluded"] == counts["extracted"]
 
     def test_classify_node_calls_tag_questions_batch(self, mock_db):
         """验证 classify_node 调用与原始 tag_questions_batch 相同的接口"""

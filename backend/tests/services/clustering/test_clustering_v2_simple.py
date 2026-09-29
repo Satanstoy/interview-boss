@@ -112,7 +112,7 @@ class TestMatchAndClusterCat2Logic:
     """测试 _match_and_cluster_cat2 的逻辑（不调用真实 LLM）"""
 
     @pytest.mark.asyncio
-    async def test_phase1_5_called_when_recent_singletons_exist(self):
+    async def test_phase1_5_called_when_recent_singletons_exist(self, test_db):
         """测试：有最近题目时，Phase 1.5 被调用"""
         # 准备
         new_questions = [
@@ -157,7 +157,7 @@ class TestMatchAndClusterCat2Logic:
         mock_load.assert_called_once_with("C3.数据库基础", days=14)
 
     @pytest.mark.asyncio
-    async def test_phase1_5_not_called_when_no_recent_singletons(self):
+    async def test_phase1_5_not_called_when_no_recent_singletons(self, test_db):
         """测试：没有最近题目时，Phase 1.5 不被调用"""
         # 准备
         new_questions = [

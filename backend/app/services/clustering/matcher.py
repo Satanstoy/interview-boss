@@ -690,6 +690,207 @@ async def generate_unified_question(
     return max(questions, key=len)
 
 
+def _match_error_code(exc) -> tuple[str, bool]:
+    """把匹配阶段的异常映射为契约 §4.4 的错误码与是否可自动重试。"""
+
+    from fastapi import HTTPException
+
+    if isinstance(exc, HTTPException):
+        if exc.status_code == 401:
+            return "MODEL_AUTH_INVALID", False
+        if exc.status_code == 429:
+            return "UPSTREAM_RATE_LIMIT", True
+        return "UPSTREAM_UNAVAILABLE", True
+    text = str(exc).lower()
+    if "401" in text or "invalid api key" in text or "unauthorized" in text:
+        return "MODEL_AUTH_INVALID", False
+    if "timeout" in text or "timed out" in text:
+        return "UPSTREAM_TIMEOUT", True
+    return "UPSTREAM_UNAVAILABLE", True
+
+
+def _coerce_id(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def match_outcomes(
+    new_rows, existing_clusters_by_cat2, user_id=None, *, strict: bool = True
+):
+    """三态匹配（AC-006）：matched / no_match / failed。
+
+    - ``matched``：带 canonical_id；
+    - ``no_match``：同分类确无候选，或模型显式声明未匹配（strict=False）；
+    - ``failed``：模型/结构错误，**不得**当作 no_match 去新建规范题。
+
+    strict=True 时，模型漏答（既未匹配也未显式声明）也判为结构错误失败，
+    由调用方按有限修复重试处理，而不是悄悄建新题。
+    """
+
+    results = []
+    if not new_rows:
+        return {"results": []}
+
+    groups: dict = {}
+    for row in new_rows:
+        groups.setdefault(row.get("cat2") or "", []).append(row)
+
+    for cat2, group in groups.items():
+        candidates = existing_clusters_by_cat2.get(cat2) or []
+        id_to_qb = {}
+        for candidate in candidates:
+            cid = candidate.get("id") or candidate.get("question_bank_id")
+            if cid is not None:
+                id_to_qb[_coerce_id(cid)] = _coerce_id(
+                    candidate.get("question_bank_id") or cid
+                )
+
+        if not candidates:
+            for row in group:
+                results.append(
+                    {
+                        "new_id": row.get("id"),
+                        "ordinal": row.get("ordinal"),
+                        "cat2": cat2,
+                        "outcome": "no_match",
+                        "reason": "no_candidates",
+                    }
+                )
+            continue
+
+        async with matcher_semaphore:
+            prompt = MATCH_EXISTING_PROMPT.format(
+                existing_clusters=_format_existing_clusters(
+                    [{**c, "id": (c.get("id") or c.get("question_bank_id"))} for c in candidates]
+                ),
+                new_questions=_format_new_questions(group),
+                count=len(group),
+            )
+            try:
+                content = await _call_llm_with_retry(
+                    prompt, response_format={"type": "json_object"}, user_id=user_id
+                )
+                parsed = _extract_json(content) or {}
+            except Exception as exc:  # 模型错误 → failed，绝不当作 no_match
+                code, retryable = _match_error_code(exc)
+                logger.warning("增量匹配调用失败 [%s]: %s", cat2 or "无分类", exc)
+                for row in group:
+                    results.append(
+                        {
+                            "new_id": row.get("id"),
+                            "ordinal": row.get("ordinal"),
+                            "cat2": cat2,
+                            "outcome": "failed",
+                            "error_code": code,
+                            "retryable": retryable,
+                        }
+                    )
+                continue
+
+        group_ids = {_coerce_id(row.get("id")) for row in group}
+        matches = parsed.get("matches") or []
+        unmatched_raw = parsed.get("unmatched") or []
+        structure_errors: list[str] = []
+        matched_map: dict[int, int] = {}
+        declared_unmatched: set[int] = set()
+
+        if not isinstance(matches, list) or not isinstance(unmatched_raw, list):
+            structure_errors.append("matches/unmatched 必须是数组")
+            matches, unmatched_raw = [], []
+
+        for item in matches:
+            if not isinstance(item, dict):
+                structure_errors.append("matches 条目必须是对象")
+                continue
+            new_id = _coerce_id(item.get("new_id"))
+            cluster_id = _coerce_id(item.get("cluster_id"))
+            if new_id is None or cluster_id is None:
+                structure_errors.append("matches 条目缺少合法 new_id/cluster_id")
+                continue
+            if new_id not in group_ids:
+                structure_errors.append(f"未知 new_id: {new_id}")
+                continue
+            if new_id in matched_map or new_id in declared_unmatched:
+                structure_errors.append(f"重复 new_id: {new_id}")
+                continue
+            if cluster_id not in id_to_qb:
+                structure_errors.append(f"越界 cluster_id: {cluster_id}")
+                continue
+            matched_map[new_id] = id_to_qb[cluster_id]
+
+        for raw_id in unmatched_raw:
+            new_id = _coerce_id(raw_id)
+            if new_id is None or new_id not in group_ids:
+                structure_errors.append(f"unmatched 含非法 new_id: {raw_id!r}")
+                continue
+            if new_id in matched_map or new_id in declared_unmatched:
+                structure_errors.append(f"重复 new_id: {new_id}")
+                continue
+            declared_unmatched.add(new_id)
+
+        omitted = {
+            gid for gid in group_ids if gid not in matched_map and gid not in declared_unmatched
+        }
+
+        if structure_errors:
+            # 全局结构问题（重复/越界/未知 ID）说明模型的 ID 映射不可信，
+            # 整组判失败，宁可重试也不写入任何关联。
+            logger.warning("匹配结果结构错误 [%s]: %s", cat2 or "无分类", structure_errors)
+            for row in group:
+                results.append(
+                    {
+                        "new_id": row.get("id"),
+                        "ordinal": row.get("ordinal"),
+                        "cat2": cat2,
+                        "outcome": "failed",
+                        "error_code": "MODEL_OUTPUT_INVALID",
+                        "retryable": True,
+                    }
+                )
+            continue
+
+        for row in group:
+            row_id = _coerce_id(row.get("id"))
+            if row_id in omitted and strict:
+                # 漏答：既非匹配也非显式未匹配，属于结构错误，绝不能当 no_match
+                results.append(
+                    {
+                        "new_id": row_id,
+                        "ordinal": row.get("ordinal"),
+                        "cat2": cat2,
+                        "outcome": "failed",
+                        "error_code": "MODEL_OUTPUT_INVALID",
+                        "retryable": True,
+                    }
+                )
+                continue
+            if row_id in matched_map:
+                results.append(
+                    {
+                        "new_id": row_id,
+                        "ordinal": row.get("ordinal"),
+                        "cat2": cat2,
+                        "outcome": "matched",
+                        "canonical_id": matched_map[row_id],
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "new_id": row_id,
+                        "ordinal": row.get("ordinal"),
+                        "cat2": cat2,
+                        "outcome": "no_match",
+                    }
+                )
+
+    return {"results": results}
+
+
 async def match_new_questions(new_rows, existing_clusters_by_cat2, user_id=None):
     """增量匹配：将新题目与已有聚类匹配（用于个人题库合并）"""
     if not new_rows:

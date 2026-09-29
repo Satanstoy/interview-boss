@@ -7,8 +7,8 @@ from app.agents.shared.events import emit_progress, build_extraction_data, NodeT
 
 logger = logging.getLogger("interview-boss")
 
-# 提取黑名单（LLM误提取的非面试题）
-_EXTRACT_BLACKLIST = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职", "优缺点"]
+# 提取阶段的 HR 类表述：**只标记不删除**（AC-019：技术题含“优缺点”曾被静默丢弃）
+_EXTRACT_MARK_PHRASES = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职"]
 
 
 async def recognize_node(state: SubmitState) -> dict:
@@ -71,11 +71,24 @@ async def extract_node(state: SubmitState) -> dict:
             doc_type = (parsed.get("type") or "").lower()
         data = parsed.get("data", {})
 
-        # 过滤黑名单
+        # 不静默漏题：黑名单只做标记，清单完整保留（AC-019）
         if doc_type == "interview":
-            q_list = data.get("具体题目清单", [])
-            q_list = [q for q in q_list if q.strip() and not any(b in q for b in _EXTRACT_BLACKLIST)]
-            data["具体题目清单"] = q_list
+            raw_list = data.get("具体题目清单", []) or []
+            kept = [q for q in raw_list if isinstance(q, str) and q.strip()]
+            marks = {}
+            for index, question in enumerate(kept, start=1):
+                for phrase in _EXTRACT_MARK_PHRASES:
+                    if phrase in question:
+                        marks[str(index)] = f"含 HR 类表述「{phrase}」，建议人工确认"
+                        break
+            data["具体题目清单"] = kept
+            data["题目标记"] = marks
+            data["提取计数"] = {
+                "extracted": len(raw_list),
+                "retained": len(kept),
+                "excluded": 0,
+                "needs_review": len(marks),
+            }
 
     # 质量评估
     quality = evaluate_extraction_quality(data)

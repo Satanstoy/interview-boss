@@ -186,7 +186,7 @@ async def test_admin_can_update_system_taxonomy_for_existing_position(test_db):
 
 
 @pytest.mark.asyncio
-async def test_user_cannot_select_an_unregistered_position():
+async def test_user_cannot_select_an_unregistered_position(test_db):
     from app.routers.profile_pkg.position import switch_my_position
 
     with pytest.raises(HTTPException) as exc_info:
