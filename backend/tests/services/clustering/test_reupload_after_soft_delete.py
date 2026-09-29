@@ -18,7 +18,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from app.db.connection import get_db_connection, DB_PATH
+from app.db.connection import get_db_connection
 from app.db.operations import _check_duplicate_url_sync, _purge_soft_deleted
 
 
@@ -31,7 +31,14 @@ TEST_URL_SIG = "test-soft-delete_sig"  # 简化的 signature
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_test_data():
+def _isolated_app_db(app_db_isolation):
+    """本文件会建删 interview/jd/questions_detail，必须落在内存测试库。"""
+
+    return app_db_isolation
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_test_data(_isolated_app_db):
     """每个测试前后清理测试数据"""
     # 确保测试用户存在（FK 约束要求）
     with get_db_connection() as conn:
