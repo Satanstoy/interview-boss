@@ -273,6 +273,84 @@ def recover_expired_jobs(conn, job_type: str = SUBMIT_IMPORT_JOB_TYPE) -> int:
     return cur.rowcount
 
 
+class JobFenceError(Exception):
+    """业务写入前的 fence 校验失败（任务被回收/代次不符）。
+
+    调用方应把该错误映射为 ``STATE_CONFLICT``：不重试、不写业务表。
+    """
+
+    code = "STATE_CONFLICT"
+
+    def __init__(self, message: str, *, job_id: int | None = None, generation=None):
+        self.job_id = job_id
+        self.generation = generation
+        super().__init__(message)
+
+
+def claim_job_with_generation(
+    conn,
+    job_id: int,
+    *,
+    worker_id: str,
+    lease_seconds: int = WORKER_LEASE_SECONDS,
+):
+    """领取一个 job 并递增 ``lease_generation``；本次领取的 fence 就是返回的代次。"""
+
+    cur = conn.execute(
+        "UPDATE jobs SET status = 'running', attempts = attempts + 1, "
+        "lease_generation = lease_generation + 1, worker_id = ?, "
+        "started_at = COALESCE(started_at, CURRENT_TIMESTAMP), "
+        "locked_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND status IN ('pending', 'queued')",
+        (worker_id, f"+{int(lease_seconds)} seconds", job_id),
+    )
+    if not cur.rowcount:
+        return None
+    return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+
+def assert_job_fence(conn, job_id: int, generation: int) -> dict:
+    """业务提交前校验 fence；代次不符直接拒绝，业务表不留痕。
+
+    v2 写入**必须**显式提供 ``generation``（不传视为编程错误）。
+    """
+
+    if generation is None:
+        raise TypeError("v2 业务提交必须显式提供 lease_generation")
+    row = conn.execute(
+        "SELECT lease_generation, status FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    if row is None:
+        raise JobFenceError(f"任务不存在: {job_id}", job_id=job_id, generation=generation)
+    if int(row["lease_generation"]) != int(generation):
+        raise JobFenceError(
+            f"任务 {job_id} 的租约已易主，拒绝旧代次写入",
+            job_id=job_id,
+            generation=generation,
+        )
+    return dict(row)
+
+
+def heartbeat_job(
+    conn,
+    job_id: int,
+    generation: int,
+    lease_seconds: int = WORKER_LEASE_SECONDS,
+) -> bool:
+    """长调用期间续租；只有当前代次有效。"""
+
+    cur = conn.execute(
+        "UPDATE jobs SET locked_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND lease_generation = ? AND status = 'running'",
+        (f"+{int(lease_seconds)} seconds", job_id, int(generation)),
+    )
+    return bool(cur.rowcount)
+
+
+# 语义化别名：回收依据是 locked_until，与 created_at 无关
+reclaim_expired_leases = recover_expired_jobs
+
+
 def claim_dispatch_batch(
     conn,
     job_type: str = SUBMIT_IMPORT_JOB_TYPE,
@@ -335,15 +413,25 @@ def claim_job(
     worker_id: str,
     job_type: str = SUBMIT_IMPORT_JOB_TYPE,
     lease_seconds: int = WORKER_LEASE_SECONDS,
+    *,
+    lease_generation: int | None = None,
 ):
-    """Atomically let one worker own a queued job."""
+    """Atomically let one worker own a queued job.
+
+    ``lease_generation`` 为 v2 提供时会同步递增并校验；旧调用方保持原行为。
+    """
+    generation_clause = ""
+    params: list[Any] = [worker_id]
+    if lease_generation is not None:
+        generation_clause = "lease_generation = lease_generation + 1,"
     cur = conn.execute(
         "UPDATE jobs SET status = 'running', attempts = attempts + 1, "
-        "started_at = COALESCE(started_at, CURRENT_TIMESTAMP), worker_id = ?, "
+        + generation_clause
+        + " started_at = COALESCE(started_at, CURRENT_TIMESTAMP), worker_id = ?, "
         "locked_until = "
         f"datetime('now', '+{int(lease_seconds)} seconds'), updated_at = CURRENT_TIMESTAMP "
         "WHERE id = ? AND job_type = ? AND status IN ('pending', 'queued')",
-        (worker_id, job_id, job_type),
+        (*params, job_id, job_type),
     )
     if not cur.rowcount:
         return None

@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 
 from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
@@ -129,6 +130,119 @@ def compute_request_hash(
     }
     encoded = json.dumps(material, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+class UploadRestoreError(Exception):
+    """恢复请求被拒绝；code 对应契约 §4.4 的错误分类。"""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+def resolve_root_job(conn, job_id: int):
+    """沿 ``parent_job_id`` 链解析根 job；链成环或断链时不猜。"""
+
+    seen: set[int] = set()
+    current = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if current is None:
+        raise UploadRestoreError("NOT_FOUND", f"任务不存在: {job_id}")
+    while current["parent_job_id"]:
+        parent_id = int(current["parent_job_id"])
+        if parent_id in seen:
+            raise UploadRestoreError(
+                "LEGACY_MAPPING_AMBIGUOUS", "任务血缘存在环，需人工确认"
+            )
+        seen.add(parent_id)
+        parent = conn.execute("SELECT * FROM jobs WHERE id = ?", (parent_id,)).fetchone()
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
+def _resolve_root_import_id(conn, *, job_id=None, import_id=None) -> str:
+    if import_id:
+        return str(import_id)
+    if job_id is None:
+        raise ValueError("必须提供 import_id 或 job_id")
+
+    root_job = resolve_root_job(conn, int(job_id))
+    candidates = []
+    for job in (root_job,):
+        if job["root_import_id"]:
+            candidates.append(job["root_import_id"])
+    if not candidates:
+        # 沿链向上找任何已打标的 import 归属（迁移后的旧 job 可能只在部分节点上）
+        node = root_job
+        while node and node["root_import_id"] is None and node["parent_job_id"]:
+            node = conn.execute(
+                "SELECT * FROM jobs WHERE id = ?", (node["parent_job_id"],)
+            ).fetchone()
+        if node and node["root_import_id"]:
+            candidates.append(node["root_import_id"])
+    if not candidates:
+        raise UploadRestoreError(
+            "LEGACY_MAPPING_AMBIGUOUS",
+            "该历史任务没有可解析的业务根任务，需人工确认后恢复",
+        )
+    return str(candidates[0])
+
+
+def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=None) -> dict:
+    """恢复同一业务任务：已有活跃批次直接返回，否则创建新批次。
+
+    只重建未完成/失败/失效的工作；已成功阶段的检查点由 worker 复用。
+    """
+
+    root_import_id = _resolve_root_import_id(conn, job_id=job_id, import_id=import_id)
+    root = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (root_import_id,)
+    ).fetchone()
+    if root is None:
+        raise UploadRestoreError("NOT_FOUND", "任务不存在")
+    if int(root["requester_id"]) != int(actor_id):
+        # 不区分“不存在”与“无权”，避免泄露他人任务存在性
+        raise UploadRestoreError("NOT_FOUND", "任务不存在")
+
+    active = conn.execute(
+        "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (root_import_id,),
+    ).fetchone()
+
+    if active is not None:
+        created_attempt = False
+        attempt = active
+    else:
+        try:
+            attempt = create_attempt(conn, import_id=root_import_id, requested_by=actor_id)
+            created_attempt = True
+        except sqlite3.IntegrityError:
+            # 并发恢复：另一方已建立 active attempt，读取它而不是新建
+            attempt = conn.execute(
+                "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (root_import_id,),
+            ).fetchone()
+            if attempt is None:
+                raise
+            created_attempt = False
+
+    conn.execute(
+        "UPDATE upload_imports SET current_attempt_no = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?",
+        (attempt["attempt_no"], root_import_id),
+    )
+
+    return {
+        "import_id": root_import_id,
+        "attempt_id": attempt["id"],
+        "attempt_no": attempt["attempt_no"],
+        "created_attempt": created_attempt,
+        "status": root["status"],
+        "status_url": f"/api/upload-imports/{root_import_id}",
+    }
 
 
 def accept_upload(

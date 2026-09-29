@@ -341,7 +341,8 @@ class Test085FkDeclarations:
         assert _fk_count(full_db, "chat_tool_traces") == 2
         assert _fk_count(full_db, "quality_issue") == 1
         assert _fk_count(full_db, "email_verification_codes") == 1
-        assert _fk_count(full_db, "analysis_queue") == 3
+        # migration 122 增加 root_import_id → upload_imports（上传恢复链路归属）
+        assert _fk_count(full_db, "analysis_queue") == 4
         assert _fk_count(full_db, "chat_conversations") == 2
         assert _fk_count(full_db, "chat_memories") == 3
         assert _fk_count(full_db, "coding_problems") == 1

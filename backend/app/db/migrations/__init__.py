@@ -37,6 +37,19 @@ def _backup_before_destructive(db_path: str, version: int, name: str) -> str | N
     return dest
 
 
+def _conn_file_path(conn) -> str | None:
+    """迁移目标数据库的实际文件路径；内存库返回 None。
+
+    破坏性迁移备份必须备份**正在迁移的库**，不能一律备份全局 DB_PATH：
+    迁移测试库/临时库时误备份生产库既无用又危险。
+    """
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        return row[2] if row and row[2] else None
+    except Exception:
+        return None
+
+
 def _conn_is_memory(conn) -> bool:
     """迁移连接是否指向内存库（测试环境），避免误备份生产文件。"""
     try:
@@ -362,9 +375,11 @@ def run_migrations(conn):
         destructive = version in DESTRUCTIVE_VERSIONS
         fk_was_on = False
         if destructive:
-            # 数据安全：破坏性迁移前整库备份（内存库/文件缺失则跳过）
-            if not _conn_is_memory(conn):
-                _backup_before_destructive(DB_PATH, version, name)
+            # 数据安全：破坏性迁移前整库备份（内存库/文件缺失则跳过）；
+            # 备份对象必须是正在迁移的库，而不是全局生产路径。
+            target_path = _conn_file_path(conn)
+            if target_path:
+                _backup_before_destructive(target_path, version, name)
             # PRAGMA foreign_keys 只能在事务外切换；表重建期间必须关闭，
             # 否则 DROP 父表会触发隐式 DELETE 级联清空子表
             fk_was_on = bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
