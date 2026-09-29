@@ -409,8 +409,34 @@ def run_db_retention(conn) -> dict:
         "AND updated_at < datetime('now', '-30 days')"
     )
     deleted["login_failures"] = cur.rowcount
+    # v2 恢复资料（AC-026）：活跃/needs_action/partial_failed/failed 一律保留；
+    # completed 超 90 天只清大正文，保留 import 摘要与结果引用。
     cur = conn.execute(
-        "DELETE FROM jobs WHERE status IN ('completed', 'failed') "
+        "UPDATE upload_imports SET payload_json = '{}', "
+        "payload_expires_at = COALESCE(payload_expires_at, datetime('now')) "
+        "WHERE status = 'completed' AND updated_at < datetime('now', '-90 days') "
+        "AND payload_json IS NOT NULL AND payload_json != '{}'"
+    )
+    deleted["upload_imports_payloads"] = cur.rowcount
+    cur = conn.execute(
+        "UPDATE job_payloads SET payload = '{}' WHERE job_id IN ("
+        "  SELECT j.id FROM jobs j JOIN upload_imports i ON i.id = j.root_import_id "
+        "  WHERE i.status = 'completed' AND j.completed_at < datetime('now', '-90 days')"
+        ") AND payload IS NOT NULL AND payload != '{}'"
+    )
+    deleted["job_payloads"] = cur.rowcount
+    cur = conn.execute(
+        "UPDATE upload_stage_results SET result_json = NULL WHERE import_id IN ("
+        "  SELECT id FROM upload_imports WHERE status = 'completed' "
+        "  AND updated_at < datetime('now', '-90 days')"
+        ") AND result_json IS NOT NULL"
+    )
+    deleted["upload_stage_results"] = cur.rowcount
+
+    # 仅清理陈旧的遗留 completed 叶子任务；failed 与 v2 归属任务一律保留
+    cur = conn.execute(
+        "DELETE FROM jobs WHERE status = 'completed' "
+        "AND root_import_id IS NULL "
         "AND completed_at < datetime('now', '-90 days') "
         "AND NOT EXISTS (SELECT 1 FROM jobs c WHERE c.parent_job_id = jobs.id)"
     )
