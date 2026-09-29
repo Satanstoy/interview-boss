@@ -215,6 +215,17 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
         # 不区分“不存在”与“无权”，避免泄露他人任务存在性
         raise UploadRestoreError("NOT_FOUND", "任务不存在")
 
+    # AC-025：源状态检查——原文已删除时不复活，给可解释阻塞
+    if root["interview_id"] is not None:
+        interview = conn.execute(
+            "SELECT deleted_at FROM interview WHERE id = ?", (root["interview_id"],)
+        ).fetchone()
+        if interview is not None and interview["deleted_at"] is not None:
+            raise UploadRestoreError(
+                "SOURCE_DELETED",
+                "原文已被删除，恢复不会重建已删除内容；如需继续请重新提供材料",
+            )
+
     active = conn.execute(
         "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
         "ORDER BY attempt_no DESC LIMIT 1",
