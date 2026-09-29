@@ -132,6 +132,15 @@ def compute_request_hash(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def build_thread_id(import_id: str, attempt_no: int, job_id) -> str:
+    """LangGraph thread_id：必须唯一标识一次执行，禁止秒级时间戳。
+
+    同秒并发上传（AC-009）靠 ``(import_id, attempt_no, job_id)`` 区分状态。
+    """
+
+    return f"{import_id}:a{int(attempt_no)}:j{job_id}"
+
+
 class UploadRestoreError(Exception):
     """恢复请求被拒绝；code 对应契约 §4.4 的错误分类。"""
 

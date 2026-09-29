@@ -759,11 +759,10 @@ def submit_interview_txn(
     返回 (answer_tasks, interview_id, question_detail_ids)。
     """
     with get_db_connection() as conn:
-        cursor = conn.cursor()
         try:
-            cursor.execute("BEGIN")
-            _insert_interview_txn(
-                cursor,
+            conn.cursor().execute("BEGIN")
+            result = submit_interview_in_conn(
+                conn,
                 saved_url,
                 data,
                 questions,
@@ -771,29 +770,74 @@ def submit_interview_txn(
                 owner_id,
                 status,
                 job_position,
-            )
-            interview_id = cursor.lastrowid
-            detail_ids = _insert_details_txn(
-                cursor, tagged_rows, job_position, interview_id=interview_id
-            )
-            answer_tasks = _apply_incremental_txn(
-                cursor,
+                tagged_rows,
                 matched,
                 unmatched_rows,
                 idx_to_row,
                 submitter_is_admin,
                 user_id,
-                job_position,
-                owner_id=qb_owner_id,
+                qb_owner_id=qb_owner_id,
                 persist_unmatched=persist_unmatched,
             )
             conn.commit()
-            return answer_tasks, interview_id, detail_ids
+            return result
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):
                 raise ValueError("该 URL 已存在，不可重复上传")
             raise
+
+
+def submit_interview_in_conn(
+    conn,
+    saved_url,
+    data,
+    questions,
+    season,
+    owner_id,
+    status,
+    job_position,
+    tagged_rows=None,
+    matched=None,
+    unmatched_rows=None,
+    idx_to_row=None,
+    submitter_is_admin=False,
+    user_id=None,
+    qb_owner_id=None,
+    persist_unmatched=True,
+):
+    """在调用方事务内提交面经：insert_interview + insert_details + 增量更新。
+
+    **不 commit/rollback**：上传恢复链路要把它与检查点、下游 job 写在同一事务，
+    任一步失败由调用方整体回滚。重复 URL 的语义由 wrapper 保持。
+    """
+    cursor = conn.cursor()
+    _insert_interview_txn(
+        cursor,
+        saved_url,
+        data,
+        questions,
+        season,
+        owner_id,
+        status,
+        job_position,
+    )
+    interview_id = cursor.lastrowid
+    detail_ids = _insert_details_txn(
+        cursor, tagged_rows, job_position, interview_id=interview_id
+    )
+    answer_tasks = _apply_incremental_txn(
+        cursor,
+        matched,
+        unmatched_rows,
+        idx_to_row,
+        submitter_is_admin,
+        user_id,
+        job_position,
+        owner_id=qb_owner_id,
+        persist_unmatched=persist_unmatched,
+    )
+    return answer_tasks, interview_id, detail_ids
 
 
 def submit_interview_txn_tag_only(
