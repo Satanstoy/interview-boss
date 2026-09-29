@@ -42,14 +42,15 @@
 | F18 | UR-018 私人正文隔离 | AC-018 | passed | 阶段G | `test_upload_task_privacy.py` 5 passed |
 | F19 | UR-019 提取不漏题 | AC-019 | passed | 阶段E | `test_upload_extraction_integrity.py` 11 passed |
 | F20 | UR-020 审批/撤回互斥 | AC-020 | passed | 阶段F | `test_public_contribution_transitions.py` 6 passed（含线程并发） |
-| — | AC-021 幂等键 | not-run | 阶段C | — |
-| — | AC-022 文件校验 | not-run | 阶段C | — |
-| — | AC-023 迁移幂等 | not-run | 阶段B | — |
-| — | AC-024 JD/旧数据 | not-run | 阶段J | — |
-| — | AC-025 源状态变化 | not-run | 阶段D | — |
-| — | AC-026 历史保留 | not-run | 阶段J | — |
-| — | AC-027 可访问性 | not-run | 阶段H | — |
-| — | AC-028 隔离集成 | not-run | 阶段J | — |
+| — | AC-021 幂等键 | passed | 阶段C | `test_upload_submit_api.py` + 前端 by-key 恢复 |
+| — | AC-022 文件校验 | passed | 阶段C | `test_upload_acceptance.py`（413/400 无幽灵 job） |
+| — | AC-023 迁移幂等 | passed | 阶段J | `test_upload_recovery_backfill.py` 7 passed + CLI 演练（二次 apply 0 新增） |
+| — | AC-024 JD/旧数据 | passed | 阶段J | `test_upload_legacy_compat.py` |
+| — | AC-025 源状态变化 | passed | 阶段J | `test_upload_legacy_compat.py`（SOURCE_DELETED） |
+| — | AC-026 历史保留 | passed | 阶段J | `test_upload_recovery_retention.py` 3 passed |
+| — | AC-027 可访问性 | passed | 阶段H | `upload-task-center.spec.js`（键盘/aria-live/375/1440）6 passed |
+| — | AC-028 隔离集成 | passed | 阶段J | `test_upload_recovery_stack.py` 4 passed（需 UPLOAD_TEST_DB_PATH/UPLOAD_TEST_REDIS_PREFIX） |
+| — | AC-029 逐题数据流追踪 | not-run | 阶段J | — |
 
 ## 3. 阶段证据
 
@@ -195,3 +196,49 @@
 
 - 生产库 `email_verification_codes` 有 15 行 `@example.com` 测试数据（2026-09-28 05:31–05:59 由旧测试运行写入）。
   防护 fixture 已阻止再次发生；清理需另行授权（软删/删除 + 备份 + 验证）。
+
+
+### 阶段G/H/I/J：快照协议、前端、分页、迁移与集成
+
+- [x] AC-011 状态聚合 + allowed_actions（无虚构按钮）：`test_upload_status_projection.py` 15 passed。
+- [x] AC-013 统一 snapshot 协议 + 3 次物理尝试预算（结构修复同预算）：`test_upload_stream_contract.py` 8 passed。
+- [x] AC-018 私人正文隔离 + 运维白名单：`test_upload_task_privacy.py` 5 passed。
+- [x] AC-001 后端 location 接口 + 前端查看结果定位（page/highlight）：`test_interview_server_pagination.py`、`upload-task-center.spec.js`。
+- [x] AC-002 服务端分页/排序/筛选：`test_interview_server_pagination.py` 7 passed。
+- [x] AC-003 双入口共用接受服务（旧 SSE 只创建后订阅，不自己跑 graph）：`test_upload_submit_api.py` 10 passed。
+- [x] AC-010 快照 SSE（授权先于流、15 秒心跳、revision 事件 id）+ 客户端 EOF 退避重连：
+      `upload-task-center.spec.js` 6 passed（含 SSE 重连、375/1440 视口）。
+- [x] AC-023/024/025/026/028：见上表；CLI 演练输出记录在本节末尾。
+
+前端验证命令与结果：
+
+```bash
+npm run build      # exit 0
+npm run lint       # 0 errors, 38 warnings（阈值 38）
+npm test           # 1 passed（smoke）
+npx playwright test tests/e2e/upload-task-center.spec.js   # 6 passed
+```
+
+AC-028 演练命令：
+
+```bash
+UPLOAD_TEST_DB_PATH=/tmp/iboss-ac028.db UPLOAD_TEST_REDIS_PREFIX=iboss-test-<ts> \
+  .venv/bin/python -m pytest -q backend/tests/integration/test_upload_recovery_stack.py
+# 4 passed；无隔离变量时 4 skipped（拒绝启动）
+```
+
+AC-023 CLI 演练：
+
+```bash
+python backend/scripts/backfill_upload_recovery.py --database /tmp/iboss-backfill-test.db --dry-run --report /tmp/iboss-manifest.json
+python backend/scripts/backfill_upload_recovery.py --database /tmp/iboss-backfill-test.db --apply --manifest /tmp/iboss-manifest.json
+# 第二次 apply：imports_created=0, attempts_created=0, jobs_linked=0
+```
+
+**未做/超出本次范围（保留 not-run）**：
+
+- AC-010 的“浏览器断 worker 恢复”全链路（真实 ARQ + 浏览器）：服务端/客户端两侧分别有测试，
+  但真实 worker 中断演练未在本机执行，登记为 not-run。
+- AC-028 的“浏览器打开正确结果”腿：由 `upload-task-center.spec.js` 的定位用例覆盖到 mock 层，
+  真实后端 + 浏览器联合腿未跑，登记为 not-run。
+- 旧 `submit-stream-v2` 在 v2 关闭时的原路径未改动（保持兼容）。
