@@ -54,6 +54,20 @@ def _accept(conn, **overrides):
         files=[],
         images=[],
         entry="api",
+        credential_loaders={
+            "user": lambda uid: {
+                "api_key": "user-key",
+                "base_url": "https://user.example.com/v1",
+                "model": "user-model",
+                "timeout": 60,
+            },
+            "global": lambda: {
+                "api_key": "global-key",
+                "base_url": "https://system.example.com/v1",
+                "model": "system-model",
+                "timeout": 60,
+            },
+        },
     )
     params.update(overrides)
     return accept_upload(conn, **params)
@@ -261,3 +275,55 @@ def test_request_hash_changes_with_content_and_is_stable():
     )
     assert a == b
     assert a != c
+
+
+# ── 凭据阻塞（AC-004） ────────────────────────────────────────
+
+
+def test_missing_user_key_accepts_root_as_needs_action_without_llm_calls():
+    """U1 无 Key、系统 Key 有效：原稿被接受，root=needs_action，0 次外部调用。"""
+
+    conn = _db()
+    calls = {"user": 0, "global": 0}
+
+    def user_loader(user_id):
+        calls["user"] += 1
+        return None
+
+    def global_loader():
+        calls["global"] += 1
+        return {
+            "api_key": "global-key",
+            "base_url": "https://system.example.com/v1",
+            "model": "system-model",
+            "timeout": 60,
+        }
+
+    result = _accept(
+        conn,
+        credential_loaders={"user": user_loader, "global": global_loader},
+    )
+    assert result["status"] == "needs_action"
+    assert result["error"]["code"] == "MODEL_CONFIG_MISSING"
+    assert result["job_id"] is None, "无 Key 时不得创建会调用模型的 job"
+    assert conn.execute("SELECT COUNT(*) FROM upload_llm_calls").fetchone()[0] == 0
+    assert calls["global"] == 0, "个人上传绝不借用系统配置"
+
+    # 原稿与根任务都在；attempt 等待恢复时创建
+    assert conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 0
+
+
+def test_fixing_config_allows_restore_of_same_root():
+    conn = _db()
+    result = _accept(
+        conn,
+        credential_loaders={"user": lambda uid: None, "global": lambda: None},
+    )
+    assert result["status"] == "needs_action"
+
+    from app.services.upload_lifecycle import restore_upload
+
+    restored = restore_upload(conn, actor_id=101, import_id=result["import_id"])
+    assert restored["import_id"] == result["import_id"]
+    assert restored["created_attempt"] is True

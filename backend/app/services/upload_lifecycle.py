@@ -19,6 +19,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
+from app.services.upload_credentials import UploadCredentialError
 from app.services.upload_policy import (
     resolve_upload_policy,
     sanitize_client_policy_fields,
@@ -273,6 +274,7 @@ def accept_upload(
     entry: str = "api",
     policy_overrides=None,
     job_position: str = "",
+    credential_loaders=None,
 ) -> dict:
     """在调用方事务内接受一次上传；同幂等键同 hash 复用同一根任务。"""
 
@@ -330,9 +332,29 @@ def accept_upload(
         payload_json=json.dumps(payload, ensure_ascii=False),
     )
 
+    # 凭据预检（AC-004）：Key 缺失/解密失败 → 根任务 needs_action，不投递模型工作
+    credential_error = None
+    try:
+        from app.services.upload_credentials import resolve_upload_credentials
+
+        resolve_upload_credentials(
+            credential_scope=policy.credential_scope,
+            user_id=actor_id if policy.credential_scope == "user" else None,
+            stage="extract",
+            user_config_loader=(credential_loaders or {}).get("user"),
+            global_config_loader=(credential_loaders or {}).get("global"),
+        )
+    except UploadCredentialError as exc:
+        credential_error = exc
+        conn.execute(
+            "UPDATE upload_imports SET status = 'needs_action', error_code = ?, "
+            "error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (exc.code, str(exc), import_id),
+        )
+
     job_id = None
     attempt_no = 0
-    if created:
+    if created and credential_error is None:
         attempt = create_attempt(conn, import_id=import_id, requested_by=actor_id)
         attempt_no = int(attempt["attempt_no"])
         cursor = conn.execute(
@@ -354,6 +376,7 @@ def accept_upload(
             (job_id, json.dumps(payload, ensure_ascii=False)),
         )
     else:
+        # 凭据被阻塞时只建根任务：attempt 由恢复时创建（contracts §2.1）
         row = conn.execute(
             "SELECT id FROM jobs WHERE root_import_id = ? ORDER BY id LIMIT 1",
             (import_id,),
@@ -374,6 +397,17 @@ def accept_upload(
         "import_id": import_id,
         "created": created,
         "job_id": job_id,
+        "error": (
+            {
+                "code": credential_error.code,
+                "message": str(credential_error),
+                "retryable": credential_error.retryable,
+                "action": credential_error.action,
+                "scope": credential_error.scope,
+            }
+            if credential_error is not None
+            else None
+        ),
         "attempt_no": attempt_no,
         "status": root["status"],
         "revision": root["revision"],
