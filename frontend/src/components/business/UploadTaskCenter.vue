@@ -14,6 +14,7 @@ import {
   loadUploadTasks,
   retryUploadTask,
 } from '@/composables/useSubmitJobs.js'
+import { getSSE } from '@/services/http.js'
 import { fetchInterviewLocation } from '@/services/dataApi.js'
 
 const router = useRouter()
@@ -83,6 +84,42 @@ async function refresh({ silent = true } = {}) {
     error.value = err?.message || '任务列表加载失败，已保留本地状态'
   } finally {
     loading.value = false
+    subscribePendingTasks()
+  }
+}
+
+const sseControllers = new Map()
+
+/** 非终态任务订阅快照流；EOF 后由 getSSE 退避重连（AC-010） */
+function subscribePendingTasks() {
+  for (const task of tasks.value) {
+    if (isTerminalStatus(task.status) || sseControllers.has(task.import_id)) continue
+    const controller = new AbortController()
+    sseControllers.set(task.import_id, controller)
+    getSSE(
+      `/api/upload-imports/${encodeURIComponent(task.import_id)}/stream`,
+      (event) => {
+        if (!event || typeof event !== 'object') return
+        const index = tasks.value.findIndex((item) => item.import_id === event.import_id)
+        if (index < 0) return
+        // 乱序 revision 不回退（AC-010）
+        if ((event.revision || 0) < (tasks.value[index].revision || 0)) return
+        tasks.value.splice(index, 1, { ...tasks.value[index], ...event })
+        if (isTerminalStatus(event.status)) {
+          announcement.value = `任务状态更新：${event.import_id} ${statusLabel[event.status] || event.status}`
+        }
+      },
+      {
+        signal: controller.signal,
+        isTerminal: (status) => isTerminalStatus(status),
+        maxReconnects: 3,
+        onReconnect: () => {
+          announcement.value = '连接中断，后台任务继续，正在重新连接'
+        },
+      },
+    ).catch(() => {
+      error.value = '连接中断，后台任务继续'
+    })
   }
 }
 
@@ -149,6 +186,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearTimeout(pollTimer)
+  for (const controller of sseControllers.values()) {
+    try {
+      controller.abort()
+    } catch { /* 忽略 */ }
+  }
+  sseControllers.clear()
 })
 </script>
 

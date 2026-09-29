@@ -109,3 +109,47 @@ test('任务卡片可用键盘操作且状态对读屏可见', async ({ page }) 
   await expect(actionButton).toBeFocused()
   await expect(center.locator('[aria-live="polite"]')).toHaveCount(1)
 })
+
+test('SSE 非终态 EOF 后客户端会重连', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    stage: 'cluster',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  await page.route('**/api/auth/**', (route) =>
+    route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } }),
+  )
+  await page.route('**/api/upload-imports?**', (route) =>
+    route.fulfill({ json: { items: [runningTask], total: 1, page: 1, page_size: 20 } }),
+  )
+
+  let streamCalls = 0
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) => {
+    streamCalls += 1
+    // 发一个非终态快照后正常 EOF（不发 error）
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: `event: snapshot\nid: 4\ndata: ${JSON.stringify({ ...runningTask, revision: 4 })}\n\n`,
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await expect.poll(() => streamCalls, { timeout: 15_000 }).toBeGreaterThan(1)
+})
+
+test('375px 与 1440px 均可查看任务与恢复按钮', async ({ page }) => {
+  await mockApi(page)
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 800 })
+    await page.goto('/')
+    await page.getByRole('button', { name: '上传任务中心' }).click()
+    const center = page.getByRole('region', { name: '上传任务中心' })
+    await expect(center).toBeVisible()
+    await expect(center.getByRole('button', { name: '重试失败步骤' })).toBeVisible()
+    await expect(center.getByRole('button', { name: '查看结果' })).toBeVisible()
+  }
+})

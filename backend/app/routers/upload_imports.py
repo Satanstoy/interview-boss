@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import json
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
@@ -184,3 +188,76 @@ async def list_upload_operations(
             }
 
     return await run_db(_query)
+
+
+TERMINAL_STATUSES = ("completed", "failed", "partial_failed", "needs_action", "waiting_review")
+SNAPSHOT_POLL_SECONDS = 2
+SNAPSHOT_HEARTBEAT_SECONDS = 15
+
+
+@router.get("/api/upload-imports/{import_id}/stream")
+async def stream_upload_import(import_id: str, user: dict = Depends(get_current_user)):
+    """SSE 快照流（AC-010/013）：先发完整快照，2 秒轮询、15 秒心跳。
+
+    授权在响应流开始前检查；非终态由客户端决定是否重连。
+    """
+
+    def _authorize():
+        with get_db_connection() as conn:
+            return _load_owned(conn, import_id, user["id"])
+
+    await run_db(_authorize)  # 无权立即 404，不进入流
+
+    from app.services.upload_retry_budget import build_snapshot_event, snapshot_from_parts
+
+    def _snapshot():
+        with get_db_connection() as conn:
+            row = _load_owned(conn, import_id, user["id"])
+            counts = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS answered, "
+                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed "
+                "FROM upload_stage_results WHERE import_id = ?",
+                (import_id,),
+            ).fetchone()
+            return snapshot_from_parts(
+                import_id=row["id"],
+                revision=int(row["revision"]),
+                status=row["status"],
+                target_intent=row["target_intent"],
+                attempt_no=int(row["current_attempt_no"]),
+                counts={
+                    "total": int(counts["total"] or 0),
+                    "answered": int(counts["answered"] or 0),
+                    "failed": int(counts["failed"] or 0),
+                },
+                error=(
+                    {"code": row["error_code"], "message": row["error_message"] or "", "retryable": False}
+                    if row["error_code"]
+                    else None
+                ),
+                updated_at=row["updated_at"],
+            )
+
+    async def event_stream():
+        last_revision = -1
+        beats = 0
+        while True:
+            snapshot = await run_db(_snapshot)
+            if int(snapshot.revision) > last_revision:
+                last_revision = int(snapshot.revision)
+                event = build_snapshot_event(snapshot)
+                yield (
+                    f"event: snapshot\nid: {event['id']}\n"
+                    f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                )
+            if snapshot.status.value in TERMINAL_STATUSES:
+                return
+            beats += 1
+            if beats % (SNAPSHOT_HEARTBEAT_SECONDS // SNAPSHOT_POLL_SECONDS) == 0:
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(SNAPSHOT_POLL_SECONDS)
+
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
+    )
