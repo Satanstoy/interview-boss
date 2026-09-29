@@ -1,91 +1,200 @@
-"""公共化申请物化的隐私边界与调度归属回归测试（audit 2026-08-24 D5/D4）。"""
+"""AC-014 / UR-014：最终公开内容必须等于审核投影。
 
-from unittest.mock import AsyncMock, patch
+契约（contracts.md §3.1、§3.3）：
+
+- 公司/轮次/来源 URL 默认不公开；管理员显式确认才公开，null 表示删除公开字段，
+  **不得**回落到原始 snapshot；
+- 审核预览与物化共用同一构造函数；
+- 物化只接受 reviewed_projection，禁止内部重新读取 source 原值补敏感字段；
+- 未知字段、非本申请 item_id 一律拒绝。
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
 
 import pytest
 
+from app.db.migrations import run_migrations
+from app.models.upload_contracts import build_review_projection_request
+from app.services.public_contributions import (
+    build_review_projection,
+    materialize_public_interview_from_projection,
+)
 
-def _seed_user(conn, user_id: int, username: str):
-    conn.execute(
-        "INSERT INTO users (id, username, password_hash) VALUES (?, ?, 'hash')",
-        (user_id, username),
+
+def _db():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    run_migrations(conn)
+    conn.execute("INSERT INTO users (id, username, password_hash) VALUES (201, 'admin', 'x')")
+    return conn
+
+
+def _snapshot():
+    return {
+        "company": "PRIVATE公司",
+        "round": "一面",
+        "focus": "数据库",
+        "source_url": "https://secret.example.com/post/1",
+        "season": "2026春招",
+        "difficulty": "中等",
+    }
+
+
+def _items():
+    return [
+        {
+            "item_id": 11,
+            "ordinal": 1,
+            "question": "说明数据库索引的工作原理",
+            "cat1": "数据库",
+            "cat2": "索引",
+            "tags": "mysql",
+            "difficulty": "中等",
+        },
+        {
+            "item_id": 12,
+            "ordinal": 2,
+            "question": "什么是事务隔离级别",
+            "cat1": "数据库",
+            "cat2": "事务",
+            "tags": "",
+            "difficulty": "中等",
+        },
+    ]
+
+
+def _review_request(payload):
+    return build_review_projection_request(payload, source_type="interview")
+
+
+def test_public_fields_equal_review_projection_not_original_snapshot():
+    request = _review_request(
+        {
+            "expected_revision": 1,
+            "excluded_item_ids": [12],
+            "review_fields": {
+                "source": {
+                    "company": None,
+                    "round": "一面（技术）",
+                    "source_url": None,
+                },
+                "items": [{"item_id": 11, "question": "数据库索引的工作原理是什么？"}],
+            },
+        }
+    )
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
     )
 
+    # 原快照不得被修改
+    assert projection["source_snapshot_unchanged"] == _snapshot()
+    # null = 删除公开字段，不回落原始值
+    assert projection["source"]["company"] is None
+    assert projection["source"]["source_url"] is None
+    assert projection["source"]["round"] == "一面（技术）"
+    item = projection["items"][0]
+    assert item["item_id"] == 11
+    assert item["question"] == "数据库索引的工作原理是什么？"
+    assert [i["item_id"] for i in projection["items"]] == [11]
+    assert projection["excluded_item_ids"] == [12]
 
-def test_public_jd_materialization_uses_field_allowlist(test_db):
-    """JD 公开物化必须走字段白名单：快照里的非白名单列不得被连带公开。"""
-    # 模拟未来 schema 演进：jd 表新增私有列
-    test_db.execute("ALTER TABLE jd ADD COLUMN internal_notes TEXT")
-    _seed_user(test_db, 7, "jd-owner")
-    _seed_user(test_db, 9, "jd-admin")
-    test_db.execute(
-        "INSERT INTO jd (id, url, company, season, owner_id, status, job_position,"
-        " tech_stack, source, position, salary, job_title, internal_notes)"
-        " VALUES (1, 'https://example.com/jd1', '示例公司', '2026秋招', 7, 'approved',"
-        " '后端', 'Python/Go', '原始JD全文', '高级工程师', '30k', '后端开发',"
-        " '私密备注：内推联系人 138xxxx')",
+
+def test_preview_and_materialization_share_one_constructor():
+    request = _review_request(
+        {
+            "expected_revision": 3,
+            "review_fields": {"source": {"company": "某公司"}},
+        }
     )
-    test_db.commit()
-
-    from app.services.public_contributions import (
-        approve_public_contribution,
-        create_public_contribution_request,
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
     )
-
-    request = create_public_contribution_request(test_db, "jd", 1, 7)
-    result = approve_public_contribution(test_db, request["id"], 9)
-
-    assert result["status"] == "published"
-    public_id = result["public_jd_id"]
-    assert public_id and public_id != 1
-    row = test_db.execute("SELECT * FROM jd WHERE id = ?", (public_id,)).fetchone()
-    assert row["owner_id"] is None
-    assert row["status"] == "approved"
-    assert row["deleted_at"] is None
-    # 白名单字段照常公开
-    assert row["url"] == "https://example.com/jd1"
-    assert row["company"] == "示例公司"
-    assert row["tech_stack"] == "Python/Go"
-    assert row["source"] == "原始JD全文"
-    assert row["position"] == "高级工程师"
-    assert row["salary"] == "30k"
-    assert row["job_title"] == "后端开发"
-    assert row["season"] == "2026秋招"
-    # 非白名单字段绝不外泄
-    assert row["internal_notes"] is None
-
-
-@pytest.mark.asyncio
-async def test_finalize_approval_schedules_cluster_batch_in_service(test_db):
-    """聚类调度属于服务层职责：finalize 包装器负责触发，路由层不再触碰 pipeline。"""
-    _seed_user(test_db, 7, "iv-owner")
-    _seed_user(test_db, 9, "iv-admin")
-    test_db.execute(
-        "INSERT INTO interview (id, url, company, owner_id, status)"
-        " VALUES (1, 'https://example.com/iv1', '示例公司', 7, 'approved')"
+    conn = _db()
+    public_interview_id, detail_ids = materialize_public_interview_from_projection(
+        conn, projection, source_id=1, requester_id=101
     )
-    test_db.execute(
-        "INSERT INTO questions_detail (id, interview_id, url, question, cat1, cat2,"
-        " owner_id, status) VALUES (11, 1, 'https://example.com/iv1',"
-        " '讲讲 MySQL 索引原理', '技术考察', '数据库', 7, 'approved')"
+    row = conn.execute("SELECT * FROM interview WHERE id = ?", (public_interview_id,)).fetchone()
+    # 物化字段与投影一致
+    assert row["company"] == "某公司"
+    # 未显式确认的可识别来源字段一律不公开（不继承 snapshot、不回读 source）
+    assert (row["round"] or "") == "", "round 未确认公开时必须为空"
+    assert (row["url"] or "") == "", "source_url 未确认公开时必须为空"
+    conn.close()
+
+
+def test_materialization_never_fills_from_source_snapshot():
+    request = _review_request({"expected_revision": 1, "review_fields": {"source": {}}})
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
     )
-    test_db.commit()
+    conn = _db()
+    public_interview_id, detail_ids = materialize_public_interview_from_projection(
+        conn, projection, source_id=1, requester_id=101
+    )
+    row = conn.execute("SELECT * FROM interview WHERE id = ?", (public_interview_id,)).fetchone()
+    # 未确认的来源字段全部不得公开
+    assert not row["company"]
+    assert not row["round"]
+    assert not row["url"]
+    detail = conn.execute(
+        "SELECT * FROM questions_detail WHERE id = ?", (detail_ids[0],)
+    ).fetchone()
+    assert detail["company"] in (None, "", "未提供")
+    conn.close()
 
-    from app.services import public_contributions as svc
 
-    request = svc.create_public_contribution_request(test_db, "interview", 1, 7)
+def test_blank_review_value_normalizes_to_deletion():
+    request = _review_request(
+        {
+            "expected_revision": 1,
+            "review_fields": {"source": {"company": "   ", "focus": "数据库"}},
+        }
+    )
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+    )
+    assert projection["source"]["company"] is None
+    assert projection["source"]["focus"] == "数据库"
 
-    scheduler = AsyncMock(return_value=True)
-    with (
-        patch(
-            "app.core.outbound_url.assert_safe_outbound_url_sync",
-            side_effect=lambda url, **_: url,
-        ),
-        patch.object(svc, "_run_cluster_batch_in_background", scheduler),
-    ):
-        result = await svc.finalize_public_contribution_approval(request["id"], 9)
 
-    assert result["status"] == "queued"
-    assert result["public_interview_id"]
-    assert result.get("cluster_scheduled") is True
-    scheduler.assert_awaited_once_with(user_id=9)
+def test_unknown_item_id_from_other_request_is_rejected():
+    request = _review_request(
+        {
+            "expected_revision": 1,
+            "review_fields": {"items": [{"item_id": 999, "question": "x"}]},
+        }
+    )
+    with pytest.raises(ValueError):
+        build_review_projection(
+            snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        )
+
+
+def test_unreviewed_item_inherits_snapshot_but_still_excludes_sensitive_source():
+    request = _review_request({"expected_revision": 1, "review_fields": {}})
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+    )
+    item = projection["items"][0]
+    assert item["question"] == "说明数据库索引的工作原理"
+    # 来源字段不随题干继承
+    assert "company" not in item
+
+
+def test_projection_has_hash_and_reviewer():
+    request = _review_request({"expected_revision": 1, "review_fields": {}})
+    projection = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+    )
+    assert projection["schema_version"] == 1
+    assert projection["reviewer_id"] == 201
+    assert projection["hash"]
+    # 同输入 hash 稳定
+    again = build_review_projection(
+        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+    )
+    assert again["hash"] == projection["hash"]
