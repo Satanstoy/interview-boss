@@ -75,7 +75,7 @@ async function refresh({ silent = true } = {}) {
     const changed = tasks.value.filter((task) => isTerminalStatus(task.status))
     if (changed.length) {
       announcement.value = `任务状态更新：${changed
-        .map((task) => `${task.import_id.slice(0, 8)} ${statusLabel[task.status] || task.status}`)
+        .map((task) => `${task.import_id} ${statusLabel[task.status] || task.status}`)
         .join('；')}`
     }
   } catch (err) {
@@ -189,7 +189,7 @@ onUnmounted(() => {
           >
             <div class="flex items-center justify-between gap-2">
               <span class="truncate text-xs text-muted-foreground">
-                {{ task.position_name || '未指定岗位' }} · {{ task.import_id.slice(0, 8) }}
+                {{ task.position_name || '未指定岗位' }} · {{ task.import_id }}
               </span>
               <span
                 class="rounded-full px-2 py-0.5 text-[11px]"
