@@ -1047,6 +1047,7 @@ from app.worker_scheduled import (
     scheduled_harness_turn_dispatch_task,
     scheduled_harness_event_publisher_task,
     scheduled_cluster_review_dispatch_task,
+    scheduled_upload_queue_reconcile_task,
     scheduled_source_health_task,
     run_db_retention,
     scheduled_db_retention_task,
@@ -1072,6 +1073,7 @@ scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dis
 scheduled_harness_turn_dispatch_task = observed_cron_task(scheduled_harness_turn_dispatch_task)
 scheduled_harness_event_publisher_task = observed_cron_task(scheduled_harness_event_publisher_task)
 scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
+scheduled_upload_queue_reconcile_task = observed_cron_task(scheduled_upload_queue_reconcile_task)
 scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
 scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
 scheduled_wal_checkpoint_task = observed_cron_task(scheduled_wal_checkpoint_task)
@@ -1098,6 +1100,7 @@ class WorkerSettings:
         scheduled_submit_job_dispatch_task,
         scheduled_harness_event_publisher_task,
         scheduled_cluster_review_dispatch_task,
+        scheduled_upload_queue_reconcile_task,
         cluster_review_task,
         scheduled_source_health_task,
         scheduled_db_retention_task,
@@ -1125,6 +1128,8 @@ class WorkerSettings:
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),
+        # AC-007：残余队列对账（每分钟，幂等）
+        cron(scheduled_upload_queue_reconcile_task, minute=set(range(0, 60))),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(scheduled_db_retention_task, hour={4}, minute={0}),
         cron(scheduled_wal_checkpoint_task, hour={4}, minute={10}),

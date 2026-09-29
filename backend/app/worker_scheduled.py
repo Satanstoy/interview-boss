@@ -261,6 +261,25 @@ async def scheduled_submit_job_dispatch_task(ctx):
     return result
 
 
+async def scheduled_upload_queue_reconcile_task(ctx):
+    """AC-007：v2 聚类队列对账 —— 有 pending 无活跃 job 的桶补单，孤儿转 blocked。
+
+    幂等：重复运行只补缺失的 job；同 root 同 work_key 至多一个活跃 job。
+    """
+    from app.db.connection import get_db_connection
+    from app.services.upload_queue import reconcile_pending_buckets
+
+    def _run():
+        with get_db_connection() as conn:
+            report = reconcile_pending_buckets(conn)
+            conn.commit()
+            return report
+
+    report = await asyncio.to_thread(_run)
+    logger.info("[上传队列] 对账完成: %s", report)
+    return report
+
+
 async def scheduled_cluster_review_dispatch_task(ctx):
     """定时补偿：回填活跃聚类状态，并将持久 outbox 投递到 ARQ。
 
