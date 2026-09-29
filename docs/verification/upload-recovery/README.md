@@ -29,16 +29,16 @@
 | F05 | UR-005 原题 resolution | AC-005 | not-run | 阶段E | — |
 | F06 | UR-006 匹配三态 | AC-006 | not-run | 阶段E | — |
 | F07 | UR-007 队列续调 | AC-007 | not-run | 阶段E | — |
-| F08 | UR-008 阶段检查点 | AC-008 | not-run | 阶段D | — |
-| F09 | UR-009 并发不串单 | AC-009 | not-run | 阶段D | — |
+| F08 | UR-008 阶段检查点 | AC-008 | In progress | 阶段D（检查点/事务拆分 passed；graph 故障点未接） | `test_upload_stage_recovery.py` 6 passed |
+| F09 | UR-009 并发不串单 | AC-009 | In progress | 阶段D（thread_id 已去时间戳） | `test_upload_stage_recovery.py` |
 | F10 | UR-010 SSE 恢复 | AC-010 | not-run | 阶段H | — |
 | F11 | UR-011 真实完成 | AC-011 | not-run | 阶段G | — |
-| F12 | UR-012 租约/fencing | AC-012 | not-run | 阶段D | — |
+| F12 | UR-012 租约/fencing | AC-012 | In progress | 阶段D（fence/回收/心跳 passed） | `test_upload_leases.py` 6 passed |
 | F13 | UR-013 错误协议 | AC-013 | not-run | 阶段G | — |
 | F14 | UR-014 审核投影生效 | AC-014 | not-run | 阶段F | — |
 | F15 | UR-015 失败子项恢复 | AC-015 | not-run | 阶段F | — |
 | F16 | UR-016 追加贡献一致 | AC-016 | not-run | 阶段F | — |
-| F17 | UR-017 跨代/并发恢复 | AC-017 | not-run | 阶段D | — |
+| F17 | UR-017 跨代/并发恢复 | AC-017 | passed | 阶段D | `test_upload_retry_family.py` 6 passed（含线程并发） |
 | F18 | UR-018 私人正文隔离 | AC-018 | not-run | 阶段G | — |
 | F19 | UR-019 提取不漏题 | AC-019 | not-run | 阶段E | — |
 | F20 | UR-020 审批/撤回互斥 | AC-020 | not-run | 阶段F | — |
@@ -152,6 +152,37 @@
   backend/tests/services/clustering/test_reupload_after_soft_delete.py
 # 47 passed（配额重构无回归）
 ```
+
+### 阶段D：检查点、恢复与 fencing（进行中）
+
+- [x] 租约 fencing：`claim_job_with_generation` 递增 `lease_generation`；旧代次业务提交抛
+      `JobFenceError`（→STATE_CONFLICT），业务表不留痕；心跳只对当前代次续租。
+- [x] 回收只看 `locked_until`：创建 1 小时但刚领取的任务不会被误回收（AC-012 部分）。
+- [x] 恢复族（AC-017）：任意历史 job 沿血缘解析根任务；并发恢复只有一个 active attempt
+      （另一方 `created_attempt=false`）；同 work_key 不重复建活跃 job。
+- [x] `submit_interview_in_conn` 拆分：面经+明细+下游写入单事务，异常整体回滚（AC-008 部分）。
+- [x] 阶段检查点复用：extract 结果按 (stage, unit_key, input_version) 唯一，重启后复用。
+- [x] thread_id = import_id+attempt_no+job_id（AC-009）。
+- [ ] 提取/分类检查点接入真实 graph 节点（模型调用前后故障点测试）——未开始。
+- [ ] 租约心跳独立任务 + finally 清理——未开始。
+- [ ] 剩余故障点（答案外部调用后/保存前等）——未开始。
+
+命令与结果：
+
+```bash
+.venv/bin/python -m pytest -q backend/tests/services/test_upload_leases.py
+# 6 passed
+.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_retry_family.py
+# 6 passed
+.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_stage_recovery.py
+# 6 passed
+.venv/bin/python -m pytest -q backend/tests/pipeline backend/tests/db backend/tests/interview
+# 250 passed（submit_interview_txn 拆分无回归）
+```
+
+顺带修复：迁移破坏性备份此前**总是备份生产库路径**（迁移测试库时会误碰生产库），
+改为备份正在迁移的库；schema 文档生成器对 git 环境不敏感，freshness 检查恢复可用
+（`docs/architecture/schema.md` 已按迁移 121/122 重新生成）。
 
 **既有失败（与本任务无关，单独记录，未修）**：
 
