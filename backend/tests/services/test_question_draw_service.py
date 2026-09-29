@@ -1,7 +1,14 @@
+import pytest
 """Tests for weighted question drawing service."""
 
 from datetime import datetime, timedelta
 
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
 
 def _seed_draw_questions(conn):
     conn.execute(

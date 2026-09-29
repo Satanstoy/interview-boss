@@ -1,6 +1,13 @@
+import pytest
 """LLM 配置增强测试：api_format（接口类型校验）+ thinking（深度思考开关）per-user 生效。"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
 
 def test_migration_creates_llm_api_format_columns(test_db):
     """user_llm_config 应有 api_format / thinking 列"""

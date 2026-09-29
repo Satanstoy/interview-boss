@@ -7,6 +7,12 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 def test_enqueue_questions_uses_interview_id_and_is_idempotent(test_db):
     # The workspace .env points at a proxy endpoint that resolves to the
     # RFC-2544 fake-IP range.  This test does not exercise outbound calls; keep

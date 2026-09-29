@@ -1,8 +1,15 @@
+import pytest
 """
 TDD 测试 — 面试上下文构建器
 
 验证 build_interview_context 正确收集和格式化用户画像信息
 """
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 class TestBuildContext:
     """面试上下文构建测试"""
 

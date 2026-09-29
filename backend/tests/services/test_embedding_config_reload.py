@@ -4,6 +4,12 @@ import pytest
 from app.db.connection import get_db_connection
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 @pytest.fixture
 def clean_embedding_module():
     """每次测试后重置 embedding_service 模块级状态，避免跨测试污染。"""
