@@ -165,6 +165,8 @@ class UploadCountsDTO(BaseModel):
     needs_review: int = 0
     resolved: int = 0
     answered: int = 0
+    failed: int = 0
+    total: int | None = None
 
 
 class UploadResultDTO(BaseModel):
