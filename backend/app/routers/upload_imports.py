@@ -12,7 +12,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.auth import get_current_user
+from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
 
 router = APIRouter()
@@ -112,5 +112,75 @@ async def get_upload_import(import_id: str, user: dict = Depends(get_current_use
     def _query():
         with get_db_connection() as conn:
             return _snapshot(_load_owned(conn, import_id, user["id"]))
+
+    return await run_db(_query)
+
+
+OPERATION_FIELDS = (
+    "import_id",
+    "job_type",
+    "scope",
+    "status",
+    "stage",
+    "attempt_no",
+    "duration_ms",
+    "error_code",
+    "next_retry_at",
+    "credential_scope",
+    "provider",
+    "model",
+    "created_at",
+    "updated_at",
+)
+
+
+@router.get("/api/admin/upload-operations")
+async def list_upload_operations(
+    user: dict = Depends(get_admin_user),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """运维白名单：只暴露状态与配置指纹，绝不返回正文/公司/来源/Key（AC-018）。"""
+
+    page = max(1, int(page))
+    page_size = max(1, min(100, int(page_size)))
+    offset = (page - 1) * page_size
+
+    def _query():
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT i.id AS import_id,
+                       COALESCE(j.job_type, 'submit_import') AS job_type,
+                       CASE WHEN json_extract(i.policy_json, '$.write_scope') = 'public'
+                            THEN 'public' ELSE 'user' END AS scope,
+                       i.status AS status,
+                       COALESCE(j.progress_phase, '') AS stage,
+                       i.current_attempt_no AS attempt_no,
+                       CAST((julianday(COALESCE(i.completed_at, i.updated_at))
+                             - julianday(i.created_at)) * 86400000 AS INTEGER) AS duration_ms,
+                       COALESCE(i.error_code, '') AS error_code,
+                       COALESCE(j.available_at, '') AS next_retry_at,
+                       COALESCE(json_extract(i.policy_json, '$.credential_scope'), '') AS credential_scope,
+                       COALESCE((SELECT c.provider FROM upload_llm_calls c
+                                 WHERE c.root_import_id = i.id ORDER BY c.id DESC LIMIT 1), '') AS provider,
+                       COALESCE((SELECT c.model FROM upload_llm_calls c
+                                 WHERE c.root_import_id = i.id ORDER BY c.id DESC LIMIT 1), '') AS model,
+                       i.created_at AS created_at,
+                       i.updated_at AS updated_at
+                FROM upload_imports i
+                LEFT JOIN jobs j ON j.root_import_id = i.id
+                ORDER BY i.created_at DESC, i.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (page_size, offset),
+            ).fetchall()
+            total = conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0]
+            return {
+                "items": [{field: row[field] for field in OPERATION_FIELDS} for row in rows],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
 
     return await run_db(_query)
