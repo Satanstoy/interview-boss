@@ -9,7 +9,16 @@
  * - 任务完成/失败时触发回调
  */
 import { ref, readonly } from 'vue'
-import { createSubmitJob, fetchActiveSubmitJobs, retrySubmitJob } from '@/services/dataApi.js'
+import {
+  createSubmitJob,
+  createSubmitJobWithKey,
+  fetchActiveSubmitJobs,
+  fetchUploadImport,
+  fetchUploadImportByKey,
+  fetchUploadImports,
+  retrySubmitJob,
+  retryUploadImport,
+} from '@/services/dataApi.js'
 import { getSSE } from '@/services/http.js'
 
 const STORAGE_KEY = 'interviewboss-submit-jobs'
@@ -292,4 +301,117 @@ export function useSubmitJobs() {
     retryJob,
     setOnJobDone,
   }
+}
+
+
+// ── 上传恢复 v2：幂等提交与 import_id 任务视图（AC-010/021/022） ──
+
+const DRAFT_KEY_PREFIX = 'interviewboss-submit-draft:'
+const TASK_STORAGE_KEY = 'interviewboss-upload-tasks'
+export const TERMINAL_STATUSES = new Set([
+  'completed',
+  'failed',
+  'partial_failed',
+  'needs_action',
+  'waiting_review',
+])
+
+export function isTerminalStatus(status) {
+  return TERMINAL_STATUSES.has(status)
+}
+
+export function createIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `key-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+/** 一次提交 = 一个幂等键；草稿重发必须复用同一把键 */
+export function rememberDraftKey(draftId, key) {
+  if (!draftId) return
+  try {
+    localStorage.setItem(DRAFT_KEY_PREFIX + draftId, key)
+  } catch { /* 隐私模式等场景忽略 */ }
+}
+
+export function getDraftKey(draftId) {
+  if (!draftId) return null
+  try {
+    return localStorage.getItem(DRAFT_KEY_PREFIX + draftId)
+  } catch {
+    return null
+  }
+}
+
+export function clearDraftKey(draftId) {
+  if (!draftId) return
+  try {
+    localStorage.removeItem(DRAFT_KEY_PREFIX + draftId)
+  } catch { /* 忽略 */ }
+}
+
+/**
+ * 幂等提交：同键同内容返回同一根任务；响应丢失先 by-key 查询，绝不直接新建。
+ * 返回 { ...importSnapshot, created, idempotency_key }。
+ */
+export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
+  const key = getDraftKey(draftId) || createIdempotencyKey()
+  rememberDraftKey(draftId, key)
+
+  // 1) 先按幂等键查已有任务（网络重发/响应丢失恢复）
+  try {
+    const existing = await fetchUploadImportByKey(key)
+    if (existing?.import_id) {
+      return { ...existing, created: false, idempotency_key: key }
+    }
+  } catch {
+    // 404 = 查无记录，继续提交
+  }
+
+  try {
+    const result = await createSubmitJobWithKey(formData, key)
+    return { ...result, idempotency_key: key }
+  } catch (err) {
+    // 2) 响应可能已到达服务端：再查一次 by-key，绝不重复创建
+    try {
+      const recovered = await fetchUploadImportByKey(key)
+      if (recovered?.import_id) {
+        return { ...recovered, created: false, idempotency_key: key }
+      }
+    } catch { /* 保持原始错误 */ }
+    throw err
+  }
+}
+
+/** 任务中心列表：本人任务分页 */
+export async function loadUploadTasks({ status, page = 1, pageSize = 20 } = {}) {
+  const params = { page, page_size: pageSize }
+  if (status) params.status = status
+  return fetchUploadImports(params)
+}
+
+export async function getUploadTask(importId) {
+  return fetchUploadImport(importId)
+}
+
+/** 恢复剩余工作：只补失败步骤，服务端保证幂等 */
+export async function retryUploadTask(importId) {
+  return retryUploadImport(importId)
+}
+
+/** 退出登录：断开全部 SSE、清计时器与本地缓存（不删除服务端任务） */
+export function abortAllTaskConnections() {
+  for (const controller of _sseControllers.values()) {
+    try {
+      controller.abort()
+    } catch { /* 忽略 */ }
+  }
+  _sseControllers.clear()
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(TASK_STORAGE_KEY)
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(DRAFT_KEY_PREFIX)) localStorage.removeItem(key)
+    }
+  } catch { /* 忽略 */ }
+  activeJobs.value = []
 }

@@ -7,6 +7,7 @@ import { useSelection } from '@/composables/useSelection.js'
 import { useTheme } from '@/composables/useTheme.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppSidebar from '@/components/AppSidebar.vue'
+import UploadTaskCenter from '@/components/business/UploadTaskCenter.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import {
   Sheet,
@@ -792,6 +793,9 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         </div>
       </div>
     </Transition>
+
+    <!-- 上传任务中心：常驻入口，折叠/关页面不删除服务端任务 -->
+    <UploadTaskCenter />
   </div>
 </template>
 

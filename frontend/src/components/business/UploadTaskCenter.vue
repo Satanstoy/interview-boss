@@ -1,0 +1,252 @@
+<script setup>
+/**
+ * 上传任务中心（AC-010 / AC-027）
+ *
+ * - 常驻任务列表：成功/失败/待审核/待配置都留在这里，不能 5 秒后消失；
+ * - 只显示服务端 allowed_actions（没有暂停能力就不出现暂停按钮）；
+ * - 结果入口：按 location 接口定位页码与高亮，不打断当前浏览；
+ * - 状态更新 aria-live=polite，键盘可操作；375px/1440px 均可查看。
+ */
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import {
+  isTerminalStatus,
+  loadUploadTasks,
+  retryUploadTask,
+} from '@/composables/useSubmitJobs.js'
+import { fetchInterviewLocation } from '@/services/dataApi.js'
+
+const router = useRouter()
+const open = ref(false)
+const loading = ref(false)
+const error = ref('')
+const tasks = ref([])
+const page = ref(1)
+const total = ref(0)
+const busyIds = ref(new Set())
+const announcement = ref('')
+
+const PAGE_SIZE = 20
+let pollTimer = null
+
+const statusLabel = {
+  queued: '排队中',
+  running: '处理中',
+  waiting_review: '待审核',
+  needs_action: '需要配置',
+  partial_failed: '部分失败',
+  failed: '失败',
+  completed: '已完成',
+}
+
+const statusClass = {
+  running: 'bg-sky-500/10 text-sky-600',
+  queued: 'bg-muted text-muted-foreground',
+  waiting_review: 'bg-amber-500/10 text-amber-600',
+  needs_action: 'bg-orange-500/10 text-orange-600',
+  partial_failed: 'bg-destructive/10 text-destructive',
+  failed: 'bg-destructive/10 text-destructive',
+  completed: 'bg-emerald-500/10 text-emerald-600',
+}
+
+const actionLabel = {
+  open_result: '查看结果',
+  retry_failed_steps: '重试失败步骤',
+  retry_after_configuration: '配置后继续',
+  configure_user_model: '去配置模型',
+  retry: '重新处理',
+  view_progress: '查看进度',
+  view_review_status: '查看审核状态',
+  view_budget: '查看额度',
+  view_summary: '查看摘要',
+}
+
+const hasPendingWork = computed(() =>
+  tasks.value.some((task) => !isTerminalStatus(task.status)),
+)
+
+async function refresh({ silent = true } = {}) {
+  if (!silent) loading.value = true
+  try {
+    const data = await loadUploadTasks({ page: page.value, pageSize: PAGE_SIZE })
+    tasks.value = data.items || []
+    total.value = data.total || 0
+    error.value = ''
+    const changed = tasks.value.filter((task) => isTerminalStatus(task.status))
+    if (changed.length) {
+      announcement.value = `任务状态更新：${changed
+        .map((task) => `${task.import_id.slice(0, 8)} ${statusLabel[task.status] || task.status}`)
+        .join('；')}`
+    }
+  } catch (err) {
+    // AC-010：恢复失败保留已有任务，不把失败当空列表
+    error.value = err?.message || '任务列表加载失败，已保留本地状态'
+  } finally {
+    loading.value = false
+  }
+}
+
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer)
+  // 等待审核/人工操作：每 15 秒 GET 一次（SSE 关闭后仍可发现状态变化）
+  pollTimer = setTimeout(async () => {
+    await refresh({ silent: true })
+    schedulePoll()
+  }, 15_000)
+}
+
+async function onAction(task, action) {
+  if (action === 'open_result') {
+    await openResult(task)
+    return
+  }
+  if (action === 'configure_user_model') {
+    router.push({ name: 'settings' })
+    return
+  }
+  if (action === 'retry' || action === 'retry_failed_steps' || action === 'retry_after_configuration') {
+    busyIds.value = new Set([...busyIds.value, task.import_id])
+    try {
+      const snapshot = await retryUploadTask(task.import_id)
+      const index = tasks.value.findIndex((item) => item.import_id === task.import_id)
+      if (index >= 0 && snapshot) tasks.value.splice(index, 1, { ...tasks.value[index], ...snapshot })
+      announcement.value = '恢复请求已提交，将继续未完成步骤'
+      await refresh({ silent: true })
+    } catch (err) {
+      error.value = err?.message || '恢复失败，请稍后重试'
+    } finally {
+      const next = new Set(busyIds.value)
+      next.delete(task.import_id)
+      busyIds.value = next
+    }
+  }
+}
+
+async function openResult(task) {
+  const interviewId = task.interview_id
+  if (!interviewId) return
+  try {
+    const location = await fetchInterviewLocation(interviewId, { sort: 'created_at_desc' })
+    // 只在用户主动“查看结果”时切换筛选与页码
+    router.push({
+      name: 'interview',
+      query: {
+        page: location.page,
+        position: location.position_id || undefined,
+        highlight: interviewId,
+      },
+    })
+    open.value = false
+  } catch {
+    error.value = '面经已删除或无权访问'
+  }
+}
+
+onMounted(async () => {
+  await refresh({ silent: true })
+  schedulePoll()
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer)
+})
+</script>
+
+<template>
+  <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+    <transition
+      enter-active-class="transition duration-200"
+      enter-from-class="translate-y-2 opacity-0"
+      leave-active-class="transition duration-150"
+      leave-to-class="translate-y-2 opacity-0"
+    >
+      <section
+        v-if="open"
+        class="pointer-events-auto w-[min(92vw,26rem)] rounded-xl border bg-background shadow-lg"
+        aria-label="上传任务中心"
+      >
+        <header class="flex items-center justify-between border-b px-4 py-3">
+          <h2 class="text-sm font-semibold">上传任务</h2>
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+            aria-label="关闭任务中心"
+            @click="open = false"
+          >
+            关闭
+          </button>
+        </header>
+
+        <p class="sr-only" aria-live="polite">{{ announcement }}</p>
+
+        <div v-if="error" class="px-4 py-2 text-xs text-destructive">{{ error }}</div>
+
+        <ul class="max-h-[60vh] overflow-y-auto px-2 py-2">
+          <li
+            v-for="task in tasks"
+            :key="task.import_id"
+            class="rounded-lg border border-border/60 p-3"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-xs text-muted-foreground">
+                {{ task.position_name || '未指定岗位' }} · {{ task.import_id.slice(0, 8) }}
+              </span>
+              <span
+                class="rounded-full px-2 py-0.5 text-[11px]"
+                :class="statusClass[task.status] || 'bg-muted text-muted-foreground'"
+              >
+                {{ statusLabel[task.status] || task.status }}
+              </span>
+            </div>
+
+            <p v-if="task.stage" class="mt-1 text-xs text-muted-foreground">
+              当前阶段：{{ task.stage }}
+            </p>
+            <p v-if="task.error" class="mt-1 text-xs text-destructive">
+              {{ task.error.message || task.error.code }}
+            </p>
+
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-for="action in task.allowed_actions || []"
+                :key="action"
+                type="button"
+                class="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                :disabled="busyIds.has(task.import_id)"
+                @click="onAction(task, action)"
+              >
+                {{ actionLabel[action] || action }}
+              </button>
+            </div>
+          </li>
+
+          <li v-if="!tasks.length && !loading" class="px-3 py-6 text-center text-xs text-muted-foreground">
+            暂无上传任务
+          </li>
+        </ul>
+
+        <footer class="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
+          <span>共 {{ total }} 条</span>
+          <button type="button" class="rounded-md px-2 py-1 hover:bg-muted" @click="refresh({ silent: false })">
+            刷新
+          </button>
+        </footer>
+      </section>
+    </transition>
+
+    <button
+      type="button"
+      class="pointer-events-auto flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm shadow-md hover:bg-muted"
+      :aria-expanded="open"
+      aria-label="上传任务中心"
+      @click="open = !open"
+    >
+      上传任务
+      <span
+        v-if="hasPendingWork"
+        class="inline-block h-2 w-2 rounded-full bg-sky-500"
+        aria-hidden="true"
+      />
+    </button>
+  </div>
+</template>

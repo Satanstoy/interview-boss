@@ -551,6 +551,18 @@ export async function uploadSSE(url, formData, onEvent, _isRetry = false) {
  * @param {object} options.headers - 额外请求头（例如 Last-Event-ID）
  * @param {boolean} _isRetry - 内部标记
  */
+// SSE 非终态 EOF 重连退避：1/3/10 秒，上限 30 秒 + 抖动（AC-010）
+const _SSE_BACKOFF_MS = [1000, 3000, 10000, 30000]
+
+function _sseReconnectDelay(attempt) {
+  const base = _SSE_BACKOFF_MS[Math.min(attempt, _SSE_BACKOFF_MS.length - 1)]
+  return base + Math.floor(Math.random() * 250)
+}
+
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
   // 支持旧的 3 参数调用: getSSE(url, onEvent, true)
   if (options === true) {
@@ -598,8 +610,34 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
       throw new Error(detail || getStatusMessage(res.status))
     }
 
-    return await _consumeSSEStream(res.body.getReader(), onEvent)
+    let lastStatus
+    const _track = (event) => {
+      if (event && typeof event === 'object' && 'status' in event) lastStatus = event.status
+      return onEvent(event)
+    }
+    const result = await _consumeSSEStream(res.body.getReader(), _track)
+
+    // AC-010：正常 EOF 但业务未终态 → 退避重连；终态/被 abort 不再重连
+    if (typeof options.isTerminal === 'function' && !options.signal?.aborted) {
+      const status = lastStatus ?? result?.status
+      if (!options.isTerminal(status)) {
+        const attempt = options.reconnectAttempt || 0
+        if (options.maxReconnects == null || attempt < options.maxReconnects) {
+          await _sleep(_sseReconnectDelay(attempt))
+          if (options.signal?.aborted) return result
+          options.onReconnect?.(attempt + 1)
+          return getSSE(
+            url,
+            onEvent,
+            { ...options, reconnectAttempt: attempt + 1 },
+            _isRetry,
+          )
+        }
+      }
+    }
+    return result
   } finally {
+    // finally 释放 controller（正常关闭读取也必须释放）
     if (options.signal && onExternalAbort) {
       options.signal.removeEventListener('abort', onExternalAbort)
     }

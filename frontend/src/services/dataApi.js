@@ -29,6 +29,24 @@ export const createSubmitJob = (formData) => upload(`${API}/submit-jobs`, formDa
 export const fetchActiveSubmitJobs = () => get(`${API}/submit-jobs/active`, { noCache: true })
 export const retrySubmitJob = (jobId) => post(`${API}/submit-jobs/${jobId}/retry`, {})
 
+// ── 上传恢复 v2（contracts §4.1） ─────────────────────────────
+export const createSubmitJobWithKey = (formData, idempotencyKey) =>
+  upload(`${API}/submit-jobs`, formData, {
+    timeout: 120_000,
+    noRetry: true,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
+export const fetchUploadImports = (params = {}) =>
+  get(`${API}/upload-imports?${new URLSearchParams(params)}`, { noCache: true })
+export const fetchUploadImport = (importId) =>
+  get(`${API}/upload-imports/${encodeURIComponent(importId)}`, { noCache: true })
+export const fetchUploadImportByKey = (idempotencyKey) =>
+  get(`${API}/upload-imports/by-key/${encodeURIComponent(idempotencyKey)}`, { noCache: true })
+export const retryUploadImport = (importId) =>
+  post(`${API}/upload-imports/${encodeURIComponent(importId)}/retry`, {})
+export const fetchInterviewLocation = (interviewId, params = {}) =>
+  get(`${API}/data/interview/${encodeURIComponent(interviewId)}/location?${new URLSearchParams(params)}`, { noCache: true })
+
 // ── Data mutations ──
 export const deleteRecord = (type, id, options = {}) => del(`${API}/data/${type}/${id}`, options)
 export const updateRecord = (data) => put(`${API}/data/update`, data)
