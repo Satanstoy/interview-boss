@@ -3,17 +3,19 @@ import logging
 import openai
 import magic as _magic
 import base64
+import uuid
 
 from typing import List, Optional
 from fastapi import (
     APIRouter,
+    Header,
     UploadFile,
     File,
     Form,
     HTTPException,
     Depends,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
@@ -23,6 +25,14 @@ from app.db.connection import get_db_connection, run_db
 from app.db.operations import (
     _check_duplicate_url_sync,
 )
+from app.services.upload_lifecycle import (
+    UploadFileMeta,
+    UploadInputError,
+    accept_upload,
+    validate_submission,
+)
+from app.services.upload_policy import ClientPolicyFieldError
+from app.services.upload_repository import IdempotencyConflict
 
 from app.agents.submit.graph import stream_submit_graph
 
@@ -67,10 +77,8 @@ async def submit_data_stream_v2(
             status_code=400, detail="文本内容过长，请限制在 50000 字符以内"
         )
     url = validate_source_url(url)
-    submit_target = (target or "private").lower()
+    submit_target = _normalize_target(target)
     # share 是“申请公共化”，不是普通用户直写公共题库。
-    if submit_target not in ("share", "private"):
-        submit_target = "private"
     is_admin = bool(user.get("is_admin", 0))
     request_public_review = submit_target == "share" and not is_admin
     bank_target = "public" if submit_target == "share" and is_admin else "personal"
@@ -190,9 +198,29 @@ async def submit_data_stream_v2(
 SUBMIT_PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
 
 
+def _recovery_v2_enabled() -> bool:
+    """灰度开关读取运行时配置，便于测试与部署覆盖。"""
+
+    from app.core import config
+
+    return bool(getattr(config, "UPLOAD_RECOVERY_V2", False))
+
+
+def _normalize_target(target: Optional[str]) -> str:
+    """target 必须是 private/share；非法值 400，禁止静默改成 private。"""
+
+    normalized = (target or "private").lower()
+    if normalized not in ("private", "share"):
+        raise HTTPException(
+            status_code=400, detail="不支持的提交目标，仅支持 private 或 share"
+        )
+    return normalized
+
+
 @router.post("/api/submit-jobs")
 async def create_submit_job(
     user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
     season: Optional[str] = Form(""),
@@ -208,10 +236,8 @@ async def create_submit_job(
             status_code=400, detail="文本内容过长，请限制在 50000 字符以内"
         )
     url = validate_source_url(url)
-    submit_target = (target or "private").lower()
+    submit_target = _normalize_target(target)
     # 分享意愿：share → 公共审核队列；private → 个人路径（目标内部映射）
-    if submit_target not in ("share", "private"):
-        submit_target = "private"
     bank_target = "personal" if submit_target == "private" else "public"
     if url:
         check_owner = user["id"] if bank_target == "personal" else None
@@ -219,46 +245,37 @@ async def create_submit_job(
             raise HTTPException(
                 status_code=409, detail="该链接的内容已存在于数据库中，请勿重复上传！"
             )
-    if not (text or "").strip() and (
-        not files or len(files) == 0 or not files[0].filename
-    ):
-        raise HTTPException(
-            status_code=400, detail="提交内容不能为空，必须提供纯文本或至少一张图片。"
+    # ── 文件元信息先校验：超限/非图片在读取内容前拒绝，不产生幽灵 job ──
+    named_files = [f for f in (files or []) if f and f.filename]
+    file_metas = [
+        UploadFileMeta(
+            filename=f.filename,
+            content_type=f.content_type or "",
+            size=int(getattr(f, "size", 0) or 0),
         )
+        for f in named_files
+    ]
+    try:
+        validate_submission(text=text, files=file_metas)
+    except UploadInputError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
 
-    # ── 读取文件到内存 ──
+    # ── 读取文件到内存（已通过大小/类型校验） ──
     image_data = []
-    if files and files[0].filename:
-        if len(files) > 20:
-            raise HTTPException(status_code=400, detail="最多上传 20 个文件")
-        total_size = 0
-        for file in files:
-            if file.content_type.startswith("image/"):
-                content = await file.read()
-                total_size += len(content)
-                if total_size > MAX_TOTAL_UPLOAD_SIZE:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"上传文件总大小超过限制（最大 {MAX_TOTAL_UPLOAD_SIZE // 1024 // 1024}MB）",
-                    )
-                if len(content) > MAX_FILE_SIZE:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"图片 {file.filename} 超过大小限制（最大 {MAX_FILE_SIZE // 1024 // 1024}MB）",
-                    )
-                real_mime = _magic.from_buffer(content[:2048], mime=True)
-                if real_mime not in ALLOWED_MIME_TYPES:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"文件 {file.filename} 不是有效的图片文件（检测到: {real_mime}）",
-                    )
-                # 图片序列化为 base64 以便存入 payload
-                image_data.append(
-                    {
-                        "content_b64": base64.b64encode(content).decode("ascii"),
-                        "mime": real_mime,
-                    }
-                )
+    for file in named_files:
+        content = await file.read()
+        real_mime = _magic.from_buffer(content[:2048], mime=True)
+        if real_mime not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件 {file.filename} 不是有效的图片文件（检测到: {real_mime}）",
+            )
+        image_data.append(
+            {
+                "content_b64": base64.b64encode(content).decode("ascii"),
+                "mime": real_mime,
+            }
+        )
 
     # 构建 payload
     payload = {
@@ -272,6 +289,83 @@ async def create_submit_job(
         "is_admin": bool(user.get("is_admin", 0)),
         "job_position": _get_current_position_for_user(user["id"]),
     }
+
+    # ── v2：统一接受服务（稳定 import_id + 幂等键 + 同事务落库） ──
+    if _recovery_v2_enabled():
+        idempotency_key = idempotency_key or str(uuid.uuid4())
+
+        def _accept():
+            with get_db_connection() as conn:
+                conn.execute("BEGIN")
+                try:
+                    result = accept_upload(
+                        conn,
+                        actor_id=user["id"],
+                        actor_is_admin=bool(user.get("is_admin", 0)),
+                        idempotency_key=idempotency_key,
+                        target_intent=submit_target,
+                        source_type="interview",
+                        text=text,
+                        url=url,
+                        season=season or "",
+                        content_type=content_type or "",
+                        position_id=None,
+                        position_name=payload["job_position"] or "",
+                        files=file_metas,
+                        images=image_data,
+                        entry="api",
+                        job_position=payload["job_position"] or "",
+                    )
+                    conn.commit()
+                    return result
+                except Exception:
+                    conn.rollback()
+                    raise
+
+        try:
+            accepted = await run_db(_accept)
+        except ClientPolicyFieldError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except IdempotencyConflict:
+            raise HTTPException(
+                status_code=409,
+                detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
+            ) from None
+
+        arq_scheduled = False
+        dispatch_error = None
+        try:
+            from app.worker import enqueue_submit_import_job
+            from app.services.job_lifecycle import mark_job_dispatched
+
+            arq_job = await enqueue_submit_import_job(accepted["job_id"])
+            arq_job_id = getattr(arq_job, "job_id", None)
+            if not arq_job_id:
+                raise RuntimeError("ARQ 未返回 job_id")
+            await run_db(
+                lambda: _mark_job_dispatched(
+                    accepted["job_id"], str(arq_job_id), mark_job_dispatched
+                )
+            )
+            arq_scheduled = True
+        except Exception as e:  # ARQ 不可用 ≠ 上传失败
+            dispatch_error = str(e)[:300]
+            logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                **accepted,
+                "idempotency_key": idempotency_key,
+                "job_status": "queued" if arq_scheduled else "pending",
+                "dispatch_error": dispatch_error,
+                "message": (
+                    "上传任务已接受"
+                    if accepted["created"]
+                    else "该提交已存在，返回原任务"
+                ),
+            },
+        )
 
     # ── 创建 job + 存 payload（单事务） ──
     def _create_job():

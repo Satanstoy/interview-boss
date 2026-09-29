@@ -43,6 +43,10 @@ MAX_TOTAL_UPLOAD_SIZE = (
     int(os.environ.get("MAX_TOTAL_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 )  # 默认 50MB
 
+# 上传恢复 v2 灰度开关（contracts §5.9）：默认 off；开启后所有新入口走同一
+# policy/接受服务。测试通过 monkeypatch 打开，生产由部署配置覆盖。
+UPLOAD_RECOVERY_V2 = os.environ.get("UPLOAD_RECOVERY_V2", "0") == "1"
+
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 

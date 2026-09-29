@@ -32,6 +32,7 @@ from app.routers import (
     coding,
     error_report,
     public_contributions,
+    upload_imports,
 )
 from app.routers.profile_pkg import router as profile_pkg_router
 from app.routers.questions_pkg import router as questions_pkg_router
@@ -238,6 +239,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(submit.router)
+app.include_router(upload_imports.router)
 app.include_router(data.router)
 app.include_router(questions.router)
 app.include_router(questions_pkg_router)
