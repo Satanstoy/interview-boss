@@ -748,6 +748,104 @@ def withdraw_public_contribution_v2(
         raise
 
 
+def publish_items_with_resolutions(conn, *, request_id: int) -> dict:
+    """把持有**当前有效** public resolution 的 item 标记 published（AC-015）。
+
+    ``public_detail_id`` 存在不是成功证据；失败/失效 resolution 的子项保持待处理，
+    恢复时只处理这些子项，不重复已成功的，也不需要新增实体。
+    """
+
+    items = conn.execute(
+        "SELECT i.id AS id, i.status AS status, i.public_detail_id AS public_detail_id, "
+        "d.id AS detail_id "
+        "FROM public_contribution_items i "
+        "LEFT JOIN questions_detail d ON d.id = i.public_detail_id "
+        "WHERE i.request_id = ? ORDER BY i.ordinal",
+        (request_id,),
+    ).fetchall()
+
+    published: list[int] = []
+    pending: list[int] = []
+    newly_published: list[int] = []
+    for item in items:
+        item_id = int(item["id"])
+        if item["status"] == "published":
+            published.append(item_id)
+            continue
+        valid = None
+        if item["public_detail_id"]:
+            valid = conn.execute(
+                "SELECT id FROM question_resolutions "
+                "WHERE detail_id = ? AND invalidated_at IS NULL "
+                "AND status IN ('matched','created') LIMIT 1",
+                (int(item["public_detail_id"]),),
+            ).fetchone()
+        if valid is not None and item["detail_id"] is not None:
+            conn.execute(
+                "UPDATE public_contribution_items SET status = 'published', "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (item_id,),
+            )
+            published.append(item_id)
+            newly_published.append(item_id)
+        else:
+            pending.append(item_id)
+
+    return {
+        "published_item_ids": sorted(published),
+        "pending_item_ids": sorted(pending),
+        "reprocessed_item_ids": sorted(newly_published),
+    }
+
+
+def refresh_public_interview_projection(conn, *, public_interview_id: int) -> dict:
+    """重建公共面经 ``questions_list``：只包含 published 且未删除的明细（AC-016）。"""
+
+    rows = conn.execute(
+        "SELECT d.question AS question FROM questions_detail d "
+        "JOIN public_contribution_items i ON i.public_detail_id = d.id "
+        "JOIN question_resolutions r ON r.detail_id = d.id "
+        "AND r.invalidated_at IS NULL AND r.status IN ('matched','created') "
+        "WHERE d.interview_id = ? AND d.deleted_at IS NULL AND i.status = 'published' "
+        "ORDER BY d.id",
+        (public_interview_id,),
+    ).fetchall()
+    questions_list = "\n".join(
+        f"{index}. {row['question']}"
+        for index, row in enumerate(rows, start=1)
+        if row["question"]
+    )
+    conn.execute(
+        "UPDATE interview SET questions_list = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (questions_list, public_interview_id),
+    )
+    return {
+        "public_interview_id": public_interview_id,
+        "published_details": len(rows),
+        "questions_list": questions_list,
+    }
+
+
+def request_publish_status(conn, *, request_id: int) -> str:
+    """申请的发布状态：全部 item published 才是 published。"""
+
+    total = conn.execute(
+        "SELECT COUNT(*) FROM public_contribution_items WHERE request_id = ? "
+        "AND status != 'rejected'",
+        (request_id,),
+    ).fetchone()[0]
+    published = conn.execute(
+        "SELECT COUNT(*) FROM public_contribution_items WHERE request_id = ? "
+        "AND status = 'published'",
+        (request_id,),
+    ).fetchone()[0]
+    if total and published == total:
+        return "published"
+    if published:
+        return "partially_published"
+    return "processing"
+
+
 def approve_public_contribution(
     conn,
     request_id: int,
