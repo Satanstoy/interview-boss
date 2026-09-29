@@ -61,6 +61,8 @@ from app.db.migrations.admin_audit import _migration_119_admin_audit_log
 from app.db.migrations.clear_db_confirmation import (
     _migration_120_clear_db_confirmations,
 )
+from app.db.migrations.upload_recovery import _migration_121_upload_recovery_core
+from app.db.migrations.upload_resolution import _migration_122_upload_resolution
 from app.db.migrations.auth import (
     _migration_003_auth_tables,
     _migration_010_users_extra_columns,
@@ -337,6 +339,8 @@ _MIGRATIONS = [
     (118, "jd_bonus", _migration_118_jd_bonus),
     (119, "admin_audit_log", _migration_119_admin_audit_log),
     (120, "clear_db_confirmations", _migration_120_clear_db_confirmations),
+    (121, "upload_recovery_core", _migration_121_upload_recovery_core),
+    (122, "upload_resolution", _migration_122_upload_resolution),
 ]
 
 
