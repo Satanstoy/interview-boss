@@ -22,26 +22,26 @@
 
 | Finding | 需求 | AC | 状态 | 阶段 | 证据 |
 |---|---|---|---|---|---|
-| F01 | UR-001 结果定位 | AC-001 | not-run | 阶段I | — |
-| F02 | UR-002 服务端分页 | AC-002 | not-run | 阶段I | — |
+| F01 | UR-001 结果定位 | AC-001 | In progress | 阶段I（location 接口 passed；前端切页高亮未做） | `test_interview_server_pagination.py` 7 passed |
+| F02 | UR-002 服务端分页 | AC-002 | passed（后端） | 阶段I | `test_interview_server_pagination.py` 7 passed（121 条同时间戳、跨页不重不漏） |
 | F03 | UR-003 四格提交策略 | AC-003 | In progress | 阶段A（policy 部分 passed） | `backend/tests/pipeline/test_upload_policy.py` 30 passed |
-| F04 | UR-004 凭据显式 scope | AC-004 | In progress | 阶段C（解析/记账/配额 passed；接受入口未接入） | `backend/tests/services/test_upload_credentials.py`、`test_upload_llm_accounting.py` 15 passed |
-| F05 | UR-005 原题 resolution | AC-005 | not-run | 阶段E | — |
-| F06 | UR-006 匹配三态 | AC-006 | not-run | 阶段E | — |
-| F07 | UR-007 队列续调 | AC-007 | not-run | 阶段E | — |
+| F04 | UR-004 凭据显式 scope | AC-004 | passed（后端） | 阶段C | 缺 Key→needs_action 0 调用、修复后同 root 恢复：`test_upload_acceptance.py` 21 passed |
+| F05 | UR-005 原题 resolution | AC-005 | passed | 阶段E | `test_question_resolutions.py` 6 passed |
+| F06 | UR-006 匹配三态 | AC-006 | passed | 阶段E | `test_upload_matching_outcomes.py` 8 passed |
+| F07 | UR-007 队列续调 | AC-007 | passed | 阶段E | `test_upload_queue_reconciliation.py` 5 passed + 每分钟对账 cron |
 | F08 | UR-008 阶段检查点 | AC-008 | In progress | 阶段D（检查点/事务拆分 passed；graph 故障点未接） | `test_upload_stage_recovery.py` 6 passed |
 | F09 | UR-009 并发不串单 | AC-009 | In progress | 阶段D（thread_id 已去时间戳） | `test_upload_stage_recovery.py` |
 | F10 | UR-010 SSE 恢复 | AC-010 | not-run | 阶段H | — |
-| F11 | UR-011 真实完成 | AC-011 | not-run | 阶段G | — |
+| F11 | UR-011 真实完成 | AC-011 | passed（后端投影） | 阶段G | `test_upload_status_projection.py` 15 passed |
 | F12 | UR-012 租约/fencing | AC-012 | In progress | 阶段D（fence/回收/心跳 passed） | `test_upload_leases.py` 6 passed |
-| F13 | UR-013 错误协议 | AC-013 | not-run | 阶段G | — |
-| F14 | UR-014 审核投影生效 | AC-014 | not-run | 阶段F | — |
-| F15 | UR-015 失败子项恢复 | AC-015 | not-run | 阶段F | — |
-| F16 | UR-016 追加贡献一致 | AC-016 | not-run | 阶段F | — |
+| F13 | UR-013 错误协议 | AC-013 | passed | 阶段G | `test_upload_stream_contract.py` 8 passed |
+| F14 | UR-014 审核投影生效 | AC-014 | passed | 阶段F | `test_public_contributions_materialize.py` 7 passed |
+| F15 | UR-015 失败子项恢复 | AC-015 | passed | 阶段F | `test_public_contribution_recovery.py` 5 passed |
+| F16 | UR-016 追加贡献一致 | AC-016 | passed | 阶段F | `test_public_contribution_recovery.py`（清单投影） |
 | F17 | UR-017 跨代/并发恢复 | AC-017 | passed | 阶段D | `test_upload_retry_family.py` 6 passed（含线程并发） |
-| F18 | UR-018 私人正文隔离 | AC-018 | not-run | 阶段G | — |
-| F19 | UR-019 提取不漏题 | AC-019 | not-run | 阶段E | — |
-| F20 | UR-020 审批/撤回互斥 | AC-020 | not-run | 阶段F | — |
+| F18 | UR-018 私人正文隔离 | AC-018 | passed | 阶段G | `test_upload_task_privacy.py` 5 passed |
+| F19 | UR-019 提取不漏题 | AC-019 | passed | 阶段E | `test_upload_extraction_integrity.py` 11 passed |
+| F20 | UR-020 审批/撤回互斥 | AC-020 | passed | 阶段F | `test_public_contribution_transitions.py` 6 passed（含线程并发） |
 | — | AC-021 幂等键 | not-run | 阶段C | — |
 | — | AC-022 文件校验 | not-run | 阶段C | — |
 | — | AC-023 迁移幂等 | not-run | 阶段B | — |
