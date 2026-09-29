@@ -382,17 +382,78 @@ def _restore_sources_for_url(cursor, url: str, owner_scope=None):
         )
 
 
+LIST_SORTS = ("created_at_desc", "created_at_asc")
+
+
+def _visibility_where_and_params(
+    conn, table_name: str, user: dict, *, scope: str = "all", season: str | None = None,
+    position_id: str | None = None,
+):
+    """授权 + 筛选谓词（AC-002）：COUNT 与 items 必须共用同一份。"""
+
+    from app.db.connection import get_user_job_position
+
+    clauses = ["deleted_at IS NULL"]
+    params: list = []
+    if scope not in ("all", "public", "mine"):
+        raise HTTPException(status_code=400, detail="scope 仅支持 all/public/mine")
+    if scope == "mine":
+        clauses.append("owner_id = ?")
+        params.append(user["id"])
+    elif scope == "public":
+        clauses.append("owner_id IS NULL AND status = 'approved'")
+    else:
+        clauses.append("(owner_id = ? OR (owner_id IS NULL AND status = 'approved'))")
+        params.append(user["id"])
+
+    if season is not None:
+        clauses.append("season = ?")
+        params.append(season)
+
+    if position_id is not None:
+        clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
+        params.append(position_id)
+    else:
+        _, current_pos = get_user_job_position(user["id"])
+        clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
+        params.append(current_pos)
+
+    return " AND ".join(clauses), params
+
+
+def _list_order_by(table_name: str, sort: str | None) -> str:
+    """稳定排序：同时间戳按 id；NULL 日期视为最旧。"""
+
+    if sort is not None and sort not in LIST_SORTS:
+        raise HTTPException(status_code=400, detail="sort 仅支持 created_at_desc/created_at_asc")
+    if sort == "created_at_asc":
+        return "ORDER BY CASE WHEN created_at IS NULL THEN 1 ELSE 0 END, created_at ASC, id ASC"
+    if sort == "created_at_desc" or (sort is None and table_name == "interview"):
+        return "ORDER BY CASE WHEN created_at IS NULL THEN 1 ELSE 0 END, created_at DESC, id DESC"
+    return "ORDER BY id ASC"
+
+
 @router.get("/api/data/{file_type}")
 async def get_data(
     file_type: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=500),
+    page_size: int | None = Query(None, ge=1),
+    sort: str | None = Query(None),
+    season: str | None = Query(None),
+    position_id: str | None = Query(None),
+    scope: str = Query("all"),
     user: dict = Depends(get_current_user),
 ):
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
-        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        return {"items": [], "total": 0, "page": page, "page_size": page_size or 20}
+
+    # AC-002：interview 默认 20、范围 1..100；其它共享表保持旧行为
+    if table_name == "interview":
+        page_size = min(100, max(1, int(page_size or 20)))
+    else:
+        page_size = min(500, max(1, int(page_size or 100)))
 
     offset = (page - 1) * page_size
 
@@ -403,20 +464,22 @@ async def get_data(
                 # all 口径：公共 + 自己的（管理员也遵守）
                 from app.db.connection import get_user_job_position
 
-                _, current_pos = get_user_job_position(user["id"])
-                where = "(owner_id = ? OR (owner_id IS NULL AND status = 'approved')) AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
-                params = (user["id"], current_pos)
+                where, params = _visibility_where_and_params(
+                    conn, table_name, user, scope=scope, season=season,
+                    position_id=position_id,
+                )
+                order_by = _list_order_by(table_name, sort)
                 total = conn.execute(
                     f"SELECT COUNT(*) FROM {safe_name} WHERE {where}", params
                 ).fetchone()[0]
                 if table_name == "jd":
                     rows = conn.execute(
-                        f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, owner_id FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?",
+                        f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, owner_id FROM {safe_name} WHERE {where} {order_by} LIMIT ? OFFSET ?",
                         (*params, page_size, offset),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        f"SELECT id, url, company, round, focus, questions_list, difficulty, season, owner_id, created_at FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?",
+                        f"SELECT id, url, company, round, focus, questions_list, difficulty, season, owner_id, created_at FROM {safe_name} WHERE {where} {order_by} LIMIT ? OFFSET ?",
                         (*params, page_size, offset),
                     ).fetchall()
             else:  # questions_detail
@@ -933,3 +996,58 @@ async def update_generic_data(
     except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="数据库更新失败，请查看服务端日志")
+
+
+@router.get("/api/data/interview/{record_id}/location")
+async def get_interview_location(
+    record_id: int,
+    sort: str | None = Query(None),
+    season: str | None = Query(None),
+    position_id: str | None = Query(None),
+    scope: str = Query("all"),
+    user: dict = Depends(get_current_user),
+):
+    """AC-001：按与列表一致的排序/筛选定位面经所在页；无权目标一律 404。"""
+
+    def _query():
+        with get_db_connection() as conn:
+            where, params = _visibility_where_and_params(
+                conn, "interview", user, scope=scope, season=season, position_id=position_id
+            )
+            target = conn.execute(
+                f"SELECT id, created_at, job_position FROM interview WHERE id = ? AND {where}",
+                (record_id, *params),
+            ).fetchone()
+            if target is None:
+                return None
+            desc = _list_order_by("interview", sort).find("DESC") >= 0
+            key_expr = "IFNULL(created_at, '0000-00-00 00:00:00')"
+            if desc:
+                rank_sql = (
+                    f"SELECT COUNT(*) FROM interview WHERE {where} AND ("
+                    f"{key_expr} > IFNULL(?, '0000-00-00 00:00:00') OR "
+                    f"({key_expr} = IFNULL(?, '0000-00-00 00:00:00') AND id > ?))"
+                )
+            else:
+                rank_sql = (
+                    f"SELECT COUNT(*) FROM interview WHERE {where} AND ("
+                    f"{key_expr} < IFNULL(?, '0000-00-00 00:00:00') OR "
+                    f"({key_expr} = IFNULL(?, '0000-00-00 00:00:00') AND id < ?))"
+                )
+            rank = conn.execute(
+                rank_sql,
+                (*params, target["created_at"], target["created_at"], int(record_id)),
+            ).fetchone()[0]
+            page_size = 20
+            return {
+                "interview_id": int(record_id),
+                "rank": int(rank),
+                "page_size": page_size,
+                "page": int(rank) // page_size + 1,
+                "position_id": target["job_position"],
+            }
+
+    result = await run_db(_query)
+    if result is None:
+        raise HTTPException(status_code=404, detail="记录不存在或无权访问")
+    return result
