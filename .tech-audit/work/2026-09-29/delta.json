@@ -1,0 +1,9 @@
+{
+  "baseline": "2026-09-28",
+  "current": "2026-09-29",
+  "new": 7,
+  "still_open": 13,
+  "removed_from_ledger": 0,
+  "fixed_verified": 0,
+  "note": "Carried baseline; no remediation changes in this review. Removed does not imply fixed."
+}

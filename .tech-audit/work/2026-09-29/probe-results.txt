@@ -1,0 +1,9 @@
+CONFIRMED review_fields company=REDACTED recorded but public projection retains PRIVATE_COMPANY
+CONFIRMED failed contribution reapproval reports published while its only queue row stays failed
+CONFIRMED same-URL later contribution adds public detail but leaves interview question list stale
+CONFIRMED retry of root creates new pending attempt despite existing running grandchild
+CONFIRMED admin job SSE returns another owner private result; ordinary unrelated user denied
+5 offline defect probes passed; no network or production DB used
+CONFIRMED exact extraction filter silently drops 2 valid technical questions containing 优缺点
+CONFIRMED approve/withdraw interleaving returns withdrawn while public projection and runnable queue remain
+TOTAL: 7 offline defect probes confirmed; interleaving forced at read boundary, no threaded timing assumption
