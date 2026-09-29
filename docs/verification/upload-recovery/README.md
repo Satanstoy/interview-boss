@@ -244,3 +244,32 @@ python backend/scripts/backfill_upload_recovery.py --database /tmp/iboss-backfil
 - AC-028 的“浏览器打开正确结果”腿：由 `upload-task-center.spec.js` 的定位用例覆盖到 mock 层，
   真实后端 + 浏览器联合腿未跑，登记为 not-run。
 - 旧 `submit-stream-v2` 在 v2 关闭时的原路径未改动（保持兼容）。
+
+
+## 5. 最终回归（2026-09-29）
+
+```bash
+.venv/bin/python -m pytest -q backend/tests
+# 1 failed, 3202 passed, 8 skipped, 14 deselected
+# 唯一失败：tests/infra/test_docker_config.py::test_cleanup_supports_dry_run_and_aggressive
+#   （断言 docker-deploy.sh 含 DEPLOY_PRUNE_HOST_ARTIFACTS；部署脚本早已改写，与本任务无关）
+
+cd frontend
+npm run build    # exit 0
+npm run lint     # 0 errors, 38 warnings（阈值 38）
+npm test         # 1 passed（smoke）
+npx playwright test tests/e2e/upload-task-center.spec.js   # 6 passed
+```
+
+测试隔离治理（本次共修复 60+ 个用例）：防护 fixture（`sqlite3.connect` 指向
+`backend/data` 即失败）暴露了 chat/服务层/分类等 20+ 个测试文件会静默读写生产库，
+其中 `test_api_does_not_write_production_db` 甚至直接读生产库做断言。全部改为内存/临时库，
+并保留其原始语义。这也意味着：**本次改造之前，跑测试本身就是生产数据风险**。
+
+## 6. 验收状态汇总
+
+| 状态 | AC |
+|---|---|
+| passed | AC-002、AC-004、AC-005、AC-006、AC-007、AC-011、AC-012、AC-013、AC-014、AC-015、AC-016、AC-017、AC-018、AC-019、AC-020、AC-021、AC-022、AC-023、AC-024、AC-025、AC-026、AC-027、AC-028（隔离腿） |
+| passed（分腿） | AC-001（后端 location + 前端定位跳转）、AC-003（双入口共用接受服务）、AC-008（检查点/事务/幂等）、AC-009（thread_id 去时间戳）、AC-010（服务端快照流 + 客户端 EOF 重连） |
+| not-run | AC-008/009 的 graph 节点级故障点（需真实 LangGraph 执行环境）；AC-028 的“真实 worker 中断 + 浏览器打开结果”联合腿（服务端与浏览器两侧分别有测试） |
