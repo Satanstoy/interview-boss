@@ -155,7 +155,17 @@ class TestAsyncioToThreadPreservation:
 class TestBackwardCompatibility:
     """验证替换 threading.local 后现有测试不回归"""
 
-    def test_get_db_connection_returns_same_connection(self):
+    @pytest.fixture
+    def temp_db_path(self, tmp_path, monkeypatch):
+        """把连接工厂的 DB_PATH 指到临时库，避免测试打开生产库。"""
+
+        import app.db.connection as db_module
+
+        path = tmp_path / "factory.db"
+        monkeypatch.setattr(db_module, "DB_PATH", str(path))
+        return path
+
+    def test_get_db_connection_returns_same_connection(self, temp_db_path):
         """多次调用 get_db_connection 返回同一个连接对象"""
         from app.db.connection import get_db_connection
 
@@ -164,7 +174,7 @@ class TestBackwardCompatibility:
 
         assert conn1 is conn2
 
-    def test_get_db_connection_works_in_thread(self):
+    def test_get_db_connection_works_in_thread(self, temp_db_path):
         """在子线程中调用 get_db_connection 也能工作"""
         from app.db.connection import get_db_connection
 

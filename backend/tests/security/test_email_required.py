@@ -8,6 +8,15 @@ TDD 测试文件 — 覆盖：
 """
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """绑定邮箱流程会读验证码/用户表，必须落在内存测试库。"""
+
+    return app_db_isolation
+
+
+
 from fastapi import HTTPException
 
 

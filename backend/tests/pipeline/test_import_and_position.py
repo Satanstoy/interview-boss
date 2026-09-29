@@ -5,6 +5,15 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """这些用例直接查表结构/数据，必须落在内存测试库。"""
+
+    return app_db_isolation
+
+
+
+
 
 class TestBug003JdJobPosition:
     """BUG-003: JD 表添加 job_position 字段"""

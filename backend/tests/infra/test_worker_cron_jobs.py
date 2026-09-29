@@ -5,6 +5,15 @@
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """cron 观测包装会写执行记录，必须落在内存测试库。"""
+
+    return app_db_isolation
+
+
+
+
 
 class TestBug001WorkerCronJobs:
     """BUG-001: cron_jobs 必须是 CronJob 实例，不能是 dict"""
