@@ -292,6 +292,14 @@ async def _run_react_case(
     return _routerize_events(raw_events), captured_state, llm_mock
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
+
+
 class TestReactE2E:
     async def test_simple_dialogue_without_tools(self):
         events, state, llm_mock = await _run_react_case(

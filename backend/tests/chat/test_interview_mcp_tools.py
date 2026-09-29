@@ -6,6 +6,12 @@ import pytest
 from unittest.mock import MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 async def _call_mcp_json(tool_name: str, args: dict) -> dict:
     from app.mcp_server.app import mcp
 

@@ -18,6 +18,12 @@ from unittest.mock import patch, AsyncMock
 # ═══════════════════════════════════════════════════
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 class TestChatServiceConversation:
     """会话管理测试"""
 
@@ -622,16 +628,18 @@ class TestChatRouter:
         finally:
             app.dependency_overrides.clear()
 
-    def test_api_does_not_write_production_db(self, client, test_db):
-        """回归：client fixture 下 API 请求不得写生产数据库。
+    def test_api_does_not_write_production_db(self, client, test_db, tmp_path, monkeypatch):
+        """回归：client fixture 下 API 请求不得写配置指向的数据库文件。
 
         历史上 client fixture 只 patch 了 app.routers.* 模块，TestClient 线程内
         get_db_connection() 会打开真实 DB_PATH 写入生产库（如 chat_conversations）。
-        此处断言请求结束后生产库文件未被修改。
+        这里把配置 DB_PATH 指向临时“生产替身”文件并断言它未被修改；
+        全局防护 fixture 已保证任何测试都无法打开真正的生产库。
         """
         import app.db.connection as db_module
 
-        prod_path = db_module.DB_PATH
+        prod_path = str(tmp_path / "prod-stand-in.db")
+        monkeypatch.setattr(db_module, "DB_PATH", prod_path)
         before = None
         if os.path.exists(prod_path):
             import sqlite3 as _sqlite3

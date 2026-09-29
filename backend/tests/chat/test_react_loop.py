@@ -78,6 +78,14 @@ def _covered_interview_history(message_count: int = 33) -> list[dict]:
 # ── TestActiveSkillsPersistence ──────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
+
+
 class TestActiveSkillsPersistence:
     def test_restore_only_persistent_skills_from_metadata(self):
         """Restoring should ignore turn-scoped mode skills."""
