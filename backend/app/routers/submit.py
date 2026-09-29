@@ -62,6 +62,7 @@ from app.services.submit_service import (
 @router.post("/api/submit-stream-v2")
 async def submit_data_stream_v2(
     user: dict = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     url: Optional[str] = Form(""),
     text: Optional[str] = Form(""),
     season: Optional[str] = Form(""),
@@ -136,6 +137,21 @@ async def submit_data_stream_v2(
         "job_position": _get_current_position_for_user(user["id"]),
     }
 
+    # ── v2：旧 SSE 入口也走统一接受服务（创建后订阅，禁止自己启动 graph） ──
+    if _recovery_v2_enabled():
+        return await _legacy_sse_via_accept_service(
+            user=user,
+            idempotency_key=idempotency_key,
+            submit_target=submit_target,
+            text=text,
+            url=url,
+            season=season,
+            content_type=content_type,
+            image_data=image_data,
+            files=files,
+            job_position=input_state["job_position"],
+        )
+
     async def event_stream():
         result_collector = {}
         try:
@@ -197,6 +213,9 @@ async def submit_data_stream_v2(
 
 SUBMIT_PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
 
+# 旧 SSE 适配的快照轮询上限（每次 2 秒）；测试可调小
+LEGACY_SSE_MAX_POLLS = 900
+
 
 def _recovery_v2_enabled() -> bool:
     """灰度开关读取运行时配置，便于测试与部署覆盖。"""
@@ -204,6 +223,160 @@ def _recovery_v2_enabled() -> bool:
     from app.core import config
 
     return bool(getattr(config, "UPLOAD_RECOVERY_V2", False))
+
+
+async def _legacy_sse_via_accept_service(
+    *,
+    user,
+    idempotency_key,
+    submit_target,
+    text,
+    url,
+    season,
+    content_type,
+    image_data,
+    files,
+    job_position,
+):
+    """旧 SSE 适配：只创建根任务并订阅快照，执行交给 worker（AC-003）。"""
+
+    import asyncio as _asyncio
+
+    from app.services.upload_lifecycle import UploadFileMeta, UploadInputError
+    from app.services.upload_retry_budget import build_snapshot_event, snapshot_from_parts
+
+    named_files = [f for f in (files or []) if f and f.filename]
+    file_metas = [
+        UploadFileMeta(
+            filename=f.filename,
+            content_type=f.content_type or "",
+            size=int(getattr(f, "size", 0) or 0),
+        )
+        for f in named_files
+    ]
+    images = [
+        {"content_b64": base64.b64encode(img["content"]).decode("ascii"), "mime": img["mime"]}
+        for img in image_data
+    ]
+    key = idempotency_key or str(uuid.uuid4())
+
+    def _accept():
+        with get_db_connection() as conn:
+            conn.execute("BEGIN")
+            try:
+                result = accept_upload(
+                    conn,
+                    actor_id=user["id"],
+                    actor_is_admin=bool(user.get("is_admin", 0)),
+                    idempotency_key=key,
+                    target_intent=submit_target,
+                    source_type="interview",
+                    text=text,
+                    url=url,
+                    season=season or "",
+                    content_type=content_type or "",
+                    position_id=None,
+                    position_name=job_position or "",
+                    files=file_metas,
+                    images=images,
+                    entry="legacy_sse",
+                    job_position=job_position or "",
+                )
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
+
+    try:
+        accepted = await run_db(_accept)
+    except UploadInputError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+    except ClientPolicyFieldError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except IdempotencyConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
+        ) from None
+
+    if accepted.get("job_id"):
+        try:
+            from app.worker import enqueue_submit_import_job
+            from app.services.job_lifecycle import mark_job_dispatched
+
+            arq_job = await enqueue_submit_import_job(accepted["job_id"])
+            arq_job_id = getattr(arq_job, "job_id", None)
+            if arq_job_id:
+                await run_db(
+                    lambda: _mark_job_dispatched(
+                        accepted["job_id"], str(arq_job_id), mark_job_dispatched
+                    )
+                )
+        except Exception as exc:  # ARQ 不可用 ≠ 上传失败
+            logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", exc)
+
+    terminal = {"completed", "failed", "partial_failed", "needs_action", "waiting_review"}
+
+    def _load_snapshot():
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM upload_imports WHERE id = ?", (accepted["import_id"],)
+            ).fetchone()
+            if row is None:
+                return None
+            counts = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS answered, "
+                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed "
+                "FROM upload_stage_results WHERE import_id = ?",
+                (accepted["import_id"],),
+            ).fetchone()
+            return row, counts
+
+    async def event_stream():
+        last_revision = -1
+        try:
+            for _ in range(LEGACY_SSE_MAX_POLLS):
+                loaded = await run_db(_load_snapshot)
+                if loaded is None:
+                    yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+                    return
+                row, counts = loaded
+                snapshot = snapshot_from_parts(
+                    import_id=row["id"],
+                    revision=int(row["revision"]),
+                    status=row["status"],
+                    target_intent=row["target_intent"],
+                    attempt_no=int(row["current_attempt_no"]),
+                    stage=None,
+                    counts={
+                        "total": int(counts["total"] or 0),
+                        "answered": int(counts["answered"] or 0),
+                        "failed": int(counts["failed"] or 0),
+                    },
+                    error=(
+                        {"code": row["error_code"], "message": row["error_message"] or "", "retryable": False}
+                        if row["error_code"]
+                        else None
+                    ),
+                    allowed_actions=[],
+                    updated_at=row["updated_at"],
+                )
+                event = build_snapshot_event(snapshot)
+                if int(row["revision"]) > last_revision:
+                    last_revision = int(row["revision"])
+                    yield f"event: snapshot\nid: {last_revision}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                if row["status"] in terminal:
+                    return
+                await _asyncio.sleep(2)
+        finally:
+            # 断开连接不取消后台任务
+            pass
+
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
+    )
 
 
 def _normalize_target(target: Optional[str]) -> str:

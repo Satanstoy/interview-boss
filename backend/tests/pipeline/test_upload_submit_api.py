@@ -162,3 +162,36 @@ def test_legacy_sse_entry_rejects_invalid_target(client, monkeypatch, test_db):
         )
         assert resp.status_code == 400
     assert test_db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+
+
+def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
+    client, monkeypatch, _no_dispatch, test_db
+):
+    """AC-003：v2 开启时旧 SSE 只创建根任务并订阅快照，不自己启动 graph。"""
+
+    import app.routers.submit as submit_module
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
+    )
+    test_db.commit()
+    _v2_on(monkeypatch)
+    monkeypatch.setattr(submit_module, "LEGACY_SSE_MAX_POLLS", 1)
+
+    async def _forbidden(*args, **kwargs):
+        raise AssertionError("旧 SSE 入口不得自己启动 graph")
+
+    monkeypatch.setattr(submit_module, "stream_submit_graph", _forbidden)
+
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        resp = client.post(
+            "/api/submit-stream-v2",
+            headers={"Idempotency-Key": "sse-1", "X-Requested-With": "XMLHttpRequest"},
+            data={"text": "面经：解释 TCP 三次握手", "target": "private"},
+        )
+        assert resp.status_code == 200
+        assert "event: snapshot" in resp.text
+
+    row = test_db.execute("SELECT * FROM upload_imports").fetchone()
+    assert row is not None, "旧入口必须落根任务"
+    assert row["id"] == "sse-1" or row["idempotency_key"] == "sse-1"
