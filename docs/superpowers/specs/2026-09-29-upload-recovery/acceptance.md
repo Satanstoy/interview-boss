@@ -138,8 +138,26 @@ U1私有上传带独特marker。U2与A分别访问GET root、root SSE、旧jobs 
 | AC-026 | 历史与保留清理 | 活跃及失败恢复payload不被90天清理；完成老任务仍有结果入口，无payload时明确不可从零恢复 |
 | AC-027 | 可访问性 | 375/1440宽度、键盘操作、焦点稳定、按钮名称和aria状态可读 |
 | AC-028 | 完整隔离集成 | 真实API+临时SQLite+隔离Redis+worker+本地模型stub，上传→审核→断worker→恢复→浏览器打开正确结果 |
+| AC-029 | 面经题目数据流追踪 | 同一份普通用户分享面经，从上传、私人保存、逐题分类/匹配，到管理员审核、公共聚类/标签和结果读取，逐题身份与数据一致；注入单题失败后恢复不重复成功成果 |
 
 AC-028属于隔离集成E2E，不宣称验证真实供应商模型质量。另行真实供应商smoke需明确费用授权，不是默认自动执行命令。
+
+### AC-029：单份面经逐题数据流追踪
+
+**Given** U1提交一份选择“申请公共化”的面经，含5道内容彼此可区分的题目；本地模型stub按稳定ordinal返回固定分类和标签。至少一道审核保留题命中已发布公共规范题，其余保留题创建或关联到正确scope的规范题。测试不连接真实模型或生产数据。
+
+**When** 通过真实HTTP入口接受任务，由worker完成提取、私人保存、逐题分类与匹配；管理员从5道题中排除1道，并批准一个对来源字段做脱敏、对一道保留题题干做编辑的审核投影；公共处理继续执行。在一题公共聚类时注入可控失败，终止并重启worker，再由任务恢复入口继续处理。
+
+**Then** 测试必须用真实临时SQLite中的记录和实际授权读取API，逐项断言以下数据链：
+
+1. 一次客户端幂等键只对应一个稳定`import_id`；根任务、attempt和job归属一致，任务policy记录U1、share意图、私人预处理scope及审核要求，不能靠客户端`is_admin`或目标字段推导权限。调用账本证明审核前由U1的user scope付费，审核批准后的公共处理使用global/system scope；不得在测试trace或日志输出Key。
+2. 5道输入题分别保留唯一且稳定的ordinal；提取结果、分类检查点、私人`questions_detail`、`question_resolutions`能按ordinal一一追溯。每题的`cat1`、`cat2`和标签必须等于stub的预期值；已匹配公共题的私人resolution指向公共canonical，但不得修改公共来源、频次或内容。
+3. 管理员批准前，私人面经和审核快照存在，公共读取接口看不到该申请的待发布内容，公共canonical数量不因私人预处理增加。审核投影的脱敏字段和修改题干成为后续公共处理的唯一输入；不得从原始snapshot回填已清空字段。
+4. 公共处理时，4个保留的审核item与公共detail、当前有效public resolution及公共canonical一一对应；scope、题目文本、分类和标签与获批投影及stub结果一致。被排除的ordinal不进入公共处理或清单；未完成resolution的题不标记published。
+5. 注入失败的ordinal在首次运行中显示明确失败，不能被当成no_match、不能创建错误canonical或发布错误标签；任务状态不能提前显示全部完成，首次公共投影只包含3道成功题。恢复后只重跑失败工作，已成功的提取/保存/分类/resolution ID保持不变；最终公共面经清单恰有4道保留题，私人原稿仍有5道题，且没有重复detail、canonical来源或标签。
+6. 普通用户只读到获批公共投影；U2不能读取U1的私人原文/来源；管理员审核能力不等于读取U1其他私人任务。测试产出可读的逐题trace映射：`input ordinal → stage result → private detail/resolution → contribution item/review projection → public detail/resolution → canonical`，映射中只包含测试ID和非敏感字段。
+
+**测试**：新增`backend/tests/integration/test_upload_question_data_flow.py`，使用临时SQLite、隔离Redis和确定性模型stub，经过真实API、worker和公开读取查询；新增`frontend/tests/e2e/upload-question-data-flow.spec.js`验证用户提交、任务状态、恢复操作和最终题目/标签结果。测试必须断言逐题数据库关系，不能只检查HTTP 200、任务completed或页面截图。
 
 ## 3. 验证命令与证据
 
@@ -152,12 +170,13 @@ AC-028属于隔离集成E2E，不宣称验证真实供应商模型质量。另�
 .venv/bin/python -m pytest -q backend/tests/services/test_public_contributions_materialize.py backend/tests/services/test_public_contribution_recovery.py backend/tests/services/test_public_contribution_transitions.py backend/tests/security/test_upload_task_privacy.py
 .venv/bin/python -m pytest -q backend/tests/pipeline/test_interview_server_pagination.py backend/tests/pipeline/test_upload_extraction_integrity.py backend/tests/services/test_upload_status_projection.py backend/tests/infra/test_upload_stream_contract.py
 .venv/bin/python -m pytest -q backend/tests/pipeline/test_submit_job_retry.py backend/tests/pipeline/test_public_personal_scope_contract.py backend/tests/infra/test_question_bank_scope_invariants.py backend/tests/security/test_public_rebuild_answer_scope.py backend/tests/security/test_question_bank_source_projection_scope.py backend/tests/infra/test_db_retention.py
+.venv/bin/python -m pytest -q backend/tests/integration/test_upload_question_data_flow.py
 ```
 
 在frontend目录：
 
 ```bash
-npx playwright test tests/e2e/upload-task-center.spec.js tests/e2e/public-contribution-review.spec.js tests/e2e/jd-interview-submit.spec.js
+npx playwright test tests/e2e/upload-task-center.spec.js tests/e2e/upload-question-data-flow.spec.js tests/e2e/public-contribution-review.spec.js tests/e2e/jd-interview-submit.spec.js
 npm run build
 npm run lint
 npm run type-check
