@@ -33,12 +33,24 @@ def _today() -> str:
     """
     from datetime import datetime, timezone
     from app.services.practice_deck_service import _study_timezone
+
     return datetime.now(timezone.utc).astimezone(_study_timezone()).date().isoformat()
 
 
-def _increment_usage(conn, user_id: int, day: str, tokens: int = 0, limit: int = DAILY_LLM_CALL_LIMIT) -> bool:
-    """Atomically reserve one call, returning False when the limit is reached."""
-    if limit <= 0:
+def reserve_call(
+    conn,
+    *,
+    user_id: int,
+    day: str,
+    tokens: int = 0,
+    limit: int = DAILY_LLM_CALL_LIMIT,
+) -> bool:
+    """预留一次调用额度；**不 commit**，由调用方事务决定提交或回滚。
+
+    供 upload recovery 链路把“配额预留 + 调用账本”原子写入（contracts §1.7）。
+    """
+    effective_limit = DAILY_LLM_CALL_LIMIT if limit is None else limit
+    if effective_limit <= 0:
         return False
 
     cursor = conn.execute(
@@ -48,23 +60,29 @@ def _increment_usage(conn, user_id: int, day: str, tokens: int = 0, limit: int =
         "call_count = call_count + 1, "
         "total_tokens = total_tokens + excluded.total_tokens "
         "WHERE call_count < ?",
-        (user_id, day, tokens, limit),
+        (user_id, day, tokens, effective_limit),
     )
-    conn.commit()
     allowed = cursor.rowcount == 1
     if not allowed:
         logger.warning(
             "per-user daily LLM quota exceeded: user_id=%s day=%s limit=%s",
             user_id,
             day,
-            limit,
+            effective_limit,
         )
     return allowed
 
 
-async def check_and_record(
-    user_id: int, tokens: int = 0, limit: int | None = None
+def _increment_usage(
+    conn, user_id: int, day: str, tokens: int = 0, limit: int = DAILY_LLM_CALL_LIMIT
 ) -> bool:
+    """Atomically reserve one call and commit（旧 wrapper 语义保持不变）。"""
+    allowed = reserve_call(conn, user_id=user_id, day=day, tokens=tokens, limit=limit)
+    conn.commit()
+    return allowed
+
+
+async def check_and_record(user_id: int, tokens: int = 0, limit: int | None = None) -> bool:
     """查询今日用量并计入本次调用。
 
     - 今日调用次数已 ≥ 上限 → 返回 False（本次调用被拒绝，不计入）。
@@ -99,4 +117,5 @@ async def release_quota(user_id: int, day: str | None = None) -> None:
             (user_id, day),
         )
         conn.commit()
+
     await run_db(_run)
