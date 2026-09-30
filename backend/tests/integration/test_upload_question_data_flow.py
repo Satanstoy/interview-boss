@@ -30,7 +30,45 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from app.db.migrations import run_migrations
+
+
+@pytest.fixture(autouse=True)
+def _isolate_db_conn(monkeypatch):
+    """本文件自包含 DB 隔离（R12 后与 AC-028 同文件同进程的健壮性）。
+
+    AC-028/全栈 fixture 会 sweep 所有 app.* 模块的 get_db_connection/run_db
+    引用并在 teardown 还原；本文件用 ``_db_conn_var`` 注入临时库连接时，
+    若兄弟测试先运行，已导入模块的引用可能残留指向已关闭的库。这里在
+    **每个用例运行期间**把全模块引用绑定到当前 ``_db_conn_var`` 的值，
+    保证本文件在任意兄弟测试后都能独立运行。
+    """
+
+    import sys
+    import app.db.connection as db_module
+
+    def _shim_get_db_connection():
+        value = db_module._db_conn_var.get()
+        if value is not None:
+            return value
+        raise RuntimeError("本文件测试必须通过 _db_conn_var 注入连接")
+
+    async def _shim_run_db(func):
+        return func()
+
+    patched = []
+    for mod_name, mod in list(sys.modules.items()):
+        if not mod_name.startswith("app.") or mod is None:
+            continue
+        if hasattr(mod, "run_db"):
+            patched.append((mod, "run_db", mod.run_db))
+            monkeypatch.setattr(mod, "run_db", _shim_run_db)
+        if hasattr(mod, "get_db_connection"):
+            patched.append((mod, "get_db_connection", mod.get_db_connection))
+            monkeypatch.setattr(mod, "get_db_connection", _shim_get_db_connection)
+    yield
 
 
 def _connect(path, migrate=True):
