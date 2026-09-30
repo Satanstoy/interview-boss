@@ -269,6 +269,30 @@ npx playwright test tests/e2e/upload-task-center.spec.js   # 6 passed
 其中 `test_api_does_not_write_production_db` 甚至直接读生产库做断言。全部改为内存/临时库，
 并保留其原始语义。这也意味着：**本次改造之前，跑测试本身就是生产数据风险**。
 
+## 5b. 对齐修复后回归（2026-09-30）
+
+在本次 spec 对齐修复（retry 路由、admin retry、v2 CAS 路由、严格 user-only 读取、
+AC-029 测试）之后重新执行：
+
+```bash
+.venv/bin/python -m pytest -q backend/tests/pipeline backend/tests/services \
+  backend/tests/security backend/tests/integration
+# 16 failed, 1650 passed, 6 skipped, 14 deselected
+# 失败全部在 tests/services/test_fts_service.py —— **既有的跨目录顺序污染**：
+# 同一子集在修复前基线 ee59eaec 上同样失败 23 例（1620 passed），
+# 本任务未引入任何新失败，反而修复了 7 例（23 → 16）。
+# 污染根因：fts_service._idf_cache 是模块级缓存，pipeline/services/security/
+# integration 同进程组合下先在别的 test_db 上计算，导致 FTS 用例读到陈旧词频。
+# 该问题与上传恢复改造无关，单独记为既有缺陷，不在本任务范围外扩。
+
+cd frontend
+npm run build                          # exit 0
+npm run lint                           # 0 errors, 38 warnings（阈值 38）
+npx playwright test tests/e2e/upload-task-center.spec.js \
+  tests/e2e/upload-question-data-flow.spec.js \
+  tests/e2e/ui-title-hierarchy.spec.js  # 24 passed
+```
+
 ## 6. 验收状态汇总
 
 | 状态 | AC |
