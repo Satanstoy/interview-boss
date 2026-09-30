@@ -12,4 +12,4 @@ F-ENQUEUE-ROOT	FIXED (persist_personal 传 root; 其余调用点仍靠兜底)	AC
 F-DATATABLE	FIXED 657eb593	contracts §4.5	DataTable 仍 client 分页（rows.length 当 total + slice）；interviewTotal 零消费方	frontend/src/components/common/DataTable.vue:5,130;useMasterBankData.js:83	DataTable 加 server 模式，传服务端 total
 F-RESOLVED-TYPE	FIXED ea8a4edc	contracts §1.1	auto 识别不落 resolved_type（硬编 interview、repository 参数从不传）	backend/app/services/upload_lifecycle.py(accept_upload);upload_repository.py:40	根据 content_type_hint/识别结果回填 resolved_type
 F-E2E-PUBLIC	FIXED e91bc22f	acceptance §194	public-contribution-review.spec.js 不存在；验收命令无法完整执行	ls frontend/tests/e2e/public-contribution-review.spec.js (missing)	补该 e2e（mock API）
-F-REVIEW-TOAST	FRONT	AC-001	切岗无显式提示（仅列表重拉+高亮，无 toast"已切换到 XX 岗位"）	AuthenticatedLayout.vue:674-676	补显式岗位切换提示
+F-REVIEW-TOAST	FIXED (AC-001 切岗 toast)	AC-001	切岗无显式提示（仅列表重拉+高亮，无 toast）	AuthenticatedLayout.vue:664-683	已补 toast.info 岗位切换提示

@@ -675,6 +675,8 @@ watch(
           }
         }
         await fetchTableData()
+        // AC-001：切岗显式提示（spec §7「返回任务结果时可切换到该面经所属岗位并明确提示」）
+        toast.info(`已切换到岗位：${currentUser.value?.current_position || '目标岗位'}`)
       } catch {
         // 岗位切换失败不阻塞定位
       }
