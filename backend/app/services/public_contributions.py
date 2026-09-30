@@ -1068,25 +1068,48 @@ async def finalize_public_contribution_approval(
     *,
     excluded_item_ids: list[int] | None = None,
     review_fields: dict | None = None,
+    expected_revision: int | None = None,
 ) -> dict:
-    """审批落库并在进入聚类队列时调度后台攒批（服务层统一入口）。
+    """审批落库并在进入聚类队列时调度后台攒批（v2 CAS，服务层统一入口）。
 
     路由层只调用本函数，不直接接触 pipeline 调度；聚类攒批沿用
     ``_run_cluster_batch_in_background`` 的持久化 job + ARQ best-effort 语义。
+
+    ``expected_revision`` 缺省时取当前 revision（兼容旧 UI 空参数批准）；
+    显式传入时按 CAS 校验，并发/过期批准返回 ``StateConflict``（HTTP 409）。
+    审核请求经 ``build_review_projection_request`` 严格解析：未知字段拒绝，
+    敏感来源字段默认不公开，只有显式确认才公开（AC-014）。
     """
+
+    from app.models.upload_contracts import build_review_projection_request
 
     def _approve():
         with get_db_connection() as conn:
-            return approve_public_contribution(
+            row = conn.execute(
+                "SELECT revision, source_type FROM public_contribution_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("公共化申请不存在")
+            current_revision = int(row["revision"])
+            revision = expected_revision if expected_revision is not None else current_revision
+            review_request = build_review_projection_request(
+                {
+                    "expected_revision": revision,
+                    "excluded_item_ids": excluded_item_ids or [],
+                    "review_fields": review_fields or {},
+                },
+                source_type=row["source_type"],
+            )
+            return approve_public_contribution_v2(
                 conn,
-                request_id,
-                admin_id,
-                excluded_item_ids=excluded_item_ids,
-                review_fields=review_fields,
+                request_id=request_id,
+                admin_id=admin_id,
+                review_request=review_request,
             )
 
     result = await run_db(_approve)
-    if result.get("status") == "queued" and result.get("public_interview_id"):
+    if result.get("public_interview_id"):
         result["cluster_scheduled"] = await _run_cluster_batch_in_background(user_id=admin_id)
     return result
 

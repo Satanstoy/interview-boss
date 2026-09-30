@@ -184,3 +184,154 @@ def test_retry_http_admin_only(client, test_db, monkeypatch):
     for _ in _as_admin():
         resp = client.post("/api/admin/public-contributions/1/retry", json={})
         assert resp.status_code == 409, resp.text
+
+
+def test_approve_http_default_revision_is_cas_safe(client, test_db):
+    """approve 路由走 v2 CAS：缺省 revision 取当前值；过期 revision 409。"""
+
+    from app.asgi import app
+    from app.core.auth import get_admin_user
+
+    _seed(test_db)
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'pending_review' WHERE id = 1"
+    )
+    test_db.commit()
+
+    def _as_admin():
+        app.dependency_overrides[get_admin_user] = lambda: {"id": 201, "is_admin": 1, "username": "admin"}
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_admin_user, None)
+
+    # 空参数批准：兼容旧 UI，默认 revision=2，成功进入 approved_for_processing
+    for _ in _as_admin():
+        resp = client.post("/api/admin/public-contributions/1/approve", json={})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "approved_for_processing"
+        assert body["revision"] == 3
+        # 已批准状态重复 approve 幂等返回（同 revision）
+        again = client.post("/api/admin/public-contributions/1/approve", json={})
+        assert again.status_code == 200
+        assert again.json()["revision"] == body["revision"]
+
+    # 过期 expected_revision → 409 STATE_CONFLICT
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'pending_review' WHERE id = 1"
+    )
+    test_db.execute("UPDATE public_contribution_requests SET revision = revision + 10 WHERE id = 1")
+    test_db.commit()
+    for _ in _as_admin():
+        resp = client.post(
+            "/api/admin/public-contributions/1/approve",
+            json={"expected_revision": 1},
+        )
+        assert resp.status_code == 409, resp.text
+        assert "STATE_CONFLICT" in resp.text or "版本已变化" in resp.text
+
+
+def test_approve_http_rejects_unknown_fields(client, test_db):
+    """approve 走严格投影 DTO：未知审核字段 → 422，且无写入（AC-014）。"""
+
+    from app.asgi import app
+    from app.core.auth import get_admin_user
+
+    _seed(test_db)
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'pending_review' WHERE id = 1"
+    )
+    test_db.commit()
+
+    def _as_admin():
+        app.dependency_overrides[get_admin_user] = lambda: {"id": 201, "is_admin": 1, "username": "admin"}
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_admin_user, None)
+
+    for _ in _as_admin():
+        resp = client.post(
+            "/api/admin/public-contributions/1/approve",
+            json={"review_fields": {"source": {"hacker_field": "x"}}},
+        )
+        assert resp.status_code == 422, resp.text
+        assert (
+            test_db.execute(
+                "SELECT status FROM public_contribution_requests WHERE id = 1"
+            ).fetchone()["status"]
+            == "pending_review"
+        ), "未知字段不得有写入"
+
+
+def test_withdraw_http_uses_v2_and_409_on_stale(client, test_db):
+    """withdraw 路由走 v2 CAS：成功撤回不留可执行公共工作；已批准 409。"""
+
+    from app.asgi import app
+    from app.core.auth import get_current_user
+
+    _seed(test_db)
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'pending_review' WHERE id = 1"
+    )
+    test_db.commit()
+
+    def _as_user():
+        app.dependency_overrides[get_current_user] = lambda: {"id": 101, "is_admin": 0, "username": "u101"}
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    # pending_review 可撤回
+    for _ in _as_user():
+        resp = client.post("/api/public-contributions/1/withdraw", json={})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "withdrawn"
+    assert (
+        test_db.execute(
+            "SELECT status FROM public_contribution_requests WHERE id = 1"
+        ).fetchone()["status"]
+        == "withdrawn"
+    )
+
+    # 已撤回再撤回 → 幂等 200（v2 自带状态幂等）
+    for _ in _as_user():
+        resp = client.post("/api/public-contributions/1/withdraw", json={})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "withdrawn"
+
+
+def test_withdraw_http_conflicts_after_approve(client, test_db):
+    """已批准（approved_for_processing）再撤回 → 409，不能假装撤回。"""
+
+    from app.asgi import app
+    from app.core.auth import get_admin_user, get_current_user
+
+    _seed(test_db)
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'pending_review' WHERE id = 1"
+    )
+    test_db.commit()
+
+    def _as_user():
+        app.dependency_overrides[get_current_user] = lambda: {"id": 101, "is_admin": 0, "username": "u101"}
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    def _as_admin():
+        app.dependency_overrides[get_admin_user] = lambda: {"id": 201, "is_admin": 1, "username": "admin"}
+        try:
+            yield
+        finally:
+            app.dependency_overrides.pop(get_admin_user, None)
+
+    for _ in _as_admin():
+        approved = client.post("/api/admin/public-contributions/1/approve", json={})
+        assert approved.status_code == 200, approved.text
+    for _ in _as_user():
+        resp = client.post("/api/public-contributions/1/withdraw", json={})
+        assert resp.status_code == 409, resp.text

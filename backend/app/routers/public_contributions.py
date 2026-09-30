@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
+from app.models.upload_contracts import ReviewFieldError
 from app.services.public_contributions import (
     StateConflict,
     create_public_contribution_request,
@@ -17,7 +18,7 @@ from app.services.public_contributions import (
     list_public_contribution_requests,
     reject_public_contribution,
     retry_failed_public_items,
-    withdraw_public_contribution,
+    withdraw_public_contribution_v2,
 )
 
 
@@ -29,6 +30,7 @@ class ContributionCreateRequest(BaseModel):
 class ContributionApproveRequest(BaseModel):
     excluded_item_ids: list[int] = Field(default_factory=list)
     review_fields: dict = Field(default_factory=dict)
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ContributionRejectRequest(BaseModel):
@@ -94,10 +96,16 @@ async def get_my_contribution(request_id: int, user: dict = Depends(get_current_
 async def withdraw_contribution(request_id: int, user: dict = Depends(get_current_user)):
     def _withdraw():
         with get_db_connection() as conn:
-            return withdraw_public_contribution(conn, request_id, user["id"])
+            return withdraw_public_contribution_v2(
+                conn,
+                request_id=request_id,
+                requester_id=user["id"],
+            )
 
     try:
         return await run_db(_withdraw)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)
 
@@ -159,7 +167,12 @@ async def approve_contribution(
             admin["id"],
             excluded_item_ids=request.excluded_item_ids,
             review_fields=request.review_fields,
+            expected_revision=request.expected_revision,
         )
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except ReviewFieldError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)
 
