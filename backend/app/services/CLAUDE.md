@@ -30,7 +30,7 @@
 | `chat_event_service.py` | Harness 2.0 append-only turn event、sequence replay、event idempotency 和 transactional outbox 写入 | `db/connection` |
 | `harness_state_service.py` | Harness 2.0 Ledger bootstrap、Action 幂等、Attempt 重试链、不可变 Artifact、TurnRun lease/heartbeat、Ledger 乐观提交和事件 Outbox claim/ack | `db/connection`, `chat_common` |
 | `harness_turn_worker.py` | Harness 2.0 ARQ worker runtime：读取冻结 TurnRun、运行单一 interview-agent、将运行事件投影到 append-only SSE stream，并在 CommitTurn 边界完成 assistant 与 Ledger | `chat_service`, `agents/chat/graph` |
-| `worker.py`（`app/worker.py`） | ARQ worker：任务执行 + 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
+| `worker.py`（`app/worker.py`） | ARQ worker：任务执行（`submit_import_task` 成功/失败聚合根状态；share 完成建公共化申请并回写 `upload_imports.contribution_request_id`；`match_failed>0` 时 match/save 阶段检查点标 failed → 根 partial_failed）+ 定时任务；`scheduled_db_retention_task`（每日 4:00）按龄清理过期邮箱验证码/完成队列/失败登录/陈旧 jobs（`run_db_retention`，保留期 30-90 天，父任务血缘保护） | |
 | `fts_service.py` | FTS5 全文搜索 | `db/connection` |
 | `memory_recall_service.py` | 用户长期记忆召回 | `db/connection` |
 | `title_service.py` | 对话标题自动生成 | `llm` |
