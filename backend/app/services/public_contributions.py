@@ -12,7 +12,7 @@ import json
 from typing import Any
 
 from app.db.connection import get_db_connection, run_db
-from app.services.pipeline.queue import _run_cluster_batch_in_background
+from app.services.pipeline.queue import _run_cluster_batch_in_background, enqueue_questions
 
 REQUEST_ACTIVE_STATUSES = (
     "pending_review",
@@ -746,6 +746,86 @@ def withdraw_public_contribution_v2(
     except Exception:
         _finish(conn, commit=False)
         raise
+
+
+APPROVED_PROCESSING_STATES = (
+    "approved_for_processing",
+    "queued",
+    "processing",
+    "partially_published",
+    "failed",
+)
+
+
+def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
+    """重试已批准申请的失败公共子项（AC-015 / contracts §4.1）。
+
+    规则（contracts.md §3.3、§4.1）：
+
+    - 仅批准后进入处理流程的申请可重试：``pending_review``/``changes_requested``
+      拒绝为 ``STATE_CONFLICT``；
+    - 复用同一审核投影，**不修改** review 状态/revision/projection_hash；
+    - 只把 ``status='failed'`` 且有 ``public_detail_id`` 的子项重新入队并复位为
+      ``queued``，已成功（published）子项不触碰；
+    - 无失败子项时返回空列表，不假装执行了工作。
+    """
+
+    row = _request_row(conn, request_id)
+    if row is None:
+        raise ValueError("公共化申请不存在")
+    if row["status"] not in APPROVED_PROCESSING_STATES:
+        raise StateConflict(f"只有已批准且进入处理流程的申请可以重试失败子项: {row['status']}")
+
+    failed_items = conn.execute(
+        "SELECT id, public_detail_id FROM public_contribution_items "
+        "WHERE request_id = ? AND status = 'failed' AND public_detail_id IS NOT NULL "
+        "ORDER BY ordinal",
+        (request_id,),
+    ).fetchall()
+
+    reprocessed: list[int] = []
+    if failed_items:
+        public_interview_id = row["public_interview_id"]
+        for item in failed_items:
+            detail_id = int(item["public_detail_id"])
+            # 复用同一投影：把该 public_detail 重新放回分析队列（幂等去重）
+            if public_interview_id is not None:
+                enqueue_questions(
+                    int(public_interview_id),
+                    owner_id=None,
+                    question_detail_ids=[detail_id],
+                    contribution_request_id=request_id,
+                    conn=conn,
+                )
+            conn.execute(
+                "UPDATE public_contribution_items SET status = 'queued', "
+                "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (item["id"],),
+            )
+            reprocessed.append(int(item["id"]))
+        if reprocessed:
+            conn.execute(
+                "UPDATE public_contribution_requests SET status = 'queued', "
+                "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (request_id,),
+            )
+        _event(
+            conn,
+            request_id,
+            admin_id,
+            "failed_items_retried",
+            row["status"],
+            "queued" if reprocessed else row["status"],
+            {"reprocessed_item_ids": reprocessed},
+        )
+
+    return {
+        "request_id": request_id,
+        "status": "queued" if reprocessed else row["status"],
+        "reprocessed_item_ids": [int(item_id) for item_id in reprocessed],
+        "revision": int(row["revision"]),
+        "projection_hash": row["projection_hash"],
+    }
 
 
 def publish_items_with_resolutions(conn, *, request_id: int) -> dict:

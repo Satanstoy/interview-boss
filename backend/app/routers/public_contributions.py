@@ -10,11 +10,13 @@ from pydantic import BaseModel, Field
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
 from app.services.public_contributions import (
+    StateConflict,
     create_public_contribution_request,
     finalize_public_contribution_approval,
     get_public_contribution_request,
     list_public_contribution_requests,
     reject_public_contribution,
+    retry_failed_public_items,
     withdraw_public_contribution,
 )
 
@@ -174,5 +176,24 @@ async def reject_contribution(
 
     try:
         return await run_db(_reject)
+    except ValueError as error:
+        _bad_request(error)
+
+
+@router.post("/api/admin/public-contributions/{request_id}/retry")
+async def retry_contribution(
+    request_id: int,
+    admin: dict = Depends(get_admin_user),
+):
+    """重试已批准申请的失败公共子项（AC-015）：复用同一投影，不改审核状态。"""
+
+    def _retry():
+        with get_db_connection() as conn:
+            return retry_failed_public_items(conn, request_id=request_id, admin_id=admin["id"])
+
+    try:
+        return await run_db(_retry)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)
