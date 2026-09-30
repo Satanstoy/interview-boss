@@ -306,7 +306,8 @@ def _materialize_public_interview(
 
 def _materialize_public_jd(conn, snapshot: dict) -> int:
     source = snapshot["source"]
-    url = source.get("url") or ""
+    # 审核投影的源使用 source_url 字段（contracts §3.1）；旧直写路径用 url，兼容两者
+    url = source.get("source_url") or source.get("url") or ""
     existing = conn.execute(
         "SELECT id FROM jd WHERE owner_id IS NULL AND url = ? "
         "AND deleted_at IS NULL ORDER BY id LIMIT 1",
@@ -320,21 +321,18 @@ def _materialize_public_jd(conn, snapshot: dict) -> int:
     from app.db.utils import _extract_url_signature
 
     values = {
-        key: source.get(key)
-        for key in (
-            "url",
-            "company",
-            "season",
-            "url_signature",
-            "job_position",
-            "tech_stack",
-            "source",
-            "position",
-            "salary",
-            "job_title",
-        )
+        "url": url,
+        "company": source.get("company"),
+        "tech_stack": source.get("tech_stack"),
+        "position": source.get("position"),
+        "salary": source.get("salary"),
+        "job_title": source.get("job_title"),
+        # 岗位从源冻结：投影 JD 源不含 job_position（contracts §3.1），
+        # 旧直写路径携带时透传，避免公共 JD 丢失岗位信息（R11）
+        "job_position": source.get("job_position") or source.get("position") or "",
+        "season": source.get("season") or "",
+        "url_signature": source.get("url_signature") or _extract_url_signature(url),
     }
-    values["url_signature"] = values["url_signature"] or _extract_url_signature(url)
     values.update({"owner_id": None, "status": "approved", "deleted_at": None})
     return _insert_dynamic(conn, "jd", values)
 
@@ -370,12 +368,20 @@ def build_review_projection(
     allowed = REVIEW_SOURCE_ALLOWED_FIELDS[source_type]
     source_model = request.review_fields.source
     provided = set(getattr(source_model, "model_fields_set", set()))
+    # 真实快照是 {source: {...}, items: [...]}，非敏感字段缺省需从 source 层级继承
+    source_base = snapshot.get("source") if isinstance(snapshot, dict) else None
+    if not isinstance(source_base, dict):
+        source_base = {}
     source: dict = {}
     for field in sorted(allowed):
         if field in SENSITIVE_SOURCE_FIELDS:
             value = getattr(source_model, field) if field in provided else None
         else:
-            value = getattr(source_model, field) if field in provided else snapshot.get(field)
+            value = (
+                getattr(source_model, field)
+                if field in provided
+                else source_base.get(field)
+            )
         source[field] = value
 
     item_models = {int(item.item_id): item for item in request.review_fields.items}
@@ -564,6 +570,7 @@ def approve_public_contribution_v2(
                 "status": row["status"],
                 "revision": current_revision,
                 "public_interview_id": row["public_interview_id"],
+                "public_jd_id": row["public_jd_id"],
             }
         if row["status"] not in APPROVABLE_STATES:
             raise StateConflict(f"当前状态不可批准: {row['status']}")
@@ -626,11 +633,52 @@ def approve_public_contribution_v2(
         if updated.rowcount != 1:
             raise StateConflict("申请状态已被其他操作修改")
 
+        # 按 source_type 分派物化（R11）：JD 只产生公共 JD，不走面经/题目分支；
+        # 岗位从源快照冻结，不允许在 approve 中偷偷换岗位（contracts §3.1）。
+        source_base = snapshot.get("source") if isinstance(snapshot, dict) else {}
+        if not isinstance(source_base, dict):
+            source_base = {}
+        if row["source_type"] == "jd":
+            public_jd_id = _materialize_public_jd(conn, {"source": projection["source"]})
+            conn.execute(
+                "UPDATE public_contribution_requests SET public_jd_id = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (public_jd_id, request_id),
+            )
+            conn.execute(
+                "UPDATE public_contribution_items SET status = 'published', "
+                "updated_at = CURRENT_TIMESTAMP WHERE request_id = ? "
+                "AND status = 'approved_for_processing'",
+                (request_id,),
+            )
+            _event(
+                conn,
+                request_id,
+                admin_id,
+                "public_projection_created",
+                "approved_for_processing",
+                "published",
+                {"projection_hash": projection["hash"]},
+            )
+            _finish(conn, commit=True)
+            return {
+                "status": "published",
+                "revision": int(
+                    conn.execute(
+                        "SELECT revision FROM public_contribution_requests WHERE id = ?",
+                        (request_id,),
+                    ).fetchone()["revision"]
+                ),
+                "public_jd_id": public_jd_id,
+                "projection_hash": projection["hash"],
+            }
+
         public_interview_id, detail_ids = materialize_public_interview_from_projection(
             conn,
             projection,
             source_id=int(row["source_id"]),
             requester_id=int(row["requester_id"]),
+            job_position=source_base.get("job_position") or "",
         )
         conn.execute(
             "UPDATE public_contribution_requests SET public_interview_id = ?, "

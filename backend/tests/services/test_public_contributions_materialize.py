@@ -198,3 +198,152 @@ def test_projection_has_hash_and_reviewer():
         snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     assert again["hash"] == projection["hash"]
+
+
+def _nested_snapshot():
+    """真实快照结构：{source: {...}, items: [...]}（R11）。"""
+
+    return {
+        "source": {
+            "company": "PRIVATE公司",
+            "round": "一面",
+            "focus": "数据库",
+            "source_url": "https://secret.example.com/post/1",
+            "season": "2026春招",
+            "difficulty": "中等",
+            "job_position": "后端开发",
+        },
+        "items": _items(),
+    }
+
+
+def test_projection_inherits_non_sensitive_defaults_from_nested_source(R11_bug=None):
+    """R11：真实嵌套快照下，非敏感来源字段从 source 层级继承（曾读错层级全变 None）。"""
+
+    request = _review_request({"expected_revision": 1, "review_fields": {}})
+    projection = build_review_projection(
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
+    )
+    # 非敏感字段继承 source 层级
+    assert projection["source"]["focus"] == "数据库"
+    assert projection["source"]["season"] == "2026春招"
+    assert projection["source"]["difficulty"] == "中等"
+    # 敏感字段未显式确认默认不公开
+    assert projection["source"]["company"] is None
+    assert projection["source"]["round"] is None
+    assert projection["source"]["source_url"] is None
+
+
+def test_jd_approve_materializes_jd_not_interview():
+    """R11：v2 批准 JD 只产生公共 jd，绝不走面经/题目分支；岗位信息保留。"""
+
+    from app.models.upload_contracts import build_review_projection_request
+    from app.services.public_contributions import (
+        approve_public_contribution_v2,
+        create_public_contribution_request,
+    )
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO jd (id, url, company, job_position, job_title, tech_stack, owner_id, status) "
+        "VALUES (50, 'https://private.example.com/jd/1', 'PRIVATE公司', '后端开发', '资深后端', 'Go', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    conn.commit()
+
+    request = create_public_contribution_request(conn, "jd", 50, 101)
+    request_id = request["id"]
+    assert request["source_type"] == "jd"
+
+    approval = approve_public_contribution_v2(
+        conn,
+        request_id=request_id,
+        admin_id=201,
+        review_request=build_review_projection_request(
+            {
+                "expected_revision": 1,
+                "review_fields": {
+                    "source": {
+                        "company": "某公司",
+                        "job_title": "资深后端工程师",
+                        "tech_stack": "Go",
+                        "position": "后端开发",
+                        "source_url": "https://public.example.com/jd/1",
+                    }
+                },
+            },
+            source_type="jd",
+        ),
+    )
+    assert approval["public_jd_id"]
+    assert approval["status"] == "published"
+
+    # 只产生公共 JD，不产生面经/题目
+    assert conn.execute("SELECT COUNT(*) FROM interview").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM questions_detail").fetchone()[0] == 0
+    jd_row = conn.execute("SELECT * FROM jd WHERE id = ?", (approval["public_jd_id"],)).fetchone()
+    assert jd_row["owner_id"] is None
+    assert jd_row["company"] == "某公司"
+    assert jd_row["job_title"] == "资深后端工程师"
+    assert jd_row["url"] == "https://public.example.com/jd/1"
+    # 岗位信息保留（R11）
+    assert (jd_row["job_position"] or "") == "后端开发"
+
+    # 申请 item 标记 published
+    item = conn.execute(
+        "SELECT status FROM public_contribution_items WHERE request_id = ?", (request_id,)
+    ).fetchone()
+    assert item["status"] == "published"
+    request_row = conn.execute(
+        "SELECT * FROM public_contribution_requests WHERE id = ?", (request_id,)
+    ).fetchone()
+    assert request_row["public_jd_id"] == approval["public_jd_id"]
+    conn.close()
+
+
+def test_interview_approve_keeps_snapshot_job_position():
+    """R11：面经批准物化时岗位从源冻结，不因审查丢失。"""
+
+    from app.models.upload_contracts import build_review_projection_request
+    from app.services.public_contributions import (
+        approve_public_contribution_v2,
+        create_public_contribution_request,
+    )
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, company, job_position, owner_id, status) "
+        "VALUES (60, 'https://private.example.com/i/1', 'PRIVATE公司', '后端开发', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2, owner_id) "
+        "VALUES (61, 60, '说明数据库索引的工作原理', '数据库', '索引', 101)"
+    )
+    conn.commit()
+
+    request = create_public_contribution_request(conn, "interview", 60, 101)
+    request_id = request["id"]
+    approval = approve_public_contribution_v2(
+        conn,
+        request_id=request_id,
+        admin_id=201,
+        review_request=build_review_projection_request(
+            {"expected_revision": 1, "review_fields": {"source": {"company": "某公司"}}},
+            source_type="interview",
+        ),
+    )
+    row = conn.execute(
+        "SELECT * FROM interview WHERE id = ?", (approval["public_interview_id"],)
+    ).fetchone()
+    # 岗位从源快照冻结
+    assert (row["job_position"] or "") == "后端开发"
+    # 未确认敏感字段不公开
+    assert (row["company"] or "") == "某公司"
+    assert (row["round"] or "") == ""
+    assert (row["url"] or "") == ""
+    conn.close()
