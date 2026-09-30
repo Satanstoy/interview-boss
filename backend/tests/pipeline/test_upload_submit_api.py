@@ -34,6 +34,23 @@ def _v2_on(monkeypatch):
     monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
 
 
+def _seed_user_models(test_db, uids=(101, 201)):
+    """为测试用户配置个人模型：strict user-only 读取下私人 scope 预检才通过。
+
+    AC-004 修复后上传链路私人阶段走 ``get_strict_user_llm_config``，本人缺
+    配置时即使 global 有效也置 needs_action。需要成功建 job 的用例必须先
+    为用户写入 ``user_llm_config``（明文即可，decrypt 对明文容错）。
+    """
+
+    for uid in uids:
+        test_db.execute(
+            "INSERT OR IGNORE INTO user_llm_config (user_id, api_key, base_url, model) "
+            "VALUES (?, 'user-key', 'https://user.example.com/v1', 'user-model')",
+            (uid,),
+        )
+    test_db.commit()
+
+
 def _post(client, *, text="面经：解释 TCP 三次握手", target="private", key="k-1", files=None):
     data = {"text": text, "target": target, "url": "", "season": "2026春招"}
     if files:
@@ -66,7 +83,7 @@ def test_submit_jobs_v2_returns_stable_import_id(
             "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
             (uid, f"u{uid}"),
         )
-    test_db.commit()
+    _seed_user_models(test_db)
     _v2_on(monkeypatch)
     for login in _login(client, entry_user):
         resp = _post(client, target=target, key=f"k-{is_admin}-{target}")
@@ -89,7 +106,7 @@ def test_submit_jobs_v2_conflict_on_same_key_different_content(
     test_db.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
     )
-    test_db.commit()
+    _seed_user_models(test_db, uids=(101,))
     _v2_on(monkeypatch)
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         first = _post(client, text="第一篇面经", key="same")
@@ -105,7 +122,7 @@ def test_by_key_returns_only_own_import(client, monkeypatch, _no_dispatch, test_
             "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
             (uid, f"u{uid}"),
         )
-    test_db.commit()
+    _seed_user_models(test_db, uids=(101,))
     _v2_on(monkeypatch)
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         created = _post(client, key="mine-only").json()
@@ -174,7 +191,7 @@ def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
     test_db.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
     )
-    test_db.commit()
+    _seed_user_models(test_db, uids=(101,))
     _v2_on(monkeypatch)
     monkeypatch.setattr(submit_module, "LEGACY_SSE_MAX_POLLS", 1)
 

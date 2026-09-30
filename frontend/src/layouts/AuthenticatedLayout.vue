@@ -633,6 +633,49 @@ watch(authCompleted, (done) => {
 
 watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeContext() }, { immediate: true })
 
+// ── AC-001：任务中心「查看结果」写入 page/position/highlight 查询参数，
+// 这里消费它们：切换岗位筛选、跳到目标页并高亮目标行（只主动打开时生效）。
+const locationQueryConsumed = ref(false)
+watch(
+  () => [route.path, route.query.page, route.query.highlight, route.query.position],
+  async ([path, page, highlight, position]) => {
+    if (!isAuthenticatedForUi.value || path !== '/interview') return
+    if (!highlight) {
+      locationQueryConsumed.value = false
+      return
+    }
+    // 同一目标不重复触发（消费后我们清掉参数，再次进入不重复）
+    if (locationQueryConsumed.value && highlightInterviewId.value) return
+    if (position && String(position) !== String(currentUser.value?.current_position_id || '')) {
+      // 仅主动「查看结果」时切到目标岗位并回到第 1 页（spec §7）。
+      // 岗位切换由服务端完成，随后拉取该岗位视图。
+      try {
+        const { switchPositionById } = await import('@/services/profileApi.js')
+        const data = await switchPositionById(Number(position))
+        if (currentUser.value) {
+          currentUser.value = {
+            ...currentUser.value,
+            current_position: data.current_position || data.current_job_position || currentUser.value.current_position,
+            current_position_id: data.current_position_id ?? null,
+          }
+        }
+        await fetchTableData()
+      } catch {
+        // 岗位切换失败不阻塞定位
+      }
+    }
+    const pageNumber = Math.max(1, parseInt(String(page), 10) || 1)
+    interviewCurrentPage.value = pageNumber
+    highlightInterviewId.value = String(highlight)
+    locationQueryConsumed.value = true
+    // 消费后清理 query，避免刷新再次触发/污染 URL
+    if (String(route.query.page || '') !== String(pageNumber) || String(route.query.highlight || '') !== String(highlight)) {
+      router.replace({ path: '/interview', query: {} })
+    }
+  },
+  { immediate: false },
+)
+
 onMounted(async () => {
   if (isPreviewMode) {
     currentUser.value = previewUser
