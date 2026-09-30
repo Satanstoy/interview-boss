@@ -138,10 +138,12 @@ def get_processing_count() -> int:
 
 def _recover_stuck_processing():
     conn = get_db_connection()
+    # contracts §2.5：按 locked_until（租约）回收，不用 created_at——
+    # created_at 早但租约仍有效的 processing 行不得误伤。
     conn.execute(
-        "UPDATE analysis_queue SET status = 'pending' "
-        "WHERE status = 'processing' AND created_at < datetime('now', ?)",
-        (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",),
+        "UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
+        "WHERE status = 'processing' AND locked_until IS NOT NULL "
+        "AND locked_until < CURRENT_TIMESTAMP",
     )
     conn.commit()
 
@@ -197,8 +199,9 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
         target_owner = bucket["owner_id"]
 
         rows = cursor.execute(
-            "UPDATE analysis_queue SET status = 'processing', processed_at = CURRENT_TIMESTAMP "
-            "WHERE id IN ("
+            "UPDATE analysis_queue SET status = 'processing', processed_at = CURRENT_TIMESTAMP, "
+            "locked_until = datetime('now', ?) "
+            f"WHERE id IN ("
             "  SELECT aq.id FROM analysis_queue aq "
             "  JOIN interview i ON aq.interview_id = i.id "
             "  JOIN questions_detail qd ON aq.question_detail_id = qd.id "
@@ -209,7 +212,7 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
             "  ORDER BY aq.id LIMIT ?"
             ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id, "
             + contribution_returning,
-            (target_owner, target_owner, batch_size),
+            (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes", target_owner, target_owner, batch_size),
         ).fetchall()
         conn.commit()
     except Exception:

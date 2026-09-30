@@ -99,3 +99,55 @@ def test_reconcile_creates_job_for_real_upload_queue():
     assert job is not None
     assert job["root_import_id"] == "imp-1"
     conn.close()
+
+def test_stuck_processing_recovered_by_locked_until_not_created_at():
+    """contracts §2.5：analysis_queue 超时回收必须按 locked_until，
+    不能用 created_at（dequeue 时写租约，避免误伤新增/运行中的行）。"""
+
+    import app.services.pipeline.queue as q
+
+    conn = _db()
+    # 两行任务：一行 40 分钟前标 processing + 有过期租约；一行 2 分钟前
+    # 标 processing + 未过期租约
+    # 9001：created_at 超时且租约过期 → 回收；
+    # 9002：created_at 超时但 locked_until 仍有效 → 必须保留
+    #（决定性反例：按 created_at 会误回收 9002，只有 locked_until 语义正确）。
+    conn.execute(
+        "INSERT INTO analysis_queue (id, interview_id, question_detail_id, owner_id, "
+        "status, created_at, locked_until) VALUES "
+        "(9001, 1, 11, 101, 'processing', datetime('now','-40 minutes'), datetime('now','-5 minutes')), "
+        "(9002, 1, 12, 101, 'processing', datetime('now','-40 minutes'), datetime('now','+25 minutes'))"
+    )
+    conn.commit()
+
+    # sweep queue 模块的连接到连接本测试库
+    import app.db.connection as dbm
+
+    def _test_get_db_connection():
+        return conn
+
+    async def _sync_run_db(func):
+        return func()
+
+    import sys as _sys
+    patched = []
+    for _mn, _md in list(_sys.modules.items()):
+        if _mn.startswith("app.") and _md is not None:
+            if hasattr(_md, "get_db_connection"):
+                patched.append((_md, _md.get_db_connection))
+                _md.get_db_connection = _test_get_db_connection
+    try:
+        q._recover_stuck_processing()
+    finally:
+        for _md, _orig in patched:
+            _md.get_db_connection = _orig
+
+    rows = {
+        r["id"]: r["status"]
+        for r in conn.execute("SELECT id, status FROM analysis_queue").fetchall()
+    }
+    assert rows[9001] == "pending", "过期租约（locked_until 超时）必须回收"
+    assert rows[9002] == "processing", (
+        "未过期租约不得被 created_at 误伤（created_at 早但租约仍有效）"
+    )
+    conn.close()
