@@ -335,3 +335,66 @@ def test_fixing_config_allows_restore_of_same_root():
     restored = restore_upload(conn, actor_id=101, import_id=result["import_id"])
     assert restored["import_id"] == result["import_id"]
     assert restored["created_attempt"] is True
+
+
+def test_accept_resolves_type_from_content_hint():
+    """contracts §1.1：content_type_hint=auto 时按内容识别并记录
+    resolved_type（jd/interview）；明确 hint 直接采用。"""
+
+    conn = _db()
+    # auto + JD 文本 → resolved_type=jd
+    result = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="k-jd-auto",
+        target_intent="private",
+        source_type="auto",
+        content_type="auto",
+        text="岗位JD：后端开发工程师，负责API设计与数据库性能优化，要求3年经验",
+        position_id=1,
+        position_name="后端",
+        job_position="后端",
+        credential_loaders={
+            "user": lambda uid: {
+                "api_key": "k",
+                "base_url": "https://u.example.com/v1",
+                "model": "m",
+            }
+        },
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT resolved_type FROM upload_imports WHERE id = ?",
+        (result["import_id"],),
+    ).fetchone()
+    assert row["resolved_type"] == "jd", "auto 识别 JD 文本必须记录 resolved_type=jd"
+
+    # 明确 interview hint → resolved_type=interview
+    result2 = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="k-iv-hint",
+        target_intent="private",
+        source_type="interview",
+        content_type="interview",
+        text="面经：TCP 三次握手",
+        position_id=1,
+        position_name="后端",
+        job_position="后端",
+        credential_loaders={
+            "user": lambda uid: {
+                "api_key": "k",
+                "base_url": "https://u.example.com/v1",
+                "model": "m",
+            }
+        },
+    )
+    conn.commit()
+    row2 = conn.execute(
+        "SELECT resolved_type FROM upload_imports WHERE id = ?",
+        (result2["import_id"],),
+    ).fetchone()
+    assert row2["resolved_type"] == "interview"
+    conn.close()

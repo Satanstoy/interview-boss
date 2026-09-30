@@ -257,6 +257,24 @@ def _plan_work_after_restore(
     return {"job_id": job_id, "created": True, "work_key": FIRST_WORK_KEY}
 
 
+_JD_MARKERS = ("岗位", "职位要求", "任职资格", "工作职责", "职位描述", "岗位职责", "负责", "要求", "经验", "薪资", "福利")
+
+
+def _guess_source_type(text: str, url: str = "") -> str:
+    """auto 内容启发式识别（contracts §1.1 resolved_type）：JD 特征文本
+    （岗位职责/任职要求/薪资福利等）判 jd，否则 interview。URL 含 jd/job
+    等标记同样加权；无信号默认 interview（与旧行为一致）。"""
+
+    blob = f"{text} {url}".lower()
+    if any(marker in blob for marker in ("岗位职责", "职位要求", "任职资格", "工作职责", "职位描述")):
+        return "jd"
+    if any(m for m in ("岗位", "招聘", "职位", "jd", "job/") if m in blob) and any(
+        m for m in ("要求", "职责", "经验", "薪资", "福利") if m in blob
+    ):
+        return "jd"
+    return "interview"
+
+
 def _loads(raw, default=None):
     import json as _json
 
@@ -639,6 +657,16 @@ def accept_upload(
         "entry": entry,
     }
 
+    # resolved_type：auto 时按内容启发式识别（contracts §1.1），
+    # 明确 hint（jd/interview）直接采用；private 段落在远程调用前落库。
+    content_hint = (content_type or "").strip().lower()
+    if content_hint in ("jd", "interview"):
+        resolved_type = content_hint
+    elif content_hint in ("", "auto"):
+        resolved_type = _guess_source_type(text or "", url or "")
+    else:
+        resolved_type = source_type or "interview"
+
     import_id, created = create_or_get_import(
         conn,
         requester_id=actor_id,
@@ -646,6 +674,7 @@ def accept_upload(
         request_hash=request_hash,
         target_intent=policy.target_intent,
         source_type=source_type,
+        resolved_type=resolved_type,
         position_id=position_id,
         position_name=position_name,
         pipeline_version=UPLOAD_PIPELINE_VERSION_DEFAULT,
