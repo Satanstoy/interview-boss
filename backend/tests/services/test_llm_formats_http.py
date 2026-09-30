@@ -69,7 +69,7 @@ async def test_http_chat_full_params(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "test-model", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
     )
     from app.services.llm import raw_llm_call
 
@@ -109,7 +109,7 @@ async def test_http_chat_tool_calls_response(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -152,7 +152,7 @@ async def test_http_chat_tool_calls_normalizes_prompt_cache_usage(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -192,7 +192,7 @@ async def test_http_chat_sends_prompt_cache_key_only_to_known_openai(monkeypatch
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -228,7 +228,7 @@ async def test_http_chat_does_not_send_prompt_cache_key_to_openai_looking_relay(
     )
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -257,7 +257,7 @@ async def test_http_chat_streaming(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import stream_llm_messages
 
@@ -289,7 +289,7 @@ async def test_http_responses_full_params(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "test-model", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import _call_llm_with_retry
@@ -323,7 +323,7 @@ async def test_http_responses_tools_and_message_history(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import llm_with_tools
@@ -368,7 +368,7 @@ async def test_http_responses_streaming(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import stream_llm_messages
@@ -422,7 +422,7 @@ async def test_http_anthropic_full_params(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import _call_llm_with_retry
 
@@ -452,7 +452,7 @@ async def test_http_anthropic_messages_preserve_json_instruction_and_parameters(
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import _call_llm_with_retry_messages
 
@@ -484,7 +484,7 @@ async def test_http_anthropic_tools(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import llm_with_tools
 
@@ -522,7 +522,7 @@ async def test_http_anthropic_tool_history_round_trip(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import llm_with_tools
 
@@ -583,7 +583,7 @@ async def test_http_anthropic_streaming(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import stream_llm_messages
 
