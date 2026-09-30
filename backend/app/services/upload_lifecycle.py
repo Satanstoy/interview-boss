@@ -274,11 +274,15 @@ def finalize_attempt_and_aggregate_root(
     error_code: str | None = None,
     error_message: str | None = None,
     interview_id: int | None = None,
+    lease_generation: int | None = None,
 ) -> dict:
     """worker 结束一次尝试后：聚合阶段检查点 → 推进根状态/revision（R04）。
 
     ``aggregate_status`` 是纯函数，本函数是持久化入口；根任务不再停在
     最初的 queued，完成/失败/审核都由这里统一推进 revision。
+
+    ``lease_generation`` 为 v2 强制项（F12）：根任务写入前校验 job 租约代次，
+    旧 worker（已被人接管）的迟到写入被 ``JobFenceError`` 拒绝，业务表不留痕。
     """
 
     from app.services.upload_status import aggregate_status, allowed_actions
@@ -288,6 +292,22 @@ def finalize_attempt_and_aggregate_root(
     ).fetchone()
     if root is None:
         raise ValueError(f"根任务不存在: {import_id}")
+
+    # F12：v2 根聚合必须显式携带 job lease generation；缺失即编程错误
+    if lease_generation is None:
+        raise TypeError("v2 根状态聚合必须提供 lease_generation")
+
+    from app.services.job_lifecycle import assert_job_fence
+
+    # 找出绑定本 root 的提交 job 并校验代次（旧 worker 迟到写入被拒）
+    submit_job = conn.execute(
+        "SELECT id, lease_generation, status FROM jobs "
+        "WHERE root_import_id = ? AND job_type = 'submit_import' "
+        "ORDER BY id DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if submit_job is not None:
+        assert_job_fence(conn, int(submit_job["id"]), int(lease_generation))
 
     # active attempt 收尾：成功则 completed，否则留在 failed 由恢复处理
     attempt = conn.execute(

@@ -212,6 +212,11 @@ def test_finalize_success_aggregates_root_to_completed():
         "UPDATE upload_imports SET interview_id = 900 WHERE id = ?", (import_id,)
     )
     # 关联的提交 job 先完成
+    # 先领取（获 lease_generation），再完成，最后用该代次聚合（真实 worker 顺序）
+    from app.services.job_lifecycle import claim_job_with_generation
+
+    claimed = claim_job_with_generation(conn, result["job_id"], worker_id="w1")
+    lease_generation = int(claimed["lease_generation"])
     conn.execute(
         "UPDATE jobs SET status = 'completed', result = '{\"interview_id\": 900}', "
         "completed_at = CURRENT_TIMESTAMP WHERE root_import_id = ?",
@@ -220,7 +225,7 @@ def test_finalize_success_aggregates_root_to_completed():
     conn.commit()
 
     snap = finalize_attempt_and_aggregate_root(
-        conn, import_id=import_id, actor_id=101
+        conn, import_id=import_id, actor_id=101, lease_generation=lease_generation
     )
     conn.commit()
     assert snap["status"] == "completed"
@@ -254,6 +259,10 @@ def test_finalize_partial_failed_sets_error_and_allows_retry():
             ("classify", "classify:all:v1", "failed"),
         ],
     )
+    from app.services.job_lifecycle import claim_job_with_generation
+
+    claimed = claim_job_with_generation(conn, result["job_id"], worker_id="w1")
+    lease_generation = int(claimed["lease_generation"])
     conn.execute(
         "UPDATE jobs SET status = 'failed', last_error = 'UPSTREAM_TIMEOUT: 超时', "
         "completed_at = CURRENT_TIMESTAMP WHERE root_import_id = ?",
@@ -267,6 +276,7 @@ def test_finalize_partial_failed_sets_error_and_allows_retry():
         actor_id=101,
         error_code="UPSTREAM_TIMEOUT",
         error_message="UPSTREAM_TIMEOUT: 超时",
+        lease_generation=lease_generation,
     )
     conn.commit()
     # extract 已成功（有保留结果）+ classify 失败 → 根 partial_failed
@@ -287,4 +297,99 @@ def test_finalize_unknown_root_raises():
         finalize_attempt_and_aggregate_root(
             conn, import_id="no-such-import", actor_id=101
         )
+    conn.close()
+
+# ── F09/F12：worker generation fencing（租约代次隔离）─────────────────
+
+
+def test_finalize_with_stale_generation_is_rejected_without_root_write():
+    """F09/F12：根聚合必须持当前 lease_generation；被回收的旧代次写入被拒绝，
+    根任务状态与 revision 不得被旧 worker 改写。"""
+
+    from app.services.job_lifecycle import (
+        JobFenceError,
+        claim_job_with_generation,
+    )
+    from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
+
+    conn = _db()
+    result = _accept(conn)
+    import_id = result["import_id"]
+    conn.commit()
+
+    # 代次 1 的 worker 领取
+    claimed = claim_job_with_generation(conn, result["job_id"], worker_id="w1")
+    conn.commit()
+    assert claimed is not None
+    gen1 = int(claimed["lease_generation"])
+
+    # 旧 worker 租约过期 → 回收回 pending → 新 worker 重新领取（代次递增）
+    from app.services.job_lifecycle import recover_expired_jobs
+
+    conn.execute(
+        "UPDATE jobs SET locked_until = '2000-01-01 00:00:00' WHERE id = ?",
+        (result["job_id"],),
+    )
+    recovered = recover_expired_jobs(conn, job_type="submit_import")
+    assert recovered >= 1
+    conn.commit()
+
+    claimed2 = claim_job_with_generation(
+        conn, result["job_id"], worker_id="w2", lease_seconds=3600
+    )
+    assert claimed2 is not None, "回收后新 worker 应可领取"
+    conn.commit()
+    gen2 = int(claimed2["lease_generation"])
+    assert gen2 == gen1 + 1
+
+    # 旧代次 w1 聚合根任务 → 必须拒绝，且根任务不被写
+    with pytest.raises(JobFenceError):
+        finalize_attempt_and_aggregate_root(
+            conn,
+            import_id=import_id,
+            actor_id=101,
+            lease_generation=gen1,
+        )
+    conn.rollback()
+    root = conn.execute(
+        "SELECT status, revision FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert int(root["revision"]) == 1, "被拒的旧代次不得推进 revision"
+
+    # 当前代次 w2 聚合成功
+    snap = finalize_attempt_and_aggregate_root(
+        conn,
+        import_id=import_id,
+        actor_id=101,
+        lease_generation=gen2,
+    )
+    conn.commit()
+    assert snap["status"] in ("completed", "queued", "failed")
+    root_after = conn.execute(
+        "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert int(root_after["revision"]) >= 2
+    conn.close()
+
+
+def test_finalize_without_generation_rejects_v2_service_contract():
+    """F12：v2 根聚合不传 lease_generation 视为编程错误（不允许裸写）。"""
+
+    from app.services.job_lifecycle import JobFenceError
+    from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
+
+    conn = _db()
+    result = _accept(conn)
+    import_id = result["import_id"]
+    conn.commit()
+
+    with pytest.raises(TypeError):
+        finalize_attempt_and_aggregate_root(
+            conn, import_id=import_id, actor_id=101
+        )
+    conn.rollback()
+    root = conn.execute(
+        "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert int(root["revision"]) == 1
     conn.close()

@@ -142,34 +142,65 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             build_matching_data(match_result, timer.elapsed),
         )
 
-        # 写入
+        # 写入（F08：import_id 已有关联时幂等复用——恢复执行不重复建面经/明细）
         saved_url = state.get("saved_url", "")
         season = state.get("season", "")
         is_admin = state.get("is_admin", False)
         record_owner_id = user_id
         record_status = "approved"
 
-        answer_tasks, interview_id, detail_ids = await run_db(
-            lambda: submit_interview_txn(
-                saved_url,
-                data,
-                "\n".join(
-                    f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
-                ),
-                season,
-                record_owner_id,
-                record_status,
-                current_pos,
-                tagged_rows,
-                match_result["matched"],
-                match_result["unmatched"],
-                idx_to_row,
-                bool(is_admin),
-                user_id,
-                qb_owner_id=user_id,
-                persist_unmatched=False,
+        import_id = state.get("import_id")
+
+        def _persist_new():
+            return run_db(
+                lambda: submit_interview_txn(
+                    saved_url,
+                    data,
+                    "\n".join(
+                        f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
+                    ),
+                    season,
+                    record_owner_id,
+                    record_status,
+                    current_pos,
+                    tagged_rows,
+                    match_result["matched"],
+                    match_result["unmatched"],
+                    idx_to_row,
+                    bool(is_admin),
+                    user_id,
+                    qb_owner_id=user_id,
+                    persist_unmatched=False,
+                )
             )
-        )
+
+        if import_id:
+            def _find_existing_linked():
+                with get_db_connection() as conn:
+                    rows = conn.execute(
+                        "SELECT interview_id, id FROM questions_detail "
+                        "WHERE import_id = ? AND deleted_at IS NULL "
+                        "ORDER BY source_ordinal",
+                        (import_id,),
+                    ).fetchall()
+                    if not rows:
+                        return None
+                    return {
+                        "interview_id": int(rows[0]["interview_id"]),
+                        "detail_ids": [int(r["id"]) for r in rows],
+                    }
+
+            existing_linked = await run_db(_find_existing_linked)
+            if existing_linked is not None:
+                # F08：该 import 已落库（前次 attempt 成功），恢复执行幂等复用
+                interview_id = existing_linked["interview_id"]
+                detail_ids = existing_linked["detail_ids"]
+                answer_tasks = []
+                match_result = {"matched": [], "unmatched": []}
+            else:
+                answer_tasks, interview_id, detail_ids = await _persist_new()
+        else:
+            answer_tasks, interview_id, detail_ids = await _persist_new()
 
         # 只有真正未匹配的个人题进入个人聚类队列。命中公共题的题目仍保留
         # 在个人面经的 questions_detail 中，但不复制成个人题，也不再次聚类。

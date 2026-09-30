@@ -568,7 +568,7 @@ async def submit_import_task(ctx, job_id: int):
     """
     from app.db.connection import get_db_connection, run_db
     from app.services.job_lifecycle import (
-        claim_job,
+        claim_job_with_generation,
         complete_job,
         default_worker_id,
         fail_job,
@@ -579,7 +579,7 @@ async def submit_import_task(ctx, job_id: int):
 
     def _claim():
         with get_db_connection() as conn:
-            task = claim_job(conn, job_id, worker_id)
+            task = claim_job_with_generation(conn, job_id, worker_id=worker_id)
             conn.commit()
             return dict(task) if task else None
 
@@ -587,6 +587,8 @@ async def submit_import_task(ctx, job_id: int):
     if not claimed:
         logger.info("上传任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
+    # F12：本次领取的 lease_generation 是根状态写入与业务提交的 fence
+    lease_generation = int(claimed["lease_generation"])
 
     def _complete(result: str | None = None):
         with get_db_connection() as conn:
@@ -652,6 +654,44 @@ async def submit_import_task(ctx, job_id: int):
             _fail("凭据预检未通过，请先修复模型配置", terminal=True)
             return
         work_key = job_row["work_key"] if job_row else FIRST_WORK_KEY
+
+        # F08：恢复执行时读取已成功的 extract/classify 阶段检查点，
+        # 注入 input_state 让节点复用（不重跑 LLM、不重复打标）。
+        resume_extracted = None
+        resume_tagged = None
+        if root_import_id:
+            def _load_resume():
+                with get_db_connection() as conn:
+                    extract_ckpt = conn.execute(
+                        "SELECT result_json FROM upload_stage_results "
+                        "WHERE import_id = ? AND stage IN ('extract','fill','match','persist') "
+                        "AND status = 'succeeded' ORDER BY id DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    classify_ckpt = conn.execute(
+                        "SELECT result_json FROM upload_stage_results "
+                        "WHERE import_id = ? AND stage IN ('classify','tag') "
+                        "AND status = 'succeeded' ORDER BY id DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    out = {"extracted": None, "tagged": None}
+                    if extract_ckpt:
+                        try:
+                            out["extracted"] = json.loads(extract_ckpt["result_json"] or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            out["extracted"] = None
+                    if classify_ckpt:
+                        try:
+                            out["tagged"] = json.loads(classify_ckpt["result_json"] or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            out["tagged"] = None
+                    return out
+
+            resume = await asyncio.to_thread(_load_resume)
+            if resume.get("extracted") and resume["extracted"].get("data"):
+                resume_extracted = resume["extracted"]
+            if resume.get("tagged") and resume["tagged"].get("tagged_rows"):
+                resume_tagged = resume["tagged"]["tagged_rows"]
 
         # 从 root 派生的策略覆盖 payload 旧字段（R02）
         target = policy.get("write_scope") or payload.get("target", "personal")
@@ -725,6 +765,9 @@ async def submit_import_task(ctx, job_id: int):
             "attempt_id": attempt_id,
             "work_key": work_key,
             "job_id": job_id,
+            # F08：检查点复用（恢复执行不重跑已成功阶段）
+            "_resume_extracted": resume_extracted,
+            "_resume_tagged_rows": resume_tagged,
         }
 
         # 阶段映射
@@ -781,6 +824,7 @@ async def submit_import_task(ctx, job_id: int):
                         actor_id=int(payload.get("user_id") or 0),
                         error_code=normalized,
                         error_message=error_message,
+                        lease_generation=lease_generation,
                     )
 
             try:
@@ -924,13 +968,34 @@ async def submit_import_task(ctx, job_id: int):
                         (root_import_id,),
                     ).fetchall()
                     for stage_row in seen_units:
+                        # F08：extract/tag 阶段把完整结果（含逐题数据）写进
+                        # 检查点，恢复时可复用不重跑 LLM。阶段名以 PHASES
+                        # （extract/fill/tag/match/save/cluster）为准。
+                        if stage_row["stage"] in ("extract", "fill", "match"):
+                            stage_payload = json.dumps(
+                                {
+                                    "doc_type": final_state_values.get("doc_type", ""),
+                                    "data": extracted_data,
+                                    "url": final_state_values.get("saved_url", ""),
+                                },
+                                ensure_ascii=False,
+                            )
+                        elif stage_row["stage"] in ("tag", "classify"):
+                            stage_payload = json.dumps(
+                                {
+                                    "tagged_rows": final_state_values.get("tagged_rows", []),
+                                },
+                                ensure_ascii=False,
+                            )
+                        else:
+                            stage_payload = success_result
                         conn.execute(
                             "UPDATE upload_stage_results SET status = 'succeeded', "
                             "result_json = ?, updated_at = CURRENT_TIMESTAMP "
                             "WHERE import_id = ? AND stage = ? AND unit_key = ? "
                             "AND status = 'running'",
                             (
-                                success_result,
+                                stage_payload,
                                 root_import_id,
                                 stage_row["stage"],
                                 stage_row["unit_key"],
@@ -951,6 +1016,7 @@ async def submit_import_task(ctx, job_id: int):
                         import_id=root_import_id,
                         actor_id=int(payload.get("user_id") or 0),
                         interview_id=final_state_values.get("saved_interview_id"),
+                        lease_generation=lease_generation,
                     )
 
             aggregated = await asyncio.to_thread(_aggregate)

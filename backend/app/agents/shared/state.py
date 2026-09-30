@@ -22,6 +22,9 @@ class SubmitState(TypedDict, total=False):
     work_key: str                           # 本次执行的 work_key
     job_id: int                             # 当前 jobs 行 ID
     credential_scope: str                   # 服务端策略 scope（user/global）
+    # F08：恢复执行时注入的已成功阶段检查点（节点短路复用，不重跑 LLM）
+    _resume_extracted: dict | None
+    _resume_tagged_rows: list | None
 
     # === 节点输出 ===
     doc_type: str                           # "JD" | "Interview" 由识别节点填入

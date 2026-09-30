@@ -307,3 +307,119 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
     ).fetchone()
     assert planned is not None, "恢复必须重建可执行提取 job"
     assert planned["upload_attempt_id"] is not None
+
+async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_stack):
+    """F08：失败恢复后的新 attempt 复用已成功 extract/classify 检查点，
+    不再重跑 LLM（计数不变）；后续阶段继续执行到完成。"""
+
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from contextlib import ExitStack
+
+    from app.services.upload_lifecycle import accept_upload, restore_upload
+    from app.services.job_lifecycle import default_worker_id
+    from app.worker import submit_import_task
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="resume-k-1",
+        target_intent="private",
+        text="面经：TCP 三次握手",
+        position_id=1,
+        position_name="后端",
+        job_position="后端",
+        credential_loaders={
+            "user": lambda uid: {
+                "api_key": "k",
+                "base_url": "https://u.example.com/v1",
+                "model": "m",
+                "timeout": 30,
+            }
+        },
+    )
+    conn.commit()
+    import_id = accepted["import_id"]
+
+    def _patcher_with_counter(counter):
+        return [
+            patch(
+                "app.services.llm._call_llm_with_retry_messages",
+                AsyncMock(side_effect=lambda *a, **k: counter.__setitem__("llm", counter.get("llm", 0) + 1) or EXTRACT_JSON),
+            ),
+            patch(
+                "app.services.llm.get_llm_client_for_user",
+                return_value=(MagicMock(), "test-model", 30, "", "openai"),
+            ),
+            patch(
+                "app.services.llm._should_use_response_format",
+                return_value=False,
+            ),
+            patch(
+                "app.services.submit_service.tag_questions_batch",
+                AsyncMock(side_effect=lambda **k: counter.__setitem__("tag", counter.get("tag", 0) + 1) or TAGGED_ROWS),
+            ),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TAXONOMY_STUB,
+            ),
+            patch(
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                AsyncMock(return_value=False),
+            ),
+        ]
+
+    counter = {}
+    # 第一次执行：LLM 各阶段调用 1 次
+    with ExitStack() as stack:
+        for patcher in _patcher_with_counter(counter):
+            stack.enter_context(patcher)
+        await submit_import_task({}, accepted["job_id"])
+    conn.commit()
+    assert counter.get("llm", 0) >= 1, "第一次执行必须调用提取 LLM"
+    assert counter.get("tag", 0) >= 1, "第一次执行必须调用打标"
+    assert conn.execute(
+        "SELECT COUNT(*) AS c FROM questions_detail WHERE import_id = ?",
+        (import_id,),
+    ).fetchone()["c"] == 2
+
+    # 失败 → 恢复 → 第二次执行：提取/打标检查点命中，不重跑 LLM
+    conn.execute(
+        "UPDATE upload_imports SET status = 'failed', error_code = 'UPSTREAM_TIMEOUT' "
+        "WHERE id = ?",
+        (import_id,),
+    )
+    conn.execute(
+        "UPDATE jobs SET status = 'failed', worker_id = NULL, locked_until = NULL "
+        "WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (import_id,),
+    )
+    conn.commit()
+    restored = restore_upload(conn, actor_id=101, import_id=import_id)
+    conn.commit()
+    new_job_id = restored["planned_job_id"]
+
+    before_llm = counter.get("llm", 0)
+    before_tag = counter.get("tag", 0)
+    with ExitStack() as stack:
+        for patcher in _patcher_with_counter(counter):
+            stack.enter_context(patcher)
+        await submit_import_task({}, new_job_id)
+    conn.commit()
+
+    assert counter.get("llm", 0) == before_llm, (
+        "恢复后提取阶段应复用检查点，不重跑 LLM"
+    )
+    assert counter.get("tag", 0) == before_tag, (
+        "恢复后分类阶段应复用检查点，不重跑打标"
+    )
+    # 后续阶段（persist 幂等 + 聚合）继续执行：根推进 revision / 明细不重复
+    assert conn.execute(
+        "SELECT COUNT(*) AS c FROM questions_detail WHERE import_id = ?",
+        (import_id,),
+    ).fetchone()["c"] == 2, "恢复执行不得重复落明细"
+    root = conn.execute(
+        "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert int(root["revision"]) >= 2
