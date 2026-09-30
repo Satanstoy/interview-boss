@@ -23,6 +23,7 @@ def enqueue_questions(
     question_detail_ids: List[int] | None = None,
     contribution_request_id: int | None = None,
     conn=None,
+    root_import_id: str | None = None,
 ) -> int:
     """将指定面经明细加入分析队列，返回本次新建的队列记录数。
 
@@ -31,6 +32,8 @@ def enqueue_questions(
         owner_id: NULL = 公共队列, user_id = 个人队列（隔离匹配）
         question_detail_ids: 可选的明细白名单；为空时入队整条面经。
         contribution_request_id: 可选的公共化申请追踪 ID。
+        root_import_id: 可选的上传根任务（R06：v2 明细已带 import_id 时
+            自动回填；真实上传产生的队列行必须写 root，才能被对账补单）。
     """
     owns_connection = conn is None
     conn = conn or get_db_connection()
@@ -59,13 +62,40 @@ def enqueue_questions(
             f"AND id IN ({placeholders}) AND deleted_at IS NULL",
             [interview_id, *ids],
         ).fetchall()
+    # R06：v2 明细带 import_id 时自动回填 root（真实上传队列行才有归属可对账）
+    if root_import_id is None and rows:
+        linked = conn.execute(
+            f"SELECT DISTINCT import_id FROM questions_detail WHERE id IN "
+            f"({','.join('?' * len(rows))}) AND import_id IS NOT NULL LIMIT 1",
+            [r[0] for r in rows],
+        ).fetchone()
+        if linked and linked["import_id"]:
+            root_import_id = str(linked["import_id"])
     count = 0
     queue_columns = {
         row[1]
         for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
     }
+    has_root_column = "root_import_id" in queue_columns
+    has_contribution_column = "contribution_request_id" in queue_columns
     for r in rows:
-        if "contribution_request_id" in queue_columns:
+        if has_root_column:
+            if has_contribution_column:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO analysis_queue "
+                    "(interview_id, question_detail_id, status, owner_id, "
+                    "contribution_request_id, root_import_id) "
+                    "VALUES (?, ?, 'pending', ?, ?, ?)",
+                    (interview_id, r[0], owner_id, contribution_request_id, root_import_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO analysis_queue "
+                    "(interview_id, question_detail_id, status, owner_id, root_import_id) "
+                    "VALUES (?, ?, 'pending', ?, ?)",
+                    (interview_id, r[0], owner_id, root_import_id),
+                )
+        elif has_contribution_column:
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO analysis_queue "
                 "(interview_id, question_detail_id, status, owner_id, contribution_request_id) "

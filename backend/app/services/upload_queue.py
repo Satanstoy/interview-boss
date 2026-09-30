@@ -6,15 +6,19 @@
 - 对账（建议 60 秒一次）：有 pending 但无活跃 job 的桶补**一个**幂等 job。
 - 选桶按最早可用时间 + 轮转，避免公共大桶永远占满调度。
 - 孤儿/被删原文转 ``blocked`` 并保留证据，不空转、不删除。
+
+R06：补单 job 复用已注册可执行的 ``cluster_batch`` 类型（不新造
+``analysis_batch`` 孤儿类型，避免注册/执行适配缺失）。
 """
 
 from __future__ import annotations
 
 import logging
 
+from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
+
 logger = logging.getLogger("interview-boss")
 
-ANALYSIS_JOB_TYPE = "analysis_batch"
 ACTIVE_JOB_STATUSES = ("pending", "queued", "running")
 
 
@@ -95,7 +99,7 @@ def ensure_bucket_job(conn, *, bucket: dict, created_by=None) -> dict:
         "INSERT INTO jobs (job_type, status, created_by, root_import_id, work_key, "
         "progress_message) VALUES (?, 'pending', ?, ?, ?, ?)",
         (
-            ANALYSIS_JOB_TYPE,
+            CLUSTER_BATCH_JOB_TYPE,
             created_by,
             bucket["root_import_id"],
             bucket["work_key"],
