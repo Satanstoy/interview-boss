@@ -13,8 +13,12 @@ import {
   Upload,
 } from '@lucide/vue'
 
-import { createSubmitJob } from '@/services/dataApi.js'
-import { useSubmitJobs, attachJob } from '@/composables/useSubmitJobs.js'
+import {
+  submitUploadWithIdempotency,
+  useSubmitJobs,
+  attachJob,
+  clearDraftKey,
+} from '@/composables/useSubmitJobs.js'
 import { useModelGuard } from '@/composables/useModelGuard.js'
 import { useConfirm } from '@/composables/useNotification.js'
 import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
@@ -236,14 +240,34 @@ async function onSubmit() {
 
     images.value.forEach(item => formData.append('files', item.file))
 
-    const result = await createSubmitJob(formData)
-    attachJob(result.job_id)
+    // R08：实际提交走幂等恢复（AC-021）：同草稿复用同一幂等键，响应丢失
+    // 先 by-key 查询绝不重复创建；needs_action 保留草稿供配置修复后重发。
+    const result = await submitUploadWithIdempotency(formData, {
+      draftId: `panel-${props.activeSeason || 'default'}`,
+    })
+
+    const importStatus = result.status || 'queued'
+    const terminalNeedsAction = importStatus === 'needs_action'
+    if (result.job_id) attachJob(result.job_id)
     emit('submitted', result)
-    resetForm()
-    submitSuccess.value = true
-    toast.success('任务已提交，正在后台处理中')
-    setTimeout(() => { submitSuccess.value = false }, 3000)
+
+    if (!terminalNeedsAction) {
+      // 正常受理（created/queued/running）才清空草稿与幂等键
+      resetForm()
+      clearDraftKey(`panel-${props.activeSeason || 'default'}`)
+    }
+    // needs_action：保留草稿（模型配置未就绪，修复后同一幂等键重发）
+    submitSuccess.value = !terminalNeedsAction
+    toast[terminalNeedsAction ? 'warning' : 'success'](
+      terminalNeedsAction
+        ? '需要先配置模型才能继续，内容已保留'
+        : '任务已提交，正在后台处理中',
+    )
+    if (submitSuccess.value) {
+      setTimeout(() => { submitSuccess.value = false }, 3000)
+    }
   } catch (error) {
+    // 提交失败也保留草稿与幂等键：允许修复后重试同一任务
     submitError.value = error.message || '提交失败'
     toast.error(submitError.value)
   } finally {

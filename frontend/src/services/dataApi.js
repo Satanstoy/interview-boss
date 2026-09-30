@@ -4,7 +4,21 @@ const API = '/api'
 
 // ── Data fetching ──
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
-export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
+export const fetchInterviewData = (params = {}) => {
+  // 服务端分页（AC-002）：接受 page/page_size/sort/season/position_id/scope，
+  // 与 location 接口同筛选协议（R09：岗位 ID 一致、不再本地切 100 条）。
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, v]) => v !== undefined && v !== '')
+  )
+  const query = new URLSearchParams({
+    page: params.page || 1,
+    page_size: params.page_size || 100,
+    sort: params.sort || 'created_desc',
+    scope: params.scope || 'all',
+    ...cleanParams,
+  })
+  return get(`${API}/data/interview?${query}`, { noCache: true })
+}
 export const fetchMasterBank = (params = {}) => {
   // Filter out undefined values to prevent URLSearchParams from converting them to "undefined" string
   const cleanParams = Object.fromEntries(

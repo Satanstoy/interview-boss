@@ -24,6 +24,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const filteredTagCountsFromServer = ref([])
   const masterBankTotal = ref(0)
   const masterBankOverallTotal = ref(0)
+  const interviewTotal = ref(0)
   const practiceStats = ref({})
   const activeSeason = ref('')
   const availableSeasons = ref([])
@@ -44,6 +45,8 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const showStarredOnly = ref(false)
   const filterSeason = ref('')
   const interviewSortOrder = ref('desc')
+  // R09：面经列表按岗位筛选时传给服务端的 position_id（与 location 同协议）
+  const interviewPositionId = ref('')
 
   const decorateQuestion = (q) => ({
     ...q, _showAnswer: false, _showSources: false, _showAnswerSources: false,
@@ -72,11 +75,12 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     filteredTagCountsFromServer.value = []
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), api.fetchInterviewData(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
+        api.fetchJdData(), fetchAllInterviewPages(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
       ])
       if (currentRequestVersion !== requestVersion.value) return
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
+      interviewTotal.value = intResp.total ?? interviewData.value.length
       const items = (masterResp.items || masterResp).map(decorateQuestion)
       masterBank.value = items
       // 检查是否还有更多数据
@@ -90,6 +94,40 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     } finally {
       if (currentRequestVersion === requestVersion.value) isDataLoading.value = false
     }
+  }
+
+  /**
+   * 拉取全部面经历页（R09/AC-002）：以服务端 total 为准循环取页，
+   * 不再只取第一页 100 条本地切片；筛选/排序与 location 接口同协议。
+   */
+  const fetchAllInterviewPages = async () => {
+    const pageSize = 100
+    const first = await api.fetchInterviewData({
+      page: 1,
+      page_size: pageSize,
+      season: filterSeason.value || undefined,
+      position_id: interviewPositionId.value || undefined,
+      sort: interviewSortOrder.value === 'asc' ? 'created_asc' : 'created_desc',
+      scope: 'all',
+    })
+    const items = [...(first.items || first)]
+    const total = first.total ?? items.length
+    const pages = Math.ceil(total / pageSize)
+    const rest = []
+    for (let page = 2; page <= pages; page += 1) {
+      try {
+        const resp = await api.fetchInterviewData({
+          page,
+          page_size: pageSize,
+          season: filterSeason.value || undefined,
+          position_id: interviewPositionId.value || undefined,
+          sort: interviewSortOrder.value === 'asc' ? 'created_asc' : 'created_desc',
+          scope: 'all',
+        })
+        rest.push(...(resp.items || resp))
+      } catch { break }
+    }
+    return { items: [...items, ...rest], total }
   }
 
   /** 加载下一页题库数据（无限滚动） */
@@ -248,7 +286,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     jdData, interviewData, masterBank, bankFilter,
     isDataLoading, dataLoadError,
     analytics, practiceStats, popularTags, categoryCounts,
-    masterBankTotal, masterBankOverallTotal,
+    masterBankTotal, masterBankOverallTotal, interviewTotal,
     activeSeason, availableSeasons,
     // infinite scroll
     isLoadingMore, hasMore, loadMoreMasterBank,
@@ -256,6 +294,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     selectedTag, selectedSubTags, searchQuery,
     filterDifficulty, showStarredOnly,
     filterSeason, interviewSortOrder,
+    interviewPositionId,
     // computed
     filteredMasterBank, filteredInterviewData,
     availableSubTags, interviewSeasons, practicedQuestions,

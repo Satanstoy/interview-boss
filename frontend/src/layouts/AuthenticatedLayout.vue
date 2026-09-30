@@ -154,6 +154,7 @@ const {
   filterDifficulty, showStarredOnly,
   filterSeason, interviewSortOrder,
   bankFilter,
+  interviewPositionId,
   filteredMasterBank, filteredInterviewData,
   availableSubTags, interviewSeasons, practicedQuestions,
   fetchTableData, fetchAnalytics, fetchPracticeStats,
@@ -630,6 +631,16 @@ watch(authCompleted, (done) => {
     loadAllData()
   }
 }, { immediate: true })
+
+// R09：面经列表按当前岗位筛选传给服务端（position_id 契约，与 location 一致）
+watch(
+  () => currentUser.value?.current_position_id,
+  (posId) => {
+    interviewPositionId.value = posId ? String(posId) : ''
+    fetchTableData()
+  },
+  { immediate: true },
+)
 
 watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeContext() }, { immediate: true })
 
