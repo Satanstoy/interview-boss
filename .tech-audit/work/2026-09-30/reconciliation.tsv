@@ -1,0 +1,21 @@
+finding_id	status	ac	implemented	remaining	primary_evidence	review_ids
+F01	partial	AC-001	新增location接口和前端query消费	完整任务结果未接且岗位名称被当ID并仍本地分页	backend/app/routers/data.py:1047;frontend/src/layouts/AuthenticatedLayout.vue:654	R04,R09
+F02	partial	AC-002	后端过滤排序分页支持total	页面仍无参取第一页100条再本地切片	frontend/src/composables/useMasterBankData.js:75;frontend/src/components/common/DataTable.vue:200	R09
+F03	partial	AC-003	提交入口新增服务端四格policy	payload和worker未传审核意图管理员公共仍直写approved	backend/app/services/upload_lifecycle.py:318;backend/app/worker.py:566	R02
+F04	partial	AC-004	接受入口使用严格个人配置读取	没有真实模型预检与预检job普通share未先检查global实际节点仍旧凭据读取	backend/app/services/upload_lifecycle.py:346;backend/app/agents/submit/extract.py:57	R01
+F05	open	AC-005	新增resolution服务和表	实际持久化路径不写resolution公共命中关联仍缺失	backend/app/agents/submit/persist_personal.py:107	R05
+F06	open	AC-006	新增三态匹配helper	实际match_new_questions仍把异常归入unmatched	backend/app/services/clustering/matcher.py:970	R05
+F07	open	AC-007	新增补单和cron	真实入队无root且补单analysis_batch未注册dispatcher	backend/app/services/upload_queue.py:94;backend/app/services/job_lifecycle.py:28	R06
+F08	open	AC-008	新增阶段表repository和事务函数	真实graph未使用检查点实体保存和下游入队仍分离	backend/app/agents/submit/graph.py:146;backend/app/agents/submit/persist_public.py:32	R03
+F09	open	AC-009	新增build_thread_id helper	真实graph仍使用用户加秒级时间	backend/app/agents/submit/graph.py:164	R03
+F10	partial	AC-010	新任务中心支持EOF重连与查询失败保留	旧提交订阅未传isTerminal且旧恢复查询失败仍清缓存	frontend/src/composables/useSubmitJobs.js:170;frontend/src/composables/useSubmitJobs.js:231	R08
+F11	open	AC-011	新增状态聚合helper和任务历史UI	worker只完成jobs不更新root与子工作聚合前端仍5秒移除旧job	backend/app/worker.py:522;frontend/src/composables/useSubmitJobs.js:159	R04
+F12	open	AC-012	新增generation fencing服务	实际worker未用且实际队列仍按created_at回收	backend/app/worker.py:513;backend/app/services/pipeline/queue.py:107	R06
+F13	partial	AC-013	新增快照和错误预算模型	GET缺allowed_actions等字段旧SSE仍旧协议重试预算未贯穿实际调用	backend/app/routers/upload_imports.py:28;backend/app/routers/bank_build.py:42	R04,R08
+F14	partial	AC-014	面经审批路由已接严格审核字段投影	真实嵌套snapshot默认字段读取不对岗位丢失JD走错物化	backend/app/services/public_contributions.py:378;backend/app/services/public_contributions.py:629	R11
+F15	partial	AC-015	新增失败子项恢复HTTP入口	发布仍用旧队列完成判断失败再批准可重建实体恢复未派发	backend/app/services/public_contributions.py:560;backend/app/services/public_contributions.py:1173	R10
+F16	open	AC-016	新增按published明细刷新清单helper	实际发布未调用且v2物化无同URL查找复用	backend/app/services/public_contributions.py:483;backend/app/services/public_contributions.py:894	R10
+F17	partial	AC-017	新恢复入口约束单active attempt	恢复不建可执行job旧retry仍只查直接子任务并不绑定root	backend/app/services/upload_lifecycle.py:229;backend/app/routers/submit.py:665	R03
+F18	open	AC-018	新root接口owner隔离和运维白名单	旧通用job stream仍允许admin读取任意私人result	backend/app/routers/bank_build.py:33	R07
+F19	partial	AC-019	原优缺点黑名单删除已改为保留标记	真实extract未接schema字符串拆单字和非字符串静默丢失仍可能发生	backend/app/agents/submit/extract.py:76	R05
+F20	implemented_not_retested	AC-020	approve与withdraw实际路由已接BEGIN IMMEDIATE及revision CAS	本轮后端复测被Docker磁盘门禁阻断不新增passed证据	backend/app/services/public_contributions.py:545;backend/app/services/public_contributions.py:697	-

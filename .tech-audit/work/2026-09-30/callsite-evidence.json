@@ -1,0 +1,86 @@
+{
+  "reviewed_head": "8c810733",
+  "method": "AST direct-name calls within backend/app only; dynamic dispatch and aliases require manual review",
+  "symbols": {
+    "aggregate_status": {
+      "definitions": [
+        "backend/app/services/upload_status.py:30"
+      ],
+      "calls": []
+    },
+    "assert_job_fence": {
+      "definitions": [
+        "backend/app/services/job_lifecycle.py:312"
+      ],
+      "calls": []
+    },
+    "build_thread_id": {
+      "definitions": [
+        "backend/app/services/upload_lifecycle.py:136"
+      ],
+      "calls": []
+    },
+    "claim_job_with_generation": {
+      "definitions": [
+        "backend/app/services/job_lifecycle.py:290"
+      ],
+      "calls": []
+    },
+    "get_stage_result": {
+      "definitions": [
+        "backend/app/services/upload_repository.py:172"
+      ],
+      "calls": []
+    },
+    "match_outcomes": {
+      "definitions": [
+        "backend/app/services/clustering/matcher.py:721"
+      ],
+      "calls": []
+    },
+    "normalize_extracted_questions": {
+      "definitions": [
+        "backend/app/services/extraction_integrity.py:52"
+      ],
+      "calls": []
+    },
+    "publish_items_with_resolutions": {
+      "definitions": [
+        "backend/app/services/public_contributions.py:841"
+      ],
+      "calls": []
+    },
+    "record_resolution": {
+      "definitions": [
+        "backend/app/services/question_resolution.py:30"
+      ],
+      "calls": []
+    },
+    "refresh_public_interview_projection": {
+      "definitions": [
+        "backend/app/services/public_contributions.py:894"
+      ],
+      "calls": []
+    },
+    "reserve_llm_call": {
+      "definitions": [
+        "backend/app/services/upload_credentials.py:194"
+      ],
+      "calls": []
+    },
+    "restore_upload": {
+      "definitions": [
+        "backend/app/services/upload_lifecycle.py:202"
+      ],
+      "calls": [
+        "backend/app/routers/upload_imports.py:282"
+      ]
+    },
+    "save_stage_result": {
+      "definitions": [
+        "backend/app/services/upload_repository.py:122"
+      ],
+      "calls": []
+    }
+  }
+}

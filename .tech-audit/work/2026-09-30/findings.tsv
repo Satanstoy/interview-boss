@@ -1,0 +1,12 @@
+3	D10	backend/app/services/upload_lifecycle.py:346	R01 配置预检未探测模型且实际节点未使用显式scope	持久预检任务探测目标scope并在每次模型调用使用同一凭据策略和账本	2d	certain
+3	D4	backend/app/worker.py:566	R02 worker丢失分享审核意图和持久策略	由root加载服务端policy并贯穿普通分享审核与管理员公共导入审计	1d	certain
+3	D14	backend/app/services/upload_lifecycle.py:202	R03 恢复只创建attempt而未重建工作且graph仍秒级ID	恢复同root未完成工作并接入检查点唯一执行ID与旧retry适配	4d	certain
+3	D15	backend/app/routers/upload_imports.py:28	R04 根状态未聚合且GET与SSE任务快照不一致	持久更新root状态revision结果并共用完整快照DTO	2d	certain
+3	D9	backend/app/agents/submit/persist_personal.py:107	R05 实际逐题流程未使用resolution三态匹配和提取schema	贯穿ordinal和resolution并阻止匹配异常走新题写入	3d	certain
+3	D14	backend/app/services/upload_queue.py:94	R06 队列补单类型未被派发且实际领取未接租约隔离	真实入队写root并接派发worker和续调同时替换旧created_at回收	3d	certain
+3	D5	backend/app/routers/bank_build.py:33	R07 管理员通用任务流仍可读他人私人正文	旧job内容接口同样按owner鉴权并分离运维白名单	0.5d	certain
+3	D15	frontend/src/components/business/StagingPanel.vue:239	R08 实际提交仍走旧job入口且未使用草稿幂等恢复	提交订阅恢复全改按import_id并保留失败草稿与账号隔离缓存	2d	certain
+3	D15	frontend/src/composables/useMasterBankData.js:75	R09 面经页面仍截断100条且定位岗位名称被当数值ID	前端消费服务端分页total并统一position_id和位置筛选协议	1d	certain
+3	D14	backend/app/services/public_contributions.py:1173	R10 公共发布仍按队列完成而非resolution且同URL物化无合并	恢复失败子项时复用旧行并派发按resolution事务刷新发布投影	2d	certain
+3	D14	backend/app/services/public_contributions.py:629	R11 v2审批把JD当面经且丢失源元数据和岗位	按source_type分别物化并按真实snapshot结构读取允许继承字段	1d	certain
+3	D3	backend/tests/integration/test_upload_question_data_flow.py:192	R12 逐题E2E手工填结果未运行实际上传worker链路	用隔离API SQLite Redis worker和模型stub执行AC028029并逐题断言	3d	certain

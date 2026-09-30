@@ -5,6 +5,9 @@
 
 规则：**未运行的步骤必须写 not-run**，不能写 passed；既有失败与新增回归分开记录。
 
+> **2026-09-30 复审修正（代码基线 `8c810733`）**：原表把若干 helper/服务单测通过记作整项通过，不能成立。当前实际状态以本节下方 §2、§6 及[复审报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)为准。§3～5b 保留历史命令与开发记录，不代表整条实际调用链已经验收。原问题的机器可读对账见 [reconciliation.tsv](../../../.tech-audit/work/2026-09-30/reconciliation.tsv)。本轮仅 mock UI 8 passed；后端 Docker 测试被构建前磁盘门禁阻断，pytest 未启动；真实 AC-028/029 未完成。
+
+
 ## 1. 基线（2026-09-29）
 
 | 项 | 值 |
@@ -16,43 +19,46 @@
 | 工作区既有改动 | 仅 4 个 untracked（`.tech-audit/work/…`、`backups`、`docs/specs/2026-09-23-frontend-ui-hierarchy-cleanup.md`）与本任务新增文件 |
 | 生产数据写入 | 无（本任务所有测试走内存/临时库） |
 
-## 2. 需求状态表
+## 2. 需求状态表（2026-09-30 复审）
 
-状态：Open / In progress / passed / failed / not-run。
+`open`：实际路径仍有原问题；`partial`：部分已接入但整个 AC 未完成；`implemented_not_retested`：实际代码已接入，本轮未复测。完整 spec 不能标 passed。
 
-| Finding | 需求 | AC | 状态 | 阶段 | 证据 |
-|---|---|---|---|---|---|
-| F01 | UR-001 结果定位 | AC-001 | passed（分腿：后端 location + 前端定位/高亮/切岗） | 阶段I + 后续修复 | `test_interview_server_pagination.py` 7 passed；`upload-task-center.spec.js`、`upload-question-data-flow.spec.js`；AuthenticatedLayout 消费 page/position/highlight 查询参数 |
-| F02 | UR-002 服务端分页 | AC-002 | passed（后端）；前端 server-mode 未做（见 §7 遗留） | 阶段I | `test_interview_server_pagination.py` 7 passed（121 条同时间戳、跨页不重不漏） |
-| F03 | UR-003 四格提交策略 | AC-003 | passed | 阶段A + 阶段C | `backend/tests/pipeline/test_upload_policy.py` 30 passed；`test_upload_submit_api.py`（双入口共用接受服务） |
-| F04 | UR-004 凭据显式 scope + 提交前配置预检 | AC-004 | passed | 阶段C + 修复 | `test_upload_credentials.py`、`test_upload_llm_accounting.py`、`test_upload_credential_preflight.py`（严格 user-only 默认读取器，无 fallback 风险） |
-| F05 | UR-005 原题 resolution | AC-005 | passed | 阶段E | `test_question_resolutions.py` 6 passed |
-| F06 | UR-006 匹配三态 | AC-006 | passed | 阶段E | `test_upload_matching_outcomes.py` 8 passed |
-| F07 | UR-007 队列续调 | AC-007 | passed | 阶段E | `test_upload_queue_reconciliation.py` 5 passed + 每分钟对账 cron |
-| F08 | UR-008 阶段检查点 | AC-008 | 分腿可见（检查点/事务/幂等 passed；真实 graph 故障点注入 not-run，见 §7 遗留） | 阶段D | `test_upload_stage_recovery.py` 6 passed |
-| F09 | UR-009 并发不串单 | AC-009 | passed（thread_id 去时间戳）；graph 级故障点 not-run | 阶段D | `test_upload_stage_recovery.py`、`test_upload_recovery_stack.py` |
-| F10 | UR-010 SSE 恢复 | AC-010 | passed（分腿：服务端快照流 + 客户端 EOF 重连；浏览器断 worker 全链路 not-run） | 阶段H | `upload-task-center.spec.js` 6 passed（含 SSE 重连、375/1440） |
-| F11 | UR-011 真实完成 | AC-011 | passed（后端投影） | 阶段G | `test_upload_status_projection.py` 15 passed |
-| F12 | UR-012 租约/fencing | AC-012 | passed（服务层）；worker 端 fencing 接续见 §7 遗留 | 阶段D | `test_upload_leases.py` 6 passed |
-| F13 | UR-013 错误协议 | AC-013 | passed | 阶段G | `test_upload_stream_contract.py` 8 passed |
-| F14 | UR-014 审核投影生效 | AC-014 | passed | 阶段F | `test_public_contributions_materialize.py` 7 passed；approve 路由走 v2 CAS（未知字段 422） |
-| F15 | UR-015 失败子项恢复 | AC-015 | passed | 阶段F | `test_public_contribution_recovery.py` 5 passed + `test_admin_public_contribution_retry.py` |
-| F16 | UR-016 追加贡献一致 | AC-016 | passed | 阶段F | `test_public_contribution_recovery.py`（清单投影） |
-| F17 | UR-017 跨代/并发恢复 | AC-017 | passed | 阶段D | `test_upload_retry_family.py` 6 passed（含线程并发）；`test_upload_import_retry.py`（HTTP 层） |
-| F18 | UR-018 私人正文隔离 | AC-018 | passed | 阶段G | `test_upload_task_privacy.py` 5 passed |
-| F19 | UR-019 提取不漏题 | AC-019 | passed | 阶段E | `test_upload_extraction_integrity.py` 11 passed |
-| F20 | UR-020 审批/撤回互斥 | AC-020 | passed | 阶段F | `test_public_contribution_transitions.py` 6 passed（含线程并发）；withdraw 路由走 v2 CAS |
-| — | AC-021 幂等键 | passed | 阶段C | `test_upload_submit_api.py` + 前端 by-key 恢复 |
-| — | AC-022 文件校验 | passed | 阶段C | `test_upload_acceptance.py`（413/400 无幽灵 job） |
-| — | AC-023 迁移幂等 | passed | 阶段J | `test_upload_recovery_backfill.py` 7 passed + CLI 演练（二次 apply 0 新增） |
-| — | AC-024 JD/旧数据 | passed | 阶段J | `test_upload_legacy_compat.py` |
-| — | AC-025 源状态变化 | passed | 阶段J | `test_upload_legacy_compat.py`（SOURCE_DELETED）+ `test_upload_import_retry.py`（409） |
-| — | AC-026 历史保留 | passed | 阶段J | `test_upload_recovery_retention.py` 3 passed |
-| — | AC-027 可访问性 | passed | 阶段H | `upload-task-center.spec.js`（键盘/aria-live/375/1440）6 passed |
-| — | AC-028 隔离集成 | passed（隔离腿） | 阶段J | `test_upload_recovery_stack.py` 4 passed（需 UPLOAD_TEST_DB_PATH/UPLOAD_TEST_REDIS_PREFIX） |
-| — | AC-029 逐题数据流追踪 | passed（服务链腿）；worker 断点注入 not-run（见 §7 遗留） | 阶段J | `backend/tests/integration/test_upload_question_data_flow.py` 2 passed + `frontend/tests/e2e/upload-question-data-flow.spec.js` 2 passed |
+| Finding | AC | 当前状态 | 已实现 | 仍未对齐 |
+|---|---|---|---|---|
+| F01 | AC-001 | partial | 新增location接口和前端query消费 | 完整任务结果未接且岗位名称被当ID并仍本地分页（R04,R09） |
+| F02 | AC-002 | partial | 后端过滤排序分页支持total | 页面仍无参取第一页100条再本地切片（R09） |
+| F03 | AC-003 | partial | 提交入口新增服务端四格policy | payload和worker未传审核意图管理员公共仍直写approved（R02） |
+| F04 | AC-004 | partial | 接受入口使用严格个人配置读取 | 没有真实模型预检与预检job普通share未先检查global实际节点仍旧凭据读取（R01） |
+| F05 | AC-005 | open | 新增resolution服务和表 | 实际持久化路径不写resolution公共命中关联仍缺失（R05） |
+| F06 | AC-006 | open | 新增三态匹配helper | 实际match_new_questions仍把异常归入unmatched（R05） |
+| F07 | AC-007 | open | 新增补单和cron | 真实入队无root且补单analysis_batch未注册dispatcher（R06） |
+| F08 | AC-008 | open | 新增阶段表repository和事务函数 | 真实graph未使用检查点实体保存和下游入队仍分离（R03） |
+| F09 | AC-009 | open | 新增build_thread_id helper | 真实graph仍使用用户加秒级时间（R03） |
+| F10 | AC-010 | partial | 新任务中心支持EOF重连与查询失败保留 | 旧提交订阅未传isTerminal且旧恢复查询失败仍清缓存（R08） |
+| F11 | AC-011 | open | 新增状态聚合helper和任务历史UI | worker只完成jobs不更新root与子工作聚合前端仍5秒移除旧job（R04） |
+| F12 | AC-012 | open | 新增generation fencing服务 | 实际worker未用且实际队列仍按created_at回收（R06） |
+| F13 | AC-013 | partial | 新增快照和错误预算模型 | GET缺allowed_actions等字段旧SSE仍旧协议重试预算未贯穿实际调用（R04,R08） |
+| F14 | AC-014 | partial | 面经审批路由已接严格审核字段投影 | 真实嵌套snapshot默认字段读取不对岗位丢失JD走错物化（R11） |
+| F15 | AC-015 | partial | 新增失败子项恢复HTTP入口 | 发布仍用旧队列完成判断失败再批准可重建实体恢复未派发（R10） |
+| F16 | AC-016 | open | 新增按published明细刷新清单helper | 实际发布未调用且v2物化无同URL查找复用（R10） |
+| F17 | AC-017 | partial | 新恢复入口约束单active attempt | 恢复不建可执行job旧retry仍只查直接子任务并不绑定root（R03） |
+| F18 | AC-018 | open | 新root接口owner隔离和运维白名单 | 旧通用job stream仍允许admin读取任意私人result（R07） |
+| F19 | AC-019 | partial | 原优缺点黑名单删除已改为保留标记 | 真实extract未接schema字符串拆单字和非字符串静默丢失仍可能发生（R05） |
+| F20 | AC-020 | implemented_not_retested | approve与withdraw实际路由已接BEGIN IMMEDIATE及revision CAS | 本轮后端复测被Docker磁盘门禁阻断不新增passed证据（-） |
 
-## 3. 阶段证据
+| 跨层 AC | 当前结论 |
+|---|---|
+| AC-021 | partial：后端幂等原语已有，真实前端提交未使用草稿幂等 helper |
+| AC-022 | partial：输入校验已有；needs_action 响应仍清空前端草稿 |
+| AC-023 | not-run（本轮）：保留历史回填服务/CLI 证据，本轮未复跑、未 apply 生产 |
+| AC-024 | open：JD 经 v2 approve 进入面经物化和题目队列；旧 retry 未统一 |
+| AC-025 | partial：helper 有部分删除检查，真实执行提交前状态/版本校验未贯通 |
+| AC-026 | implemented_not_retested（保留策略局部）：本轮未复测，长期失败队列恢复仍需覆盖 |
+| AC-027 | mock UI 8 passed 中包含相关用例；真实接口集成未验收 |
+| AC-028 | open / not-run：现有测试没有真实 API、Redis 和 worker 联合执行 |
+| AC-029 | open / not-run：现有服务测试手填中间产物，前端只验 mock 和跳转 URL |
+
+## 3. 阶段证据（历史开发记录，当前关闭状态见 §2）
 
 ### 阶段A：可执行边界与测试隔离
 
@@ -168,7 +174,7 @@
       （另一方 `created_attempt=false`）；同 work_key 不重复建活跃 job。
 - [x] `submit_interview_in_conn` 拆分：面经+明细+下游写入单事务，异常整体回滚（AC-008 部分）。
 - [x] 阶段检查点复用：extract 结果按 (stage, unit_key, input_version) 唯一，重启后复用。
-- [x] thread_id = import_id+attempt_no+job_id（AC-009）。
+- [ ] 仅 `build_thread_id` helper 实现 import_id+attempt_no+job_id；实际 graph 仍使用用户＋秒级时间，AC-009 未完成（2026-09-30 复审）。
 - [ ] 提取/分类检查点接入真实 graph 节点（模型调用前后故障点测试）——未开始。
 - [ ] 租约心跳独立任务 + finally 清理——未开始。
 - [ ] 剩余故障点（答案外部调用后/保存前等）——未开始。
@@ -293,10 +299,26 @@ npx playwright test tests/e2e/upload-task-center.spec.js \
   tests/e2e/ui-title-hierarchy.spec.js  # 24 passed
 ```
 
-## 6. 验收状态汇总
+## 6. 验收状态汇总（2026-09-30 复审修正）
 
-| 状态 | AC |
-|---|---|
-| passed | AC-002（后端）、AC-004、AC-005、AC-006、AC-007、AC-011（后端投影）、AC-013、AC-014、AC-015、AC-016、AC-017、AC-018、AC-019、AC-020、AC-021、AC-022、AC-023、AC-024、AC-025、AC-026、AC-027、AC-028（隔离腿）、AC-029（服务链腿） |
-| passed（分腿） | AC-001（后端 location + 前端定位/高亮/切岗）、AC-003（双入口共用接受服务）、AC-010（服务端快照流 + 客户端 EOF 重连） |
-| not-run / 待续 | AC-008/009 的 graph 节点级故障点注入（需真实 LangGraph 执行环境）；AC-010/028/029 的“真实 worker 中断 + 浏览器打开结果”全链路腿（服务端与浏览器两侧分别有测试）；AC-002 前端 server-mode DataTable（contracts §4.5 要求，待前端接入服务端 total） |
+- F01～F19 未满足各自完整 AC 的关闭条件（有实际部分修复，也有只新增 helper 的项目）。其中 F19 原黑名单删除已修，但实际节点结构校验未接。
+- F20 的 approve/withdraw 已接写事务和 revision CAS；本轮后端复测未执行，不能新增 passed 证据。
+- 新增明确回归：JD 审核进入面经/题目流程；真实嵌套快照默认字段及岗位传递不对。见报告 R11。
+- AC-004 尚缺真实 scope 模型预检及所有模型阶段的显式凭据使用。
+- AC-028/029 尚缺完整 API/Redis/worker/浏览器和逐题结果验收，不能称“仅剩中断演练”。
+
+本轮实际验证：
+
+```bash
+./deploy/docker-deploy.sh test -q \
+  -k 'upload or question_resolutions or public_contribution or interview_server_pagination or extraction_integrity' \
+  --ignore=backend/tests/integration/test_upload_recovery_stack.py
+# exit 1；磁盘门禁 2948 MB < 4096 MB，构建和 pytest 未启动
+
+cd frontend
+npx --no-install playwright test tests/e2e/upload-task-center.spec.js \
+  tests/e2e/upload-question-data-flow.spec.js --reporter=line
+# exit 0；8 passed (24.8s)；模拟接口，不能视为全栈通过
+```
+
+原报告的服务测试结果作为历史证据保留；当前需按[复审报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)补实际调用链和对应回归后，再逐项关闭。
