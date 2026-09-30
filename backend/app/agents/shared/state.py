@@ -16,6 +16,12 @@ class SubmitState(TypedDict, total=False):
     user_id: int                            # 当前用户 ID
     is_admin: bool                          # 是否管理员
     job_position: str                       # 当前岗位
+    # v2 执行上下文（R02/R03/R05）：LangGraph 只透传已声明的输入键
+    import_id: str                          # 根任务 ID（upload_imports.id）
+    attempt_id: int | None                  # 当前恢复批次 ID
+    work_key: str                           # 本次执行的 work_key
+    job_id: int                             # 当前 jobs 行 ID
+    credential_scope: str                   # 服务端策略 scope（user/global）
 
     # === 节点输出 ===
     doc_type: str                           # "JD" | "Interview" 由识别节点填入

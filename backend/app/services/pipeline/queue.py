@@ -62,15 +62,21 @@ def enqueue_questions(
             f"AND id IN ({placeholders}) AND deleted_at IS NULL",
             [interview_id, *ids],
         ).fetchall()
-    # R06：v2 明细带 import_id 时自动回填 root（真实上传队列行才有归属可对账）
+    # R06：v2 明细带 import_id 时自动回填 root（真实上传队列行才有归属可对账）。
+    # 旧 schema（mock/轻量测试库）没有该列时跳过，不改变旧行为。
     if root_import_id is None and rows:
-        linked = conn.execute(
-            f"SELECT DISTINCT import_id FROM questions_detail WHERE id IN "
-            f"({','.join('?' * len(rows))}) AND import_id IS NOT NULL LIMIT 1",
-            [r[0] for r in rows],
-        ).fetchone()
-        if linked and linked["import_id"]:
-            root_import_id = str(linked["import_id"])
+        detail_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('questions_detail')").fetchall()
+        }
+        if "import_id" in detail_columns:
+            linked = conn.execute(
+                f"SELECT DISTINCT import_id FROM questions_detail WHERE id IN "
+                f"({','.join('?' * len(rows))}) AND import_id IS NOT NULL LIMIT 1",
+                [r[0] for r in rows],
+            ).fetchone()
+            if linked and linked["import_id"]:
+                root_import_id = str(linked["import_id"])
     count = 0
     queue_columns = {
         row[1]

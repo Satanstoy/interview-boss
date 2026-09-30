@@ -12,6 +12,19 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _reset_idf_cache_per_test():
+    """修复跨目录顺序污染：``fts_service._idf_cache`` 是模块级缓存，先前
+    任意服务/聚合测试触发过 ``_compute_idf_cache`` 后会残留陈旧词频；
+    本文件每个用例都重置，保证判定与“单独跑此文件”一致。"""
+    import app.services.fts_service as fts
+
+    saved = fts._idf_cache
+    fts._idf_cache = None
+    yield
+    fts._idf_cache = saved
+
+
 class TestSearchQuestionsFts:
     """search_questions_fts 核心测试"""
 
