@@ -199,6 +199,58 @@ def _resolve_root_import_id(conn, *, job_id=None, import_id=None) -> str:
     return str(candidates[0])
 
 
+def _plan_work_after_restore(
+    conn, *, root, attempt, actor_id: int
+) -> dict:
+    """恢复后的工作规划：为同 root 写可派发 job（R03）。
+
+    - 同一 root 已有在途 job（pending/queued/running）→ 幂等复用，不重复建
+      （DB 部分唯一索引 uq_jobs_v2_work_active 兜底）；
+    - 否则创建首个未完成 work_key 的 ``submit_import`` job，绑定
+      root + attempt + work_key，payload 从根任务快照复制（含原稿/图片）。
+    """
+
+    import_id = root["id"]
+    in_flight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? "
+        "AND status IN ('pending', 'queued', 'running') ORDER BY id LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if in_flight:
+        return {"job_id": int(in_flight["id"]), "created": False, "work_key": FIRST_WORK_KEY}
+
+    payload = _loads(root["payload_json"], {}) or {}
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, progress_total, "
+        "root_import_id, upload_attempt_id, work_key, idempotency_key) "
+        "VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)",
+        (
+            UPLOAD_JOB_TYPE,
+            actor_id,
+            len(SUBMIT_PHASES),
+            import_id,
+            attempt["id"],
+            FIRST_WORK_KEY,
+            f"restore:{import_id}:{int(attempt['attempt_no'])}:{FIRST_WORK_KEY}",
+        ),
+    )
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, json.dumps(payload, ensure_ascii=False)),
+    )
+    return {"job_id": job_id, "created": True, "work_key": FIRST_WORK_KEY}
+
+
+def _loads(raw, default=None):
+    import json as _json
+
+    try:
+        return _json.loads(raw or "null")
+    except Exception:
+        return default
+
+
 def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=None) -> dict:
     """恢复同一业务任务：已有活跃批次直接返回，否则创建新批次。
 
@@ -226,15 +278,58 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
                 "原文已被删除，恢复不会重建已删除内容；如需继续请重新提供材料",
             )
 
+    # 已完成的根任务不需要恢复（R03：结果可打开，不重复执行）
+    if root["status"] == "completed":
+        return {
+            "import_id": root_import_id,
+            "attempt_id": None,
+            "attempt_no": int(root["current_attempt_no"] or 0),
+            "created_attempt": False,
+            "status": root["status"],
+            "status_url": f"/api/upload-imports/{root_import_id}",
+        }
+
     active = conn.execute(
         "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
         "ORDER BY attempt_no DESC LIMIT 1",
         (root_import_id,),
     ).fetchone()
 
+    def _finalize_attempt(a):
+        """关闭一个没有在途工作的 attempt（失败/耗尽 → failed）。"""
+
+        conn.execute(
+            "UPDATE upload_attempts SET status = 'failed', completed_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND status = 'active'",
+            (a["id"],),
+        )
+
+    created_attempt = False
     if active is not None:
-        created_attempt = False
-        attempt = active
+        in_flight = conn.execute(
+            "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+            "AND status IN ('pending', 'queued', 'running') ORDER BY id LIMIT 1",
+            (root_import_id, active["id"]),
+        ).fetchone()
+        if in_flight is not None:
+            attempt = active
+            created_attempt = False
+        else:
+            # 该 attempt 已无在途工作（全部终态失败/耗尽）：收尾后开新批次
+            _finalize_attempt(active)
+            try:
+                attempt = create_attempt(conn, import_id=root_import_id, requested_by=actor_id)
+                created_attempt = True
+            except sqlite3.IntegrityError:
+                # 并发恢复：另一方已建立 active attempt，读取它而不是新建
+                attempt = conn.execute(
+                    "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+                    "ORDER BY attempt_no DESC LIMIT 1",
+                    (root_import_id,),
+                ).fetchone()
+                if attempt is None:
+                    raise
+                created_attempt = False
     else:
         try:
             attempt = create_attempt(conn, import_id=root_import_id, requested_by=actor_id)
@@ -256,11 +351,18 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
         (attempt["attempt_no"], root_import_id),
     )
 
+    # R03：为本次恢复规划可执行工作（幂等：已有在途 job 就不重复建）
+    planned = _plan_work_after_restore(
+        conn, root=root, attempt=attempt, actor_id=actor_id
+    )
+
     return {
         "import_id": root_import_id,
         "attempt_id": attempt["id"],
         "attempt_no": attempt["attempt_no"],
         "created_attempt": created_attempt,
+        "planned_job_id": planned["job_id"],
+        "planned_work_key": planned["work_key"],
         "status": root["status"],
         "status_url": f"/api/upload-imports/{root_import_id}",
     }

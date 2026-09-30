@@ -641,7 +641,11 @@ async def get_active_submit_jobs(user: dict = Depends(get_current_user)):
 
 @router.post("/api/submit-jobs/{job_id}/retry")
 async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
-    """创建一次新的上传尝试，保留原任务作为审计记录。"""
+    """创建一次新的上传尝试，保留原任务作为审计记录。
+
+    R03：先解析业务根任务，再复用上传恢复的同一规划器，保证新 job
+    绑定 root + attempt + work_key（不只看直接子任务、不丢失根归属）。
+    """
 
     def _create_retry():
         with get_db_connection() as conn:
@@ -662,50 +666,85 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                 if original["status"] != "failed":
                     raise HTTPException(status_code=409, detail="只有失败任务可以重新处理")
 
-                active_child = conn.execute(
-                    "SELECT id FROM jobs WHERE parent_job_id = ? "
-                    "AND job_type = 'submit_import' "
-                    "AND status IN ('pending', 'queued', 'running') "
-                    "ORDER BY id DESC LIMIT 1",
-                    (job_id,),
-                ).fetchone()
-                if active_child:
+                # R03：旧 retry 优先走根任务恢复规划器（同 root、绑定 attempt、幂等）；
+                # 纯历史 job（无 v2 root 归属）回退到旧子任务行为，不破坏老界面重试。
+                from app.services.upload_lifecycle import (
+                    UploadRestoreError,
+                    restore_upload,
+                )
+
+                try:
+                    restored = restore_upload(
+                        conn,
+                        actor_id=int(original["created_by"]),
+                        job_id=int(job_id),
+                    )
+                    new_root_id = restored.get("planned_job_id")
+                    if not new_root_id:
+                        # 幂等路径：已有在途 job 直接返回
+                        active_child = conn.execute(
+                            "SELECT id FROM jobs WHERE root_import_id = ? "
+                            "AND status IN ('pending', 'queued', 'running') "
+                            "ORDER BY id DESC LIMIT 1",
+                            (restored["import_id"],),
+                        ).fetchone()
+                        if active_child:
+                            conn.commit()
+                            return {"job_id": int(active_child["id"]), "created": False}
+                        raise HTTPException(status_code=409, detail="无法规划恢复工作")
                     conn.commit()
-                    return {"job_id": int(active_child["id"]), "created": False}
+                    return {"job_id": new_root_id, "created": restored["created_attempt"]}
+                except UploadRestoreError as leaky:
+                    if leaky.code not in ("NOT_FOUND", "LEGACY_MAPPING_AMBIGUOUS"):
+                        raise HTTPException(status_code=409, detail=f"{leaky.code}: {leaky}") from None
+                    # 无 root 归属的历史任务：走旧子任务重试路径
+                    active_child = conn.execute(
+                        "SELECT id FROM jobs WHERE parent_job_id = ? "
+                        "AND job_type = 'submit_import' "
+                        "AND status IN ('pending', 'queued', 'running') "
+                        "ORDER BY id DESC LIMIT 1",
+                        (job_id,),
+                    ).fetchone()
+                    if active_child:
+                        conn.commit()
+                        return {"job_id": int(active_child["id"]), "created": False}
 
-                payload_row = conn.execute(
-                    "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-                ).fetchone()
-                if not payload_row:
-                    raise HTTPException(status_code=409, detail="原任务数据已不存在，无法重试")
+                    payload_row = conn.execute(
+                        "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
+                    ).fetchone()
+                    if not payload_row:
+                        raise HTTPException(status_code=409, detail="原任务数据已不存在，无法重试")
 
-                retry_count = conn.execute(
-                    "SELECT COUNT(*) AS count FROM jobs WHERE parent_job_id = ?",
-                    (job_id,),
-                ).fetchone()["count"]
-                idempotency_key = f"submit-retry:{job_id}:{int(retry_count) + 1}"
-                cursor = conn.execute(
-                    "INSERT INTO jobs (job_type, status, progress_total, created_by, "
-                    "available_at, parent_job_id, idempotency_key) "
-                    "VALUES ('submit_import', 'pending', ?, ?, CURRENT_TIMESTAMP, ?, ?)",
-                    (
-                        original["progress_total"] or 6,
-                        original["created_by"],
-                        job_id,
-                        idempotency_key,
-                    ),
-                )
-                new_job_id = int(cursor.lastrowid)
+                    retry_count = conn.execute(
+                        "SELECT COUNT(*) AS count FROM jobs WHERE parent_job_id = ?",
+                        (job_id,),
+                    ).fetchone()["count"]
+                    idempotency_key = f"submit-retry:{job_id}:{int(retry_count) + 1}"
+                    cursor = conn.execute(
+                        "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+                        "available_at, parent_job_id, idempotency_key) "
+                        "VALUES ('submit_import', 'pending', ?, ?, CURRENT_TIMESTAMP, ?, ?)",
+                        (
+                            original["progress_total"] or 6,
+                            original["created_by"],
+                            job_id,
+                            idempotency_key,
+                        ),
+                    )
+                    new_job_id = int(cursor.lastrowid)
 
-                payload = json.loads(payload_row["payload"])
-                payload["retry_of_job_id"] = job_id
-                payload["retry_attempt"] = int(retry_count) + 1
-                conn.execute(
-                    "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-                    (new_job_id, json.dumps(payload, ensure_ascii=False)),
-                )
-                conn.commit()
-                return {"job_id": new_job_id, "created": True}
+                    payload = json.loads(payload_row["payload"])
+                    payload["retry_of_job_id"] = job_id
+                    payload["retry_attempt"] = int(retry_count) + 1
+                    conn.execute(
+                        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                        (new_job_id, json.dumps(payload, ensure_ascii=False)),
+                    )
+                    conn.commit()
+                    return {"job_id": new_job_id, "created": True}
+            except HTTPException:
+                conn.rollback()
+                raise
             except Exception:
                 conn.rollback()
                 raise

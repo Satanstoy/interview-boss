@@ -10,6 +10,67 @@ def _override_user():
     return app, get_current_user
 
 
+def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
+    """R03：旧 retry 对已有 v2 root 的失败任务，新 job 绑定 root+attempt（不只看子任务）。"""
+
+    from app.services.upload_lifecycle import accept_upload
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (1, 'sj', 'x', 1)"
+    )
+    accepted = accept_upload(
+        test_db,
+        actor_id=1,
+        actor_is_admin=True,
+        idempotency_key="root-retry-1",
+        target_intent="private",
+        text="待重试的面经",
+        credential_loaders={
+            "user": lambda uid: {
+                "api_key": "k",
+                "base_url": "https://u.example.com/v1",
+                "model": "m",
+            }
+        },
+    )
+    test_db.commit()
+    import_id = accepted["import_id"]
+
+    # 标记失败：在途 job 全部终态失败并释放 attempt 归属
+    test_db.execute(
+        "UPDATE jobs SET status = 'failed', worker_id = NULL, locked_until = NULL "
+        "WHERE root_import_id = ?",
+        (import_id,),
+    )
+    test_db.commit()
+
+    app, dependency = _override_user()
+    try:
+        arq_job = MagicMock(job_id="arq-retry-root-1")
+        with patch(
+            "app.worker.enqueue_submit_import_job",
+            new=AsyncMock(return_value=arq_job),
+        ):
+            retry_response = client.post(f"/api/submit-jobs/{accepted['job_id']}/retry", json={})
+
+        assert retry_response.status_code == 200, retry_response.text
+        retry_id = retry_response.json()["job_id"]
+        job = test_db.execute(
+            "SELECT job_type, status, root_import_id, upload_attempt_id, work_key, arq_job_id "
+            "FROM jobs WHERE id = ?",
+            (retry_id,),
+        ).fetchone()
+        assert job["job_type"] == "submit_import"
+        assert job["root_import_id"] == import_id, "重试 job 必须绑定根任务"
+        assert job["upload_attempt_id"] is not None, "重试 job 必须绑定 attempt"
+        assert job["work_key"], "重试 job 必须带 work_key"
+        assert job["status"] == "queued"
+        assert job["arq_job_id"] == "arq-retry-root-1"
+    finally:
+        app.dependency_overrides.pop(dependency, None)
+
+
 def _create_failed_submit_job(test_db):
     cursor = test_db.execute(
         "INSERT INTO jobs (job_type, status, progress_total, created_by, "
