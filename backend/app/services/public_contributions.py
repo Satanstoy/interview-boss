@@ -638,6 +638,16 @@ def approve_public_contribution_v2(
             (public_interview_id, request_id),
         )
 
+        # 把每个保留 item 显式关联到物化出的 public detail（AC-015 依据，
+        # 不能只靠 source_item_id 或 URL；顺序与 projection.items 一致）
+        for item_id, detail_id in zip(approved_item_ids, detail_ids):
+            conn.execute(
+                "UPDATE public_contribution_items SET status = 'queued', "
+                "public_detail_id = ?, error_message = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (detail_id, item_id),
+            )
+
         from app.services.pipeline.queue import enqueue_questions
 
         enqueue_questions(
@@ -851,6 +861,9 @@ def publish_items_with_resolutions(conn, *, request_id: int) -> dict:
         item_id = int(item["id"])
         if item["status"] == "published":
             published.append(item_id)
+            continue
+        if item["status"] == "rejected":
+            # 审核排除项不再参与处理，不算 pending，也不阻塞发布
             continue
         valid = None
         if item["public_detail_id"]:
