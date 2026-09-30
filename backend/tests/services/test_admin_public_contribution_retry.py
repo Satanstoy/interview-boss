@@ -113,6 +113,14 @@ def test_retry_requeues_only_failed_items(tmp_path):
         "AND question_detail_id = 512 AND status = 'pending'"
     ).fetchone()[0]
     assert queued == 1, "失败子项的 public_detail 重新入队"
+    # R10：重试后派发聚类 job，保证公共队列被实际执行（不依赖 root 回填）
+    batch_job = conn.execute(
+        "SELECT job_type, root_import_id, work_key, status FROM jobs "
+        "WHERE job_type = 'cluster_batch' AND idempotency_key LIKE 'retry:%' "
+        "ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert batch_job is not None, "重试失败子项必须派发可执行的聚类 job"
+    assert batch_job["status"] == "pending"
     # 请求回到 queued，审核投影/revision 未变
     row = conn.execute(
         "SELECT status, revision, projection_hash FROM public_contribution_requests WHERE id = 1"

@@ -347,3 +347,59 @@ def test_interview_approve_keeps_snapshot_job_position():
     assert (row["round"] or "") == ""
     assert (row["url"] or "") == ""
     conn.close()
+
+
+def test_v2_materialize_reuses_same_url_public_interview():
+    """R10/AC-016：同 URL 已有公共面经时复用不重复建（追加贡献一致）。"""
+
+    from app.models.upload_contracts import build_review_projection_request
+    from app.services.public_contributions import (
+        approve_public_contribution_v2,
+        create_public_contribution_request,
+    )
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    # 已存在的公共面经（同 URL）
+    conn.execute(
+        "INSERT INTO interview (id, url, company, job_position, owner_id, status) "
+        "VALUES (900, 'https://shared.example.com/i/1', '旧公司', '后端开发', NULL, 'approved')"
+    )
+    # 私人申请（同 URL 追加）
+    conn.execute(
+        "INSERT INTO interview (id, url, company, job_position, owner_id, status) "
+        "VALUES (70, 'https://shared.example.com/i/1', 'PRIVATE公司', '后端开发', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2, owner_id) "
+        "VALUES (71, 70, 'Redis 持久化机制', '数据库', 'Redis', 101)"
+    )
+    conn.commit()
+
+    request = create_public_contribution_request(conn, "interview", 70, 101)
+    approval = approve_public_contribution_v2(
+        conn,
+        request_id=request["id"],
+        admin_id=201,
+        review_request=build_review_projection_request(
+            {
+                "expected_revision": 1,
+                "review_fields": {
+                    "source": {"company": "某公司", "source_url": "https://shared.example.com/i/1"}
+                },
+            },
+            source_type="interview",
+        ),
+    )
+    # 复用公共面经 900，不新建
+    assert approval["public_interview_id"] == 900
+    # 追加的明细挂到公共面经下
+    detail = conn.execute(
+        "SELECT id, interview_id, company FROM questions_detail "
+        "WHERE interview_id = 900 AND question = 'Redis 持久化机制'"
+    ).fetchone()
+    assert detail is not None
+    assert detail["company"] == "某公司"
+    conn.close()

@@ -486,6 +486,41 @@ def materialize_public_interview_from_projection(
         "url_signature": url_signature,
         "job_position": job_position,
     }
+    # R10/AC-016：同 URL 已有公共面经时复用而不重复建（追加贡献一致）
+    if source_url:
+        existing = conn.execute(
+            "SELECT id FROM interview WHERE owner_id IS NULL AND url = ? "
+            "AND deleted_at IS NULL ORDER BY id LIMIT 1",
+            (source_url,),
+        ).fetchone()
+        if existing is not None:
+            interview_id = int(existing["id"])
+            conn.execute(
+                "UPDATE interview SET questions_list = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (questions_list, interview_id),
+            )
+            detail_ids = []
+            for item in items:
+                detail_ids.append(
+                    _insert_dynamic(
+                        conn,
+                        "questions_detail",
+                        {
+                            "interview_id": interview_id,
+                            "url": source_url,
+                            "company": source.get("company") or "",
+                            "round": source.get("round") or "",
+                            "question": item.get("question") or "",
+                            "cat1": item.get("cat1") or "",
+                            "cat2": item.get("cat2") or "",
+                            "tags": item.get("tags") or "",
+                            "diff_tag": item.get("difficulty") or "",
+                            "job_position": job_position,
+                        },
+                    )
+                )
+            return interview_id, detail_ids
     interview_id = _insert_dynamic(conn, "interview", interview_values)
 
     detail_ids = []
@@ -866,6 +901,22 @@ def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
                 "UPDATE public_contribution_requests SET status = 'queued', "
                 "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (request_id,),
+            )
+            # R10：派发一个可执行的 cluster_batch job，保证公共失败子项被
+            # 实际处理（公共队列行无 root，对账扫描不到，必须显式派发）。
+            from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
+            from uuid import uuid4 as _uuid4
+
+            conn.execute(
+                "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+                "available_at, idempotency_key) "
+                "VALUES (?, 'pending', ?, ?, CURRENT_TIMESTAMP, ?)",
+                (
+                    CLUSTER_BATCH_JOB_TYPE,
+                    max(1, len(reprocessed)),
+                    admin_id,
+                    f"retry:{request_id}:{_uuid4().hex}",
+                ),
             )
         _event(
             conn,
