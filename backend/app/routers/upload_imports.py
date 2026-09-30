@@ -1,9 +1,11 @@
-"""上传根任务查询 API（contracts §4.1）。
+"""上传根任务查询/恢复 API（contracts §4.1）。
 
 - ``GET /api/upload-imports``：本人任务分页，按 created_at DESC。
 - ``GET /api/upload-imports/by-key/{key}``：本人按幂等键查询（响应丢失后恢复）；
   **必须注册在 ``/api/upload-imports/{id}`` 之前**。
 - ``GET /api/upload-imports/{id}``：本人完整快照；非本人一律 404（含管理员）。
+- ``POST /api/upload-imports/{id}/retry``：恢复剩余工作，返回快照与
+  ``created_attempt`` 布尔；非本人一律 404（含管理员）。
 """
 
 from __future__ import annotations
@@ -11,13 +13,13 @@ from __future__ import annotations
 import json
 
 import asyncio
-import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
+from app.services.upload_lifecycle import UploadRestoreError, restore_upload
 
 router = APIRouter()
 
@@ -261,3 +263,51 @@ async def stream_upload_import(import_id: str, user: dict = Depends(get_current_
     return StreamingResponse(
         event_stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
     )
+
+
+@router.post("/api/upload-imports/{import_id}/retry")
+async def retry_upload_import(import_id: str, user: dict = Depends(get_current_user)):
+    """恢复剩余工作（contracts §4.1）：返回根快照与 ``created_attempt`` 布尔。
+
+    只重建未完成/失败/失效的工作；已成功阶段由 worker 复用检查点。
+    非本人一律 404（含管理员，AC-018）；原文已删除返回 409 SOURCE_DELETED。
+    """
+
+    def _retry():
+        with get_db_connection() as conn:
+            # 权限即“归属即存在”：非本人一律 404，不泄露他人任务存在性
+            _load_owned(conn, import_id, user["id"])
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                restored = restore_upload(
+                    conn,
+                    actor_id=user["id"],
+                    import_id=import_id,
+                )
+                row = conn.execute(
+                    "SELECT * FROM upload_imports WHERE id = ?", (import_id,)
+                ).fetchone()
+                conn.commit()
+            except UploadRestoreError as exc:
+                conn.rollback()
+                status_code = (
+                    409 if exc.code in ("SOURCE_DELETED", "LEGACY_MAPPING_AMBIGUOUS") else 404
+                )
+                raise HTTPException(
+                    status_code=status_code,
+                    detail=f"{exc.code}: {exc}",
+                ) from None
+            except Exception:
+                conn.rollback()
+                raise
+
+            snapshot = _snapshot(row)
+            snapshot.update(
+                {
+                    "created_attempt": restored["created_attempt"],
+                    "status_url": restored["status_url"],
+                }
+            )
+            return snapshot
+
+    return await run_db(_retry)
