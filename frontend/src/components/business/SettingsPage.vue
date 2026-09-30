@@ -50,11 +50,18 @@ const sections = computed(() => {
 // 支持 /settings?section=ai 直达对应配置区（模型守卫引导入口）
 const sectionFromQuery = (value) => {
   const known = ['profile', 'interview', 'ai', 'search', 'mcp', 'security', 'admin']
-  return known.includes(value) ? value : 'profile'
+  if (!known.includes(value)) return 'profile'
+  if (value === 'admin' && !props.isAdmin) return 'profile'
+  return value
 }
-watch(() => route.query.section, (value) => {
+watch([() => route.query.section, () => props.isAdmin], ([value]) => {
   if (value) activeSection.value = sectionFromQuery(value)
+  else if (!props.isAdmin && activeSection.value === 'admin') activeSection.value = 'profile'
 }, { immediate: true })
+
+const adminTabFromQuery = computed(() => {
+  return typeof route.query.adminTab === 'string' ? route.query.adminTab : 'taxonomy'
+})
 
 </script>
 
@@ -154,6 +161,7 @@ watch(() => route.query.section, (value) => {
             <SettingsAdmin
               :is-building="isBuilding"
               :is-admin="isAdmin"
+              :initial-tab="adminTabFromQuery"
               @build-master-bank="emit('build-master-bank')"
               @taxonomy-updated="emit('profile-updated')"
             />

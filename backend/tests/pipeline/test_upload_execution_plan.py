@@ -18,7 +18,6 @@ import pytest
 
 from app.db.migrations import run_migrations
 from app.services.upload_lifecycle import (
-    FIRST_WORK_KEY,
     UploadRestoreError,
     accept_upload,
     restore_upload,
@@ -291,6 +290,70 @@ def test_finalize_partial_failed_sets_error_and_allows_retry():
     conn.close()
 
 
+@pytest.mark.parametrize(
+    "is_admin,expected_action",
+    [(False, "wait_for_global_model"), (True, "configure_system_model")],
+)
+def test_finalize_global_model_actions_follow_root_owner_role(is_admin, expected_action):
+    """Worker snapshots use the task owner's role, not the current API viewer."""
+
+    conn = _db()
+    actor_id = 201 if is_admin else 101
+    if is_admin:
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, is_admin) "
+            "VALUES (201, 'admin201', 'x', 1)"
+        )
+    result = _accept(
+        conn,
+        key=f"global-{actor_id}",
+        target="share",
+        extra={"actor_id": actor_id, "actor_is_admin": is_admin},
+    )
+    import_id = result["import_id"]
+    conn.execute(
+        "UPDATE upload_imports SET policy_json = ? WHERE id = ?",
+        (json.dumps({"credential_scope": "global"}), import_id),
+    )
+    conn.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status, error_code, job_id) "
+        "VALUES (?, 'preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
+        "'needs_action', 'MODEL_CONFIG_MISSING', ?)",
+        (import_id, result["job_id"]),
+    )
+    conn.commit()
+
+    from app.services.job_lifecycle import claim_job_with_generation
+
+    claimed = claim_job_with_generation(conn, result["job_id"], worker_id="w1")
+    lease_generation = int(claimed["lease_generation"])
+    conn.execute(
+        "UPDATE jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (result["job_id"],),
+    )
+    conn.commit()
+
+    snapshot = finalize_attempt_and_aggregate_root(
+        conn,
+        import_id=import_id,
+        actor_id=actor_id,
+        error_code="MODEL_CONFIG_MISSING",
+        error_message="system model unavailable",
+        lease_generation=lease_generation,
+    )
+    conn.commit()
+
+    assert snapshot["status"] == "needs_action"
+    assert expected_action in snapshot["allowed_actions"]
+    assert (
+        "configure_system_model" not in snapshot["allowed_actions"]
+        if not is_admin
+        else "wait_for_global_model" not in snapshot["allowed_actions"]
+    )
+    conn.close()
+
+
 def test_finalize_unknown_root_raises():
     conn = _db()
     with pytest.raises(ValueError):
@@ -375,7 +438,6 @@ def test_finalize_with_stale_generation_is_rejected_without_root_write():
 def test_finalize_without_generation_rejects_v2_service_contract():
     """F12：v2 根聚合不传 lease_generation 视为编程错误（不允许裸写）。"""
 
-    from app.services.job_lifecycle import JobFenceError
     from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
 
     conn = _db()

@@ -24,7 +24,7 @@ from app.services.upload_lifecycle import UploadRestoreError, restore_upload
 router = APIRouter()
 
 
-def _error_dto(code, message):
+def _error_dto(code, message, *, credential_scope="user", is_admin=False):
     """错误码 → DTO（AC-013）：action/retryable 由统一错误策略映射。"""
 
     from app.models.upload_contracts import ErrorCode
@@ -35,12 +35,19 @@ def _error_dto(code, message):
     except ValueError:
         code = ErrorCode.INTERNAL_ERROR.value
     policy = ERROR_POLICY.get(code, {})
+    scope = policy.get("scope")
+    action = policy.get("action")
+    if code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
+        if credential_scope in ("user", "global"):
+            scope = credential_scope
+        if scope == "global":
+            action = "configure_system_model" if is_admin else "wait_for_global_model"
     return {
         "code": code,
         "message": message or code,
         "retryable": bool(policy.get("retryable", False)),
-        "action": policy.get("action"),
-        "scope": policy.get("scope"),
+        "action": action,
+        "scope": scope,
     }
 
 
@@ -108,7 +115,7 @@ def _stage_counts(conn, import_id: str) -> dict:
     }
 
 
-def _snapshot(row, counts=None, conn=None) -> dict:
+def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
     """完整根快照（R04/AC-011）：列表/详情/by-key/retry 共用同一构造。
 
     GET 与 SSE 统一用 ``snapshot_from_parts``，allowed_actions 由服务端算，
@@ -119,6 +126,16 @@ def _snapshot(row, counts=None, conn=None) -> dict:
     from app.services.upload_retry_budget import snapshot_from_parts
     from app.services.upload_status import allowed_actions
     from app.services.upload_lifecycle import upload_action_credential_scope
+
+    try:
+        policy = json.loads(row["policy_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        policy = {}
+    action_scope = upload_action_credential_scope(
+        conn,
+        import_id=row["id"],
+        fallback=policy.get("credential_scope", "user"),
+    ) if conn is not None else policy.get("credential_scope", "user")
 
     review_status = None
     if conn is not None and row["contribution_request_id"]:
@@ -171,7 +188,12 @@ def _snapshot(row, counts=None, conn=None) -> dict:
         if row["interview_id"] is not None
         else None,
         error=(
-            _error_dto(row["error_code"], row["error_message"] or "")
+            _error_dto(
+                row["error_code"],
+                row["error_message"] or "",
+                credential_scope=action_scope,
+                is_admin=bool(actor_is_admin),
+            )
             if row["error_code"]
             else None
         ),
@@ -179,15 +201,8 @@ def _snapshot(row, counts=None, conn=None) -> dict:
             row["status"],
             error_code=row["error_code"],
             has_result=row["interview_id"] is not None,
-            credential_scope=upload_action_credential_scope(
-                conn,
-                import_id=row["id"],
-                fallback=(
-                    json.loads(row["policy_json"] or "{}").get("credential_scope", "user")
-                    if row["policy_json"]
-                    else "user"
-                ),
-            ),
+            credential_scope=action_scope,
+            is_admin=bool(actor_is_admin),
         ),
         updated_at=row["updated_at"],
     )
@@ -256,7 +271,10 @@ async def list_upload_imports(
                 (*params, page_size, offset),
             ).fetchall()
             return {
-                "items": [_snapshot(row, conn=conn) for row in rows],
+                "items": [
+                    _snapshot(row, conn=conn, actor_is_admin=bool(user.get("is_admin")))
+                    for row in rows
+                ],
                 "total": total,
                 "page": page,
                 "page_size": page_size,
@@ -274,7 +292,11 @@ async def get_upload_import_by_key(idempotency_key: str, user: dict = Depends(ge
                 "SELECT * FROM upload_imports WHERE requester_id = ? AND idempotency_key = ?",
                 (user["id"], idempotency_key),
             ).fetchone()
-            return _snapshot(row, conn=conn) if row is not None else None
+            return (
+                _snapshot(row, conn=conn, actor_is_admin=bool(user.get("is_admin")))
+                if row is not None
+                else None
+            )
 
     snapshot = await run_db(_query)
     if snapshot is None:
@@ -286,7 +308,11 @@ async def get_upload_import_by_key(idempotency_key: str, user: dict = Depends(ge
 async def get_upload_import(import_id: str, user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
-            return _snapshot(_load_owned(conn, import_id, user["id"]), conn=conn)
+            return _snapshot(
+                _load_owned(conn, import_id, user["id"]),
+                conn=conn,
+                actor_is_admin=bool(user.get("is_admin")),
+            )
 
     return await run_db(_query)
 
@@ -385,7 +411,12 @@ async def stream_upload_import(import_id: str, user: dict = Depends(get_current_
     def _snapshot_stream():
         with get_db_connection() as conn:
             row = _load_owned(conn, import_id, user["id"])
-            return _snapshot(row, counts=_stage_counts(conn, import_id), conn=conn)
+            return _snapshot(
+                row,
+                counts=_stage_counts(conn, import_id),
+                conn=conn,
+                actor_is_admin=bool(user.get("is_admin")),
+            )
 
     async def event_stream():
         last_revision = -1
@@ -450,7 +481,9 @@ async def retry_upload_import(import_id: str, user: dict = Depends(get_current_u
                 conn.rollback()
                 raise
 
-            snapshot = _snapshot(row, conn=conn)
+            snapshot = _snapshot(
+                row, conn=conn, actor_is_admin=bool(user.get("is_admin"))
+            )
             snapshot.update(
                 {
                     "created_attempt": restored["created_attempt"],

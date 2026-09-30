@@ -55,6 +55,7 @@ const actionLabel = {
   retry_failed_steps: '重试失败步骤',
   retry_after_configuration: '配置后继续',
   configure_user_model: '去配置模型',
+  configure_system_model: '配置系统模型',
   retry: '重新处理',
   view_progress: '查看进度',
   view_review_status: '查看审核状态',
@@ -139,6 +140,13 @@ async function onAction(task, action) {
   }
   if (action === 'configure_user_model') {
     router.push({ name: 'settings' })
+    return
+  }
+  if (action === 'configure_system_model') {
+    router.push({
+      name: 'settings',
+      query: { section: 'admin', adminTab: 'model' },
+    })
     return
   }
   if (action === 'retry' || action === 'retry_failed_steps' || action === 'retry_after_configuration') {
@@ -250,16 +258,24 @@ onUnmounted(() => {
             </p>
 
             <div class="mt-2 flex flex-wrap gap-2">
-              <button
-                v-for="action in task.allowed_actions || []"
-                :key="action"
-                type="button"
-                class="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
-                :disabled="busyIds.has(task.import_id)"
-                @click="onAction(task, action)"
-              >
-                {{ actionLabel[action] || action }}
-              </button>
+              <template v-for="action in task.allowed_actions || []" :key="action">
+                <p
+                  v-if="action === 'wait_for_global_model'"
+                  class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+                  role="status"
+                >
+                  等待管理员配置公共模型
+                </p>
+                <button
+                  v-else
+                  type="button"
+                  class="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                  :disabled="busyIds.has(task.import_id)"
+                  @click="onAction(task, action)"
+                >
+                  {{ actionLabel[action] || action }}
+                </button>
+              </template>
             </div>
           </li>
 

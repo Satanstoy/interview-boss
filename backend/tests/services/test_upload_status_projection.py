@@ -127,6 +127,7 @@ def test_allowed_actions_global_scope_points_to_system_configuration():
         "needs_action",
         error_code="MODEL_AUTH_INVALID",
         credential_scope="global",
+        is_admin=True,
     )
     assert "configure_system_model" in actions
     assert "configure_user_model" not in actions
@@ -141,8 +142,10 @@ def test_allowed_actions_shared_user_global_missing_warns_wait_global():
         "needs_action",
         error_code="MODEL_CONFIG_MISSING",
         credential_scope="global",
+        is_admin=False,
     )
     assert "wait_for_global_model" in actions
+    assert "configure_system_model" not in actions
     assert "configure_user_model" not in actions
     assert "retry_after_configuration" in actions
 

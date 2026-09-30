@@ -48,8 +48,8 @@
 
 | 跨层 AC | 当前结论 |
 |---|---|
-| AC-021 | partial：后端幂等原语已有，真实前端提交未使用草稿幂等 helper |
-| AC-022 | partial：输入校验已有；needs_action 响应仍清空前端草稿 |
+| AC-021 | partial：`StagingPanel` 已调用草稿幂等 helper，按草稿复用键并先查 by-key；仍缺响应丢失后的表单级回归验收 |
+| AC-022 | partial：输入校验已有，`needs_action` 会保留草稿和幂等键；仍缺配置修复后表单重发的专用回归验收 |
 | AC-023 | not-run（本轮）：保留历史回填服务/CLI 证据，本轮未复跑、未 apply 生产 |
 | AC-024 | open：JD 经 v2 approve 进入面经物化和题目队列；旧 retry 未统一 |
 | AC-025 | partial：helper 有部分删除检查，真实执行提交前状态/版本校验未贯通 |
@@ -69,6 +69,7 @@
 | AC-008/011 / F08/F11 | partial；本轮回归通过 | 聚类子题有 root 检查点，队列领取/释放推进 running/pending，root 聚合等待所有异步子题结果；失败后同 root 可重试。 | extract/classify 的所有故障点、worker 进程强杀与独立 Redis dispatcher 接管仍需单独演练。 |
 | AC-009 / F09 | worker→graph 稳定 thread ID 已接通并回归通过 | Worker 从 attempt 行取 `attempt_no`（不是 attempt 主键），构造 `import_id + attempt_no + job_id`，交给 LangGraph SSE bridge 作为 checkpoint thread ID；分别验证 worker 输入和最终 graph config。 | 老的非上传调用仍保留兼容 fallback；真实 ARQ 崩溃/重启后的持久 checkpoint 接管不在本轮验证范围。 |
 | AC-015 / F15 | implemented；恢复回归通过 | 公共失败子项只恢复失败 detail；即使原 queue 行已 done 也会重开；每次 root-bound 公共重试先创建同 attempt、global scope 的预检，再放行 cluster job。 | 多 root 并发、真实 ARQ 中断恢复仍未跑。 |
+| AC-013 / 公共模型恢复动作 | 该行为已实现；定向回归通过 | 根快照和 worker 聚合按任务所有者身份区分管理员的`configure_system_model`与普通用户的`wait_for_global_model`；任务中心显示等待说明、管理员可直达`settings?section=admin&adminTab=model`，非管理员深链回退普通设置；同时保留非模型错误原有scope。 | Playwright API 为mock；不代表真实 API/Redis/worker 联合链路已验收。 |
 | AC-029 | partial；隔离 HTTP + worker 函数链路通过 | 新增 `test_upload_question_data_flow_worker.py`：实际 `/api/submit-jobs` 接受、上传 worker、逐题标签/私人聚类、管理员审核 HTTP、审核后 global 预检、公共聚类、一题失败、管理员重试与最终公共读取 API；不手填这些中间产物。修复 public projection 丢失输入 `source_ordinal`。 | 聚类/提取 worker 函数由测试直接调用，ARQ/Redis 和浏览器没有启动；完整 AC-029 仍不能标 passed。 |
 | AC-028 | open / not-run | — | 真实隔离 Redis + ARQ worker + 浏览器的联合恢复演练仍未执行。 |
 
@@ -111,6 +112,21 @@ UPLOAD_TEST_REDIS_PREFIX=iboss-upload-20261001-final \
   backend/tests/pipeline/test_upload_worker_policy_wiring.py::test_worker_passes_root_policy_share_review_and_aggregates \
   backend/tests/pipeline/test_upload_stage_recovery.py::test_submit_graph_uses_worker_thread_id
 # 3 passed（稳定 thread_id 从 worker 贯穿 graph；global 工具调用选择系统 scope）
+
+.venv/bin/pytest -q backend/tests/services/test_upload_status_projection.py \
+  backend/tests/infra/test_upload_stream_contract.py \
+  backend/tests/pipeline/test_upload_execution_plan.py
+# 41 passed（含 root owner 角色投影、快照错误动作与错误scope回归）
+
+(cd frontend && npx --no-install playwright test tests/e2e/upload-task-center.spec.js --reporter=dot)
+# 9 passed（页面/API mock；管理员/普通用户动作与深链）
+(cd frontend && npx --no-install eslint src/components/business/UploadTaskCenter.vue \
+  src/components/business/SettingsPage.vue src/components/business/SettingsAdmin.vue \
+  src/views/SettingsView.vue
+)
+# passed
+(cd frontend && npm run build)
+# passed（保留既有 CSS at-rule、chunk size 提示）
 
 # Ruff 对本轮所有变更的 Python 文件：All checks passed
 

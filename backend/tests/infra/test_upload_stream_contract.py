@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.models.upload_contracts import UploadStatus
 from app.services.upload_retry_budget import (
     ERROR_POLICY,
@@ -222,7 +220,6 @@ def test_snapshot_review_status_from_bound_contribution(tmp_path):
     """AC-010/AC-013：root 绑定公共化申请后，快照 review_status 不再恒空
     （此前 _snapshot 只透出 contribution_request_id 不计算 review_status）。"""
 
-    import json as _json
     import sqlite3
 
     from app.db.migrations import run_migrations
@@ -266,3 +263,63 @@ def test_snapshot_review_status_from_bound_contribution(tmp_path):
         "根状态由 worker 聚合推进（waiting_review 转换在 aggregate 层），快照透传 review_status"
     )
     conn.close()
+
+
+def test_snapshot_global_preflight_actions_follow_viewer_role(test_db):
+    """Global credential errors direct admins to settings and users to wait."""
+    import json as _json
+
+    from app.routers.upload_imports import _snapshot
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (101, 'upload-user', 'x', 0)"
+    )
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (201, 'upload-admin', 'x', 1)"
+    )
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, "
+        "status, error_code, error_message) "
+        "VALUES ('imp-global-block', 101, 'global-block', 'hash', 'share', 'interview', "
+        "'upload-pipeline-v1', ?, '{}', 'needs_action', 'MODEL_CONFIG_MISSING', 'system model unavailable')",
+        (_json.dumps({"credential_scope": "user", "post_approval_credential_scope": "global"}),),
+    )
+    job_id = test_db.execute(
+        "INSERT INTO jobs (job_type, status, root_import_id, work_key) "
+        "VALUES ('credential_preflight', 'failed', 'imp-global-block', 'preflight:credential:v1') "
+        "RETURNING id"
+    ).fetchone()["id"]
+    test_db.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, _json.dumps({"credential_scope": "global"})),
+    )
+    test_db.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status, error_code, job_id) VALUES "
+        "('imp-global-block', 'preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
+        "'failed', 'MODEL_CONFIG_MISSING', ?)",
+        (job_id,),
+    )
+    test_db.commit()
+    row = test_db.execute(
+        "SELECT * FROM upload_imports WHERE id = 'imp-global-block'"
+    ).fetchone()
+
+    user_snapshot = _snapshot(row, conn=test_db, actor_is_admin=False)
+    admin_snapshot = _snapshot(row, conn=test_db, actor_is_admin=True)
+
+    assert user_snapshot["error"]["scope"] == "global"
+    assert user_snapshot["error"]["action"] == "wait_for_global_model"
+    assert "wait_for_global_model" in user_snapshot["allowed_actions"]
+    assert "configure_system_model" not in user_snapshot["allowed_actions"]
+    assert admin_snapshot["error"]["action"] == "configure_system_model"
+    assert "configure_system_model" in admin_snapshot["allowed_actions"]
+
+
+def test_snapshot_keeps_non_credential_error_scope_from_error_policy():
+    from app.routers.upload_imports import _error_dto
+
+    assert _error_dto("UPSTREAM_TIMEOUT", "timeout")["scope"] == "system"

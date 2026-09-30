@@ -37,15 +37,38 @@ const TASK = {
 
 const MOCK_TASKS = { items: [TASK], total: 1, page: 1, page_size: 20 }
 
-async function mockApi(page) {
+async function mockApi(page, { user = MOCK_USER, task = TASK } = {}) {
   await page.route('**/api/auth/**', (route) =>
-    route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } }),
+    route.fulfill({ json: { token: 'e2e-token', user } }),
   )
-  await page.route('**/api/upload-imports?**', (route) => route.fulfill({ json: MOCK_TASKS }))
-  await page.route('**/api/upload-imports/imp-e2e-0001', (route) => route.fulfill({ json: TASK }))
+  await page.route('**/api/upload-imports?**', (route) =>
+    route.fulfill({ json: { ...MOCK_TASKS, items: [task] } }),
+  )
+  await page.route('**/api/upload-imports/imp-e2e-0001', (route) => route.fulfill({ json: task }))
   await page.route('**/api/data/interview/555/location?**', (route) =>
     route.fulfill({ json: { interview_id: 555, page: 4, page_size: 20, rank: 61, position_id: 1 } }),
   )
+  await page.route('**/api/positions**', (route) =>
+    route.fulfill({ json: { positions: [{ id: 1, name: '后端开发工程师' }] } }),
+  )
+  await page.route('**/api/profile**', (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname.endsWith('/embedding')) {
+      return route.fulfill({ json: { settings: { backend: 'auto', dimension: 512 } } })
+    }
+    if (pathname.endsWith('/taxonomy/system')) {
+      return route.fulfill({ json: { job_position: '后端开发工程师', categories: [], tags: [] } })
+    }
+    return route.fulfill({
+      json: {
+        settings: {
+          current_job_position: '后端开发工程师',
+          llm_model: 'system-model',
+          llm_timeout: '120',
+        },
+      },
+    })
+  })
 }
 
 test('任务中心展示 allowed_actions 且不出现暂停按钮', async ({ page }) => {
@@ -108,6 +131,62 @@ test('任务卡片可用键盘操作且状态对读屏可见', async ({ page }) 
   await actionButton.focus()
   await expect(actionButton).toBeFocused()
   await expect(center.locator('[aria-live="polite"]')).toHaveCount(1)
+})
+
+test('普通用户遇到公共模型阻塞时只看到等待提示', async ({ page }) => {
+  const waitingTask = {
+    ...TASK,
+    status: 'needs_action',
+    error: {
+      code: 'MODEL_CONFIG_MISSING',
+      message: '系统尚未配置模型，请管理员修复',
+      retryable: false,
+      action: 'wait_for_global_model',
+      scope: 'global',
+    },
+    allowed_actions: ['wait_for_global_model', 'retry_after_configuration'],
+  }
+  await mockApi(page, { task: waitingTask })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('等待管理员配置公共模型')).toBeVisible()
+  await expect(center.getByRole('button', { name: '等待管理员配置公共模型' })).toHaveCount(0)
+  await expect(center.getByRole('button', { name: '配置后继续' })).toBeVisible()
+})
+
+test('管理员可从公共模型阻塞任务直达全局模型配置', async ({ page }) => {
+  const admin = { ...MOCK_USER, id: 201, username: 'admin', is_admin: 1 }
+  const blockedTask = {
+    ...TASK,
+    status: 'needs_action',
+    error: {
+      code: 'MODEL_AUTH_INVALID',
+      message: '系统模型鉴权失败',
+      retryable: false,
+      action: 'configure_system_model',
+      scope: 'global',
+    },
+    allowed_actions: ['configure_system_model', 'retry_after_configuration'],
+  }
+  await mockApi(page, { user: admin, task: blockedTask })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await page.getByRole('button', { name: '配置系统模型' }).click()
+
+  await expect(page).toHaveURL(/section=admin/)
+  await expect(page).toHaveURL(/adminTab=model/)
+  await expect(page.getByText('全局 LLM 配置')).toBeVisible()
+})
+
+test('普通用户不能通过管理员设置深链打开全局模型配置', async ({ page }) => {
+  await mockApi(page)
+  await page.goto('/settings?section=admin&adminTab=model')
+
+  await expect(page.getByText('全局 LLM 配置')).toHaveCount(0)
+  await expect(page.getByText('管理员设置')).toHaveCount(0)
 })
 
 test('SSE 非终态 EOF 后客户端会重连', async ({ page }) => {

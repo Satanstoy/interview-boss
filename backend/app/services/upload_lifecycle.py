@@ -492,6 +492,10 @@ def finalize_attempt_and_aggregate_root(
 
     policy = _loads(root["policy_json"] or "{}", {}) or {}
     action_scope = policy.get("credential_scope", "user")
+    requester_role = conn.execute(
+        "SELECT is_admin FROM users WHERE id = ?", (root["requester_id"],)
+    ).fetchone()
+    requester_is_admin = bool(requester_role and requester_role["is_admin"])
     if status == "needs_action" and conn.execute(
         "SELECT 1 FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight' "
         "ORDER BY id DESC LIMIT 1",
@@ -528,6 +532,7 @@ def finalize_attempt_and_aggregate_root(
             error_code=final_error_code,
             has_result=aggregated["result_available"],
             credential_scope=action_scope,
+            is_admin=requester_is_admin,
         ),
     }
 

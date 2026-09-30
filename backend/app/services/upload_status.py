@@ -82,6 +82,7 @@ def allowed_actions(
     error_code: str | None = None,
     has_result: bool = False,
     credential_scope: str = "user",
+    is_admin: bool = False,
 ) -> list[str]:
     """服务端允许的操作；绝不虚构暂停/取消。
 
@@ -97,8 +98,9 @@ def allowed_actions(
     if status == "needs_action":
         if error_code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
             if credential_scope == "global":
-                actions.append("configure_system_model")
-                actions.append("wait_for_global_model")
+                actions.append(
+                    "configure_system_model" if is_admin else "wait_for_global_model"
+                )
             else:
                 actions.append("configure_user_model")
         if error_code == "QUOTA_EXCEEDED":
