@@ -81,9 +81,15 @@ class ResolvedCredential:
 
 
 def _default_user_loader(user_id: int):
-    from app.core.config import get_user_llm_config
+    """用户 scope 的**严格**读取器：绝不用通用回退函数，绝不借系统配置。
 
-    return get_user_llm_config(user_id)
+    ``get_strict_user_llm_config`` 缺失/解密失败一律返回 None，调用方按
+    ``MODEL_CONFIG_MISSING`` 处理；禁止走 ``get_user_llm_config``（缺 Key 回退全局）。
+    """
+
+    from app.core.config import get_strict_user_llm_config
+
+    return get_strict_user_llm_config(user_id)
 
 
 def _default_global_loader():
