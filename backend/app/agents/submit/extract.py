@@ -7,9 +7,6 @@ from app.agents.shared.events import emit_progress, build_extraction_data, NodeT
 
 logger = logging.getLogger("interview-boss")
 
-# 提取阶段的 HR 类表述：**只标记不删除**（AC-019：技术题含“优缺点”曾被静默丢弃）
-_EXTRACT_MARK_PHRASES = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职"]
-
 
 async def recognize_node(state: SubmitState) -> dict:
     """识别内容类型节点（JD/Interview）"""
@@ -73,21 +70,32 @@ async def extract_node(state: SubmitState) -> dict:
 
         # 不静默漏题：黑名单只做标记，清单完整保留（AC-019）
         if doc_type == "interview":
+            from app.services.extraction_integrity import (
+                ExtractionSchemaError,
+                normalize_extracted_questions,
+            )
+
             raw_list = data.get("具体题目清单", []) or []
-            kept = [q for q in raw_list if isinstance(q, str) and q.strip()]
-            marks = {}
-            for index, question in enumerate(kept, start=1):
-                for phrase in _EXTRACT_MARK_PHRASES:
-                    if phrase in question:
-                        marks[str(index)] = f"含 HR 类表述「{phrase}」，建议人工确认"
-                        break
-            data["具体题目清单"] = kept
-            data["题目标记"] = marks
+            try:
+                normalized = normalize_extracted_questions(raw_list)
+            except ExtractionSchemaError as schema_error:
+                # 结构错误 → MODEL_OUTPUT_INVALID 走有限修复重试，绝不拆字/丢题
+                raise ExtractionSchemaError(str(schema_error)) from schema_error
+            questions = [item["question"] for item in normalized["questions"]]
+            data["具体题目清单"] = questions
+            data["题目 ordinal"] = [
+                item["ordinal"] for item in normalized["questions"]
+            ]
+            data["题目标记"] = {
+                str(item["ordinal"]): item["review_reason"]
+                for item in normalized["questions"]
+                if item["needs_review"]
+            }
             data["提取计数"] = {
-                "extracted": len(raw_list),
-                "retained": len(kept),
-                "excluded": 0,
-                "needs_review": len(marks),
+                "extracted": normalized["counts"]["extracted"],
+                "retained": normalized["counts"]["retained"],
+                "excluded": normalized["counts"]["excluded"],
+                "needs_review": normalized["counts"]["needs_review"],
             }
 
     # 质量评估

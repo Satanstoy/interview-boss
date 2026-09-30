@@ -132,3 +132,87 @@ def test_sanitize_marks_hr_style_without_dropping():
     clean, filtered = sanitize_batch(batch)
     assert len(clean) == 2
     assert all("mark" not in item or item.get("mark") in (None, "needs_review") for item in clean)
+
+
+# ── 真实 extract 节点接入 schema 校验（R05）────────────────
+
+
+async def test_extract_node_rejects_string_list_instead_of_splitting_chars():
+    """R05：实际 extract 节点对字符串清单抛 MODEL_OUTPUT_INVALID，不拆单字。"""
+
+    from unittest.mock import patch
+
+    from app.agents.submit.extract import extract_node
+    from app.services.extraction_integrity import ExtractionSchemaError
+
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_llm = AsyncMock(
+        return_value='{"type": "interview", "data": {"具体题目清单": "TCP 三次握手，Redis 持久化"}}'
+    )
+
+    state = {
+        "doc_type": "interview",
+        "user_id": 101,
+        "raw_text": "面经",
+        "image_data": [],
+        "url": "",
+        "season": "",
+        "llm_call_count": 0,
+    }
+    with (
+        patch("app.services.llm._call_llm_with_retry_messages", mock_llm),
+        patch("app.services.llm._should_use_response_format", return_value=False),
+        patch(
+            "app.services.llm.get_llm_client_for_user",
+            return_value=(MagicMock(), "test-model", 30, "", "openai"),
+        ),
+    ):
+        with pytest.raises(ExtractionSchemaError) as exc_info:
+            await extract_node(state)
+        assert getattr(exc_info.value, "code", "") == "MODEL_OUTPUT_INVALID"
+
+
+async def test_extract_node_normalizes_mixed_ordinals():
+    """R05：真实节点对 dict 清单按 ordinal 排序去重并保留全部题目。"""
+
+    from unittest.mock import patch
+
+    from app.agents.submit.extract import extract_node
+
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_llm = AsyncMock(
+        return_value=(
+            '{"type": "interview", "data": {"具体题目清单": ['
+            '{"ordinal": 1, "question": "TCP 三次握手"}, '
+            '{"ordinal": 2, "question": "Redis 持久化优缺点"}]}}'
+        )
+    )
+
+    state = {
+        "doc_type": "interview",
+        "user_id": 101,
+        "raw_text": "面经",
+        "image_data": [],
+        "url": "",
+        "season": "",
+        "llm_call_count": 0,
+    }
+    with (
+        patch("app.services.llm._call_llm_with_retry_messages", mock_llm),
+        patch("app.services.llm._should_use_response_format", return_value=False),
+        patch(
+            "app.services.llm.get_llm_client_for_user",
+            return_value=(MagicMock(), "test-model", 30, "", "openai"),
+        ),
+    ):
+        result = await extract_node(state)
+    data = result["extracted_data"]
+    assert [q for q in data["具体题目清单"]] == [
+        "TCP 三次握手",
+        "Redis 持久化优缺点",
+    ]
+    assert data["题目 ordinal"] == [1, 2]
+    assert data["提取计数"]["extracted"] == 2
+    assert data["提取计数"]["retained"] == 2

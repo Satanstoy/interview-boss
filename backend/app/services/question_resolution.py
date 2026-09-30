@@ -27,6 +27,20 @@ def _validate_scope(*, occurrence_scope: str, occurrence_owner_id, canonical_sco
         raise ValueError("public 原题不得有 owner")
 
 
+def list_current_resolutions(conn, *, detail_ids: list[int]) -> dict[int, dict]:
+    """读取一组明细的当前（未失效）resolution，按 detail_id 索引（AC-005）。"""
+
+    if not detail_ids:
+        return {}
+    placeholders = ",".join("?" * len(detail_ids))
+    rows = conn.execute(
+        "SELECT * FROM question_resolutions WHERE detail_id IN "
+        f"({placeholders}) AND invalidated_at IS NULL",
+        detail_ids,
+    ).fetchall()
+    return {int(row["detail_id"]): dict(row) for row in rows}
+
+
 def record_resolution(
     conn,
     *,

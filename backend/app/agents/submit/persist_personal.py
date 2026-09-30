@@ -190,6 +190,84 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             question_detail_ids=queue_detail_ids,
         )
 
+        # R05：v2 root 上下文存在时，为逐题明细写 import_id/source_ordinal
+        # 并登记 resolution（匹配失败持久化为 failed，不落 phantom canonical）。
+        import_id = state.get("import_id")
+        if import_id:
+            from app.services.upload_resolution_link import (
+                link_details_to_import,
+            )
+
+            matches: dict[int, dict | None] = {}
+            matched_new_ids = {
+                int(m["new_id"])
+                for m in list(personal_match["matched"]) + list(public_match["matched"])
+            }
+            # 匹配结果的 new_id 是“非空行序号”；与 submit_interview_txn 的
+            # valid_index 语义一致，逐行映射回 detail_id。
+            valid_index = 0
+            detail_new_id_map: dict[int, int] = {}
+            for detail_id, row in zip(detail_ids, tagged_rows):
+                if not row[3].strip():
+                    continue
+                detail_new_id_map[int(detail_id)] = valid_index
+                valid_index += 1
+
+            for detail_id, new_id in detail_new_id_map.items():
+                if new_id in matched_new_ids:
+                    canonical_id = next(
+                        (
+                            int(m["question_bank_id"])
+                            for m in list(personal_match["matched"]) + list(public_match["matched"])
+                            if int(m["new_id"]) == new_id
+                        ),
+                        None,
+                    )
+                    if canonical_id:
+                        canonical_scope = (
+                            "private"
+                            if any(
+                                int(m["new_id"]) == new_id
+                                for m in personal_match["matched"]
+                            )
+                            else "public"
+                        )
+                        matches[detail_id] = {
+                            "canonical_id": canonical_id,
+                            "canonical_scope": canonical_scope,
+                            "status": "matched",
+                        }
+                    else:
+                        matches[detail_id] = None
+                else:
+                    # 未命中且 persist_unmatched=False → 由 link 记 failed
+                    matches[detail_id] = None
+
+            # ordinal：提取节点写出的“题目 ordinal”（有序）；缺省按明细序兜底
+            extracted_ordinals = (state.get("extracted_data") or {}).get(
+                "题目 ordinal", []
+            )
+            ordinals = {}
+            for index, detail_id in enumerate(detail_ids):
+                if extracted_ordinals and index < len(extracted_ordinals):
+                    ordinals[int(detail_id)] = int(extracted_ordinals[index])
+                else:
+                    ordinals[int(detail_id)] = index + 1
+
+            def _link():
+                with get_db_connection() as conn:
+                    return link_details_to_import(
+                        conn,
+                        import_id=import_id,
+                        detail_ids=list(detail_ids),
+                        ordinals=ordinals,
+                        actor_id=user_id,
+                        matches=matches,
+                        write_unmatched=False,
+                    )
+
+            await run_db(_link)
+
         contribution_request_id = None
         if state.get("request_public_review"):
             from app.services.public_contributions import create_public_contribution_request
