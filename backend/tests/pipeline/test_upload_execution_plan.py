@@ -165,3 +165,123 @@ def test_restore_non_owner_raises_not_found():
         restore_upload(conn, actor_id=102, import_id=result["import_id"])
     assert exc_info.value.code == "NOT_FOUND"
     conn.close()
+
+
+# ── R04：worker 完成/失败后的根状态聚合 ─────────────────────────
+
+from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
+
+
+def _seed_stage_results(conn, import_id: str, stages: list[tuple[str, str]]):
+    """stages: [(stage, unit_key, status)] 写入阶段检查点。"""
+
+    for index, (stage, unit_key, status) in enumerate(stages):
+        conn.execute(
+            "INSERT INTO upload_stage_results ("
+            "  import_id, stage, unit_key, input_version, pipeline_version, status, job_id"
+            ") VALUES (?, ?, ?, 1, 'upload-pipeline-v1', ?, ?)",
+            (import_id, stage, unit_key, status, 1),
+        )
+    conn.commit()
+
+
+def test_finalize_success_aggregates_root_to_completed():
+    """R04：全部阶段成功后根聚合为 completed、revision 推进、结果可打开。"""
+
+    conn = _db()
+    result = _accept(conn)
+    import_id = result["import_id"]
+    _seed_stage_results(
+        conn,
+        import_id,
+        [
+            ("extract", "extract:document:v1", "succeeded"),
+            ("classify", "classify:all:v1", "succeeded"),
+            ("persist", "persist:interview:v1", "succeeded"),
+        ],
+    )
+    # 模拟 worker 已把面经写进 interview 表
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (900, 'internal://abc', 101, 'approved', '后端开发')"
+    )
+    conn.execute(
+        "UPDATE upload_imports SET interview_id = 900 WHERE id = ?", (import_id,)
+    )
+    # 关联的提交 job 先完成
+    conn.execute(
+        "UPDATE jobs SET status = 'completed', result = '{\"interview_id\": 900}', "
+        "completed_at = CURRENT_TIMESTAMP WHERE root_import_id = ?",
+        (import_id,),
+    )
+    conn.commit()
+
+    snap = finalize_attempt_and_aggregate_root(
+        conn, import_id=import_id, actor_id=101
+    )
+    conn.commit()
+    assert snap["status"] == "completed"
+    assert snap["result_available"] is True
+    assert snap["interview_id"] == 900
+    root = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert root["status"] == "completed"
+    assert int(root["revision"]) >= 1
+    attempt = conn.execute(
+        "SELECT status FROM upload_attempts WHERE import_id = ? "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    assert attempt["status"] == "completed"
+    conn.close()
+
+
+def test_finalize_partial_failed_sets_error_and_allows_retry():
+    """R04：部分阶段失败 → partial_failed（有保留结果）+ error_code + 允许重试。"""
+
+    conn = _db()
+    result = _accept(conn)
+    import_id = result["import_id"]
+    _seed_stage_results(
+        conn,
+        import_id,
+        [
+            ("extract", "extract:document:v1", "succeeded"),
+            ("classify", "classify:all:v1", "failed"),
+        ],
+    )
+    conn.execute(
+        "UPDATE jobs SET status = 'failed', last_error = 'UPSTREAM_TIMEOUT: 超时', "
+        "completed_at = CURRENT_TIMESTAMP WHERE root_import_id = ?",
+        (import_id,),
+    )
+    conn.commit()
+
+    snap = finalize_attempt_and_aggregate_root(
+        conn,
+        import_id=import_id,
+        actor_id=101,
+        error_code="UPSTREAM_TIMEOUT",
+        error_message="UPSTREAM_TIMEOUT: 超时",
+    )
+    conn.commit()
+    # extract 已成功（有保留结果）+ classify 失败 → 根 partial_failed
+    assert snap["status"] == "partial_failed", snap
+    assert snap["error"] and snap["error"]["code"] == "UPSTREAM_TIMEOUT"
+    assert "retry_failed_steps" in snap["allowed_actions"]
+    root = conn.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    assert root["status"] == "partial_failed"
+    assert root["error_code"] == "UPSTREAM_TIMEOUT"
+    conn.close()
+
+
+def test_finalize_unknown_root_raises():
+    conn = _db()
+    with pytest.raises(ValueError):
+        finalize_attempt_and_aggregate_root(
+            conn, import_id="no-such-import", actor_id=101
+        )
+    conn.close()

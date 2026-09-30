@@ -491,6 +491,23 @@ async def _build_master_bank_job(ctx, job_id: int):
         raise
 
 
+def _normalize_error_code(message: str) -> str:
+    """把 worker 原始错误消息归一到契约错误码（AC-013）；未知返回原样截断。"""
+
+    text = (message or "").lower()
+    if "401" in text or "invalid api key" in text or "unauthorized" in text:
+        return "MODEL_AUTH_INVALID"
+    if "额度" in text or ("quota" in text and "limit" in text):
+        return "QUOTA_EXCEEDED"
+    if "429" in text or "rate limit" in text or "rate_limit" in text:
+        return "UPSTREAM_RATE_LIMIT"
+    if "timeout" in text or "超时" in text:
+        return "UPSTREAM_TIMEOUT"
+    if "api key" in text or "model_config" in text or "配置" in text:
+        return "MODEL_CONFIG_MISSING"
+    return (message or "UNKNOWN_ERROR")[:64]
+
+
 async def submit_import_task(ctx, job_id: int):
     """后台任务：执行上传导入（面经/JD 提取 + 打标 + 聚类）
 
@@ -550,7 +567,74 @@ async def submit_import_task(ctx, job_id: int):
         return
 
     try:
+        # R02/R03：worker 按 root 读取完整服务端 policy 与 v2 归属，
+        # 不再靠 payload 里的旧字段猜策略（普通 share 审核意图必须贯穿）。
+        def _load_root_context():
+            with get_db_connection() as conn:
+                job = conn.execute(
+                    "SELECT root_import_id, upload_attempt_id, work_key, "
+                    "idempotency_key FROM jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                root = None
+                policy = {}
+                if job and job["root_import_id"]:
+                    root = conn.execute(
+                        "SELECT * FROM upload_imports WHERE id = ?",
+                        (job["root_import_id"],),
+                    ).fetchone()
+                if root:
+                    try:
+                        policy = json.loads(root["policy_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        policy = {}
+                return (dict(job) if job else None), (dict(root) if root else None), policy
+
+        job_row, root_row, policy = await asyncio.to_thread(_load_root_context)
+        root_import_id = job_row["root_import_id"] if job_row else None
+        attempt_id = job_row["upload_attempt_id"] if job_row else None
+        work_key = job_row["work_key"] if job_row else FIRST_WORK_KEY
+
+        # 从 root 派生的策略覆盖 payload 旧字段（R02）
+        target = policy.get("write_scope") or payload.get("target", "personal")
+        target_intent = policy.get("target_intent") or payload.get("target_intent", "private")
+        request_public_review = bool(
+            policy.get("request_public_review", False)
+            or payload.get("request_public_review", False)
+        )
+        credential_scope = policy.get("credential_scope") or (
+            "global" if payload.get("is_admin") and payload.get("target") == "public" else "user"
+        )
+        is_admin = bool(
+            payload.get("is_admin", False) or policy.get("audit_public_import", False)
+        )
+
+        # 首次 job 的 attempt 归属（root 为 v2 时）
+        if root_import_id and attempt_id is None:
+            def _attach_attempt():
+                with get_db_connection() as conn:
+                    row = conn.execute(
+                        "SELECT id FROM upload_attempts WHERE import_id = ? "
+                        "AND status = 'active' ORDER BY attempt_no DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    if row:
+                        conn.execute(
+                            "UPDATE jobs SET upload_attempt_id = ? WHERE id = ?",
+                            (row["id"], job_id),
+                        )
+                        conn.commit()
+                        return int(row["id"])
+                    return None
+
+            attempt_id = await asyncio.to_thread(_attach_attempt)
+
         from app.agents.submit.graph import stream_submit_graph
+        from app.services.upload_lifecycle import (
+            FIRST_WORK_KEY,
+            build_thread_id,
+            finalize_attempt_and_aggregate_root,
+        )
 
         # 构建 input_state（将 base64 图片还原为 bytes）
         raw_images = payload.get("image_data", [])
@@ -563,16 +647,26 @@ async def submit_import_task(ctx, job_id: int):
             else:
                 image_data.append(img)  # 兼容直接传 bytes 的场景
 
+        thread_id = build_thread_id(
+            root_import_id or f"legacy-{job_id}", attempt_id or 0, job_id
+        )
         input_state = {
             "raw_text": payload.get("raw_text", ""),
             "image_data": image_data,
             "url": payload.get("url", ""),
             "season": payload.get("season", ""),
             "content_type_hint": payload.get("content_type_hint", ""),
-            "target": payload.get("target", "personal"),
+            "target": target,
+            "target_intent": target_intent,
+            "request_public_review": request_public_review,
+            "credential_scope": credential_scope,
             "user_id": payload.get("user_id"),
-            "is_admin": payload.get("is_admin", False),
+            "is_admin": is_admin,
             "job_position": payload.get("job_position", ""),
+            "import_id": root_import_id,
+            "attempt_id": attempt_id,
+            "work_key": work_key,
+            "job_id": job_id,
         }
 
         # 阶段映射
@@ -592,9 +686,55 @@ async def submit_import_task(ctx, job_id: int):
                     progress_phase=phase,
                 ):
                     raise RuntimeError(f"上传任务 lease 已失效: job_id={job_id}")
+                # R03：execution 进度持久化进阶段检查点（幂等 UNIQUE）
+                if root_import_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO upload_stage_results ("
+                        "  import_id, stage, unit_key, input_version, pipeline_version, "
+                        "  status, job_id"
+                        ") VALUES (?, ?, ?, 1, 'upload-pipeline-v1', 'running', ?)",
+                        (root_import_id, phase, f"{phase}:running", job_id),
+                    )
                 conn.commit()
 
         _update_progress("extract", "正在提取内容...")
+
+        async def _aggregate_root_failure(error_message: str):
+            """失败路径：把执行中的阶段检查点标记为 failed，并聚合根状态（R04）。"""
+
+            if not root_import_id:
+                return
+            code = str(error_message)[:64]
+            # 统一错误码归一到契约常量（AC-013）
+            normalized = _normalize_error_code(code)
+
+            def _apply():
+                with get_db_connection() as conn:
+                    conn.execute(
+                        "UPDATE upload_stage_results SET status = 'failed', "
+                        "error_code = ?, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE import_id = ? AND status IN ('running', 'pending')",
+                        (normalized, root_import_id),
+                    )
+                    conn.commit()
+                    return finalize_attempt_and_aggregate_root(
+                        conn,
+                        import_id=root_import_id,
+                        actor_id=int(payload.get("user_id") or 0),
+                        error_code=normalized,
+                        error_message=error_message,
+                    )
+
+            try:
+                aggregated = await asyncio.to_thread(_apply)
+                logger.info(
+                    "上传根任务失败聚合: import_id=%s status=%s code=%s",
+                    root_import_id,
+                    aggregated["status"],
+                    normalized,
+                )
+            except Exception as exc:
+                logger.warning("根任务失败聚合异常: %s", exc)
 
         result_collector = {}
         last_phase = ""
@@ -635,6 +775,7 @@ async def submit_import_task(ctx, job_id: int):
 
         # 如果 graph yield 了 error 事件，立刻标记失败
         if emitted_error:
+            await _aggregate_root_failure(emitted_error)
             _fail(emitted_error)
             return
 
@@ -642,10 +783,12 @@ async def submit_import_task(ctx, job_id: int):
         final_state_values = result_collector.get("final_state") or {}
 
         if final_state_values.get("error"):
+            await _aggregate_root_failure(final_state_values["error"])
             _fail(final_state_values["error"])
             return
 
         if not final_state_values and not saw_done:
+            await _aggregate_root_failure("任务未返回有效结果")
             _fail("任务未返回有效结果")
             return
 
@@ -711,10 +854,79 @@ async def submit_import_task(ctx, job_id: int):
 
             answer_job_ids = await asyncio.to_thread(_create_answer_jobs)
         result_data["answer_job_count"] = len(answer_job_ids)
+
+        # R04：worker 完成时在持久化事务中聚合根状态并推进 revision；
+        # 同时把本次执行的各阶段检查点标记 succeeded（幂等）。
+        if root_import_id:
+            def _finalize_root(success_result: str | None):
+                with get_db_connection() as conn:
+                    seen_units = conn.execute(
+                        "SELECT stage, unit_key FROM upload_stage_results "
+                        "WHERE import_id = ? AND status = 'running'",
+                        (root_import_id,),
+                    ).fetchall()
+                    for stage_row in seen_units:
+                        conn.execute(
+                            "UPDATE upload_stage_results SET status = 'succeeded', "
+                            "result_json = ?, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE import_id = ? AND stage = ? AND unit_key = ? "
+                            "AND status = 'running'",
+                            (
+                                success_result,
+                                root_import_id,
+                                stage_row["stage"],
+                                stage_row["unit_key"],
+                            ),
+                        )
+                    conn.commit()
+
+            await asyncio.to_thread(_finalize_root, json.dumps(result_data, ensure_ascii=False))
+
         _complete(result=json.dumps(result_data, ensure_ascii=False))
+
+        # 根聚合必须在 complete 之后（读 jobs 最终态），且在当前 worker 进程中
+        if root_import_id:
+            def _aggregate():
+                with get_db_connection() as conn:
+                    return finalize_attempt_and_aggregate_root(
+                        conn,
+                        import_id=root_import_id,
+                        actor_id=int(payload.get("user_id") or 0),
+                        interview_id=final_state_values.get("saved_interview_id"),
+                    )
+
+            aggregated = await asyncio.to_thread(_aggregate)
+            logger.info(
+                "上传根任务推进: import_id=%s status=%s revision=%s",
+                root_import_id,
+                aggregated["status"],
+                aggregated["revision"],
+            )
+            # R02：普通 share 优先走公共化申请而非直接完成
+            if request_public_review:
+                from app.db.connection import get_db_connection
+                from app.services.public_contributions import create_public_contribution_request
+
+                def _ensure_contribution():
+                    with get_db_connection() as conn:
+                        interview_id = aggregated.get("interview_id")
+                        if not interview_id:
+                            return None
+                        return create_public_contribution_request(
+                            conn, "interview", int(interview_id), int(payload.get("user_id") or 0)
+                        )
+
+                contribution = await asyncio.to_thread(_ensure_contribution)
+                if contribution:
+                    logger.info(
+                        "share 已建公共化申请: request=%s import=%s",
+                        contribution["id"],
+                        root_import_id,
+                    )
 
     except Exception as e:
         logger.exception(f"上传导入任务失败: job_id={job_id}")
+        await _aggregate_root_failure(str(e)[:500])
         _fail(str(e)[:500])
 
 

@@ -24,30 +24,127 @@ from app.services.upload_lifecycle import UploadRestoreError, restore_upload
 router = APIRouter()
 
 
-def _snapshot(row) -> dict:
+def _error_dto(code, message):
+    """错误码 → DTO（AC-013）：action/retryable 由统一错误策略映射。"""
+
+    from app.models.upload_contracts import ErrorCode
+    from app.services.upload_retry_budget import ERROR_POLICY
+
+    try:
+        ErrorCode(code)
+    except ValueError:
+        code = ErrorCode.INTERNAL_ERROR.value
+    policy = ERROR_POLICY.get(code, {})
     return {
-        "import_id": row["id"],
-        "revision": row["revision"],
-        "status": row["status"],
-        "target_intent": row["target_intent"],
-        "source_type": row["source_type"],
-        "resolved_type": row["resolved_type"],
-        "position_id": row["position_id"],
-        "position_name": row["position_name"],
-        "input_version": row["input_version"],
-        "pipeline_version": row["pipeline_version"],
-        "attempt_no": row["current_attempt_no"],
-        "interview_id": row["interview_id"],
-        "contribution_request_id": row["contribution_request_id"],
-        "error": (
-            {"code": row["error_code"], "message": row["error_message"]}
+        "code": code,
+        "message": message or code,
+        "retryable": bool(policy.get("retryable", False)),
+        "action": policy.get("action"),
+        "scope": policy.get("scope"),
+    }
+
+
+def _stage_counts(conn, import_id: str) -> dict:
+    """按实际问题单元统计根任务阶段检查点（R04：不再是“成功阶段行数=answered”）。"""
+
+    rows = conn.execute(
+        "SELECT stage, status, COUNT(*) AS c FROM upload_stage_results "
+        "WHERE import_id = ? GROUP BY stage, status",
+        (import_id,),
+    ).fetchall()
+    total = sum(int(r["c"]) for r in rows)
+    answered = sum(
+        int(r["c"])
+        for r in rows
+        if r["status"] == "succeeded" and r["stage"] not in ("extract", "classify")
+    )
+    failed = sum(int(r["c"]) for r in rows if r["status"] == "failed")
+    return {"total": total, "answered": answered, "failed": failed}
+
+
+def _snapshot(row, counts=None) -> dict:
+    """完整根快照（R04/AC-011）：列表/详情/by-key/retry 共用同一构造。
+
+    GET 与 SSE 统一用 ``snapshot_from_parts``，allowed_actions 由服务端算，
+    前端只按服务端授权渲染按钮（无暂停能力绝不出现暂停）。
+    """
+
+    from app.services.upload_retry_budget import snapshot_from_parts
+    from app.services.upload_status import allowed_actions
+
+    count_values = counts or {
+        "total": 0,
+        "answered": 0,
+        "failed": 0,
+    }
+    total_done = int(count_values["total"] or 0)
+    total_denominator = max(total_done, int(row["current_attempt_no"] or 0) + 1)
+    snapshot = snapshot_from_parts(
+        import_id=row["id"],
+        revision=int(row["revision"]),
+        status=row["status"],
+        target_intent=row["target_intent"],
+        attempt_no=int(row["current_attempt_no"]),
+        stage=row["status"] if row["status"] != "queued" else "queued",
+        progress={
+            "unit": "questions",
+            "completed": total_done,
+            "total": total_denominator,
+        },
+        counts={
+            "extracted": total_done,
+            "retained": total_done,
+            "excluded": int(count_values.get("excluded", 0)),
+            "needs_review": 0,
+            "resolved": int(count_values.get("answered", 0)),
+            "answered": int(count_values.get("answered", 0)),
+            "failed": int(count_values.get("failed", 0)),
+            "total": int(count_values.get("total", 0)),
+        },
+        result={
+            "interview_id": row["interview_id"],
+            "mode": "partial" if row["status"] == "partial_failed" else "full",
+        }
+        if row["interview_id"] is not None
+        else None,
+        error=(
+            _error_dto(row["error_code"], row["error_message"] or "")
             if row["error_code"]
             else None
         ),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-        "completed_at": row["completed_at"],
-    }
+        allowed_actions=allowed_actions(
+            row["status"],
+            error_code=row["error_code"],
+            has_result=row["interview_id"] is not None,
+        ),
+        updated_at=row["updated_at"],
+    )
+    data = snapshot.model_dump(mode="json")
+    data.update(
+        {
+            "import_id": row["id"],
+            "position_id": row["position_id"],
+            "position_name": row["position_name"],
+            "source_type": row["source_type"],
+            "resolved_type": row["resolved_type"],
+            "input_version": row["input_version"],
+            "pipeline_version": row["pipeline_version"],
+            "contribution_request_id": row["contribution_request_id"],
+            "error": data.get("error"),
+            "created_at": row["created_at"],
+            "completed_at": row["completed_at"],
+        }
+    )
+    return data
+
+
+def _loads(raw, default=None):
+    import json as _json
+
+    try:
+        return _json.loads(raw or "null")
+    except Exception:
+        return default
 
 
 def _load_owned(conn, import_id: str, user_id: int):
@@ -210,50 +307,30 @@ async def stream_upload_import(import_id: str, user: dict = Depends(get_current_
 
     await run_db(_authorize)  # 无权立即 404，不进入流
 
-    from app.services.upload_retry_budget import build_snapshot_event, snapshot_from_parts
+    from app.models.upload_contracts import UploadSnapshot
+    from app.services.upload_retry_budget import build_snapshot_event
 
-    def _snapshot():
+    def _snapshot_stream():
         with get_db_connection() as conn:
             row = _load_owned(conn, import_id, user["id"])
-            counts = conn.execute(
-                "SELECT COUNT(*) AS total, "
-                "SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS answered, "
-                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed "
-                "FROM upload_stage_results WHERE import_id = ?",
-                (import_id,),
-            ).fetchone()
-            return snapshot_from_parts(
-                import_id=row["id"],
-                revision=int(row["revision"]),
-                status=row["status"],
-                target_intent=row["target_intent"],
-                attempt_no=int(row["current_attempt_no"]),
-                counts={
-                    "total": int(counts["total"] or 0),
-                    "answered": int(counts["answered"] or 0),
-                    "failed": int(counts["failed"] or 0),
-                },
-                error=(
-                    {"code": row["error_code"], "message": row["error_message"] or "", "retryable": False}
-                    if row["error_code"]
-                    else None
-                ),
-                updated_at=row["updated_at"],
-            )
+            return _snapshot(row, counts=_stage_counts(conn, import_id))
 
     async def event_stream():
         last_revision = -1
         beats = 0
         while True:
-            snapshot = await run_db(_snapshot)
-            if int(snapshot.revision) > last_revision:
-                last_revision = int(snapshot.revision)
-                event = build_snapshot_event(snapshot)
+            snap_data = await run_db(_snapshot_stream)
+            revision = int(snap_data["revision"])
+            if revision > last_revision:
+                last_revision = revision
+                snapshot_obj = UploadSnapshot(**snap_data)
+                event = build_snapshot_event(snapshot_obj)
                 yield (
                     f"event: snapshot\nid: {event['id']}\n"
                     f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
                 )
-            if snapshot.status.value in TERMINAL_STATUSES:
+            status = snap_data["status"]
+            if status in TERMINAL_STATUSES:
                 return
             beats += 1
             if beats % (SNAPSHOT_HEARTBEAT_SECONDS // SNAPSHOT_POLL_SECONDS) == 0:

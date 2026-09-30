@@ -251,6 +251,164 @@ def _loads(raw, default=None):
         return default
 
 
+def finalize_attempt_and_aggregate_root(
+    conn,
+    *,
+    import_id: str,
+    actor_id: int,
+    error_code: str | None = None,
+    error_message: str | None = None,
+    interview_id: int | None = None,
+) -> dict:
+    """worker 结束一次尝试后：聚合阶段检查点 → 推进根状态/revision（R04）。
+
+    ``aggregate_status`` 是纯函数，本函数是持久化入口；根任务不再停在
+    最初的 queued，完成/失败/审核都由这里统一推进 revision。
+    """
+
+    from app.services.upload_status import aggregate_status, allowed_actions
+
+    root = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    if root is None:
+        raise ValueError(f"根任务不存在: {import_id}")
+
+    # active attempt 收尾：成功则 completed，否则留在 failed 由恢复处理
+    attempt = conn.execute(
+        "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if attempt is not None:
+        new_attempt_status = (
+            "completed"
+            if error_code is None
+            and conn.execute(
+                "SELECT COUNT(*) AS c FROM upload_stage_results "
+                "WHERE import_id = ? AND status = 'succeeded'",
+                (import_id,),
+            ).fetchone()["c"]
+            > 0
+            else "failed"
+        )
+        # 部分成功也算完成尝试（有保留内容可打开）；失败尝试保留 failed 由恢复接管
+        if new_attempt_status == "completed":
+            conn.execute(
+                "UPDATE upload_attempts SET status = 'completed', "
+                "completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (attempt["id"],),
+            )
+
+    rows = conn.execute(
+        "SELECT stage, status, error_code FROM upload_stage_results "
+        "WHERE import_id = ? ORDER BY id",
+        (import_id,),
+    ).fetchall()
+    review_status = None
+    if root["contribution_request_id"]:
+        review_row = conn.execute(
+            "SELECT status FROM public_contribution_requests WHERE id = ?",
+            (root["contribution_request_id"],),
+        ).fetchone()
+        if review_row:
+            review_status = review_row["status"]
+
+    has_succeeded = any(r["status"] == "succeeded" for r in rows)
+    work_items = []
+    for r in rows:
+        if r["status"] == "succeeded":
+            work_items.append(
+                {
+                    "stage": r["stage"],
+                    "status": "succeeded",
+                    "has_result": True,
+                    "unit_key": r["stage"],
+                }
+            )
+        elif r["status"] == "failed":
+            work_items.append(
+                {
+                    "stage": r["stage"],
+                    "status": "failed",
+                    "has_result": False,
+                    "unit_key": r["stage"],
+                }
+            )
+    # 阶段检查点为空时，按根状态兜底（尚未写检查点的旧 worker 路径）
+    if not work_items:
+        if error_code:
+            work_items.append({"stage": "extract", "status": "failed", "has_result": False})
+        elif has_succeeded or interview_id is not None:
+            work_items.append(
+                {"stage": "persist", "status": "succeeded", "has_result": True}
+            )
+        else:
+            work_items.append({"stage": "extract", "status": "queued", "has_result": False})
+
+    aggregated = aggregate_status(
+        work_items,
+        review_status=review_status,
+        warnings=[error_message] if error_message else None,
+    )
+    status = aggregated["status"]
+    if status == "completed" and review_status in ("pending_review", "approved_for_processing"):
+        status = "waiting_review" if review_status == "pending_review" else status
+
+    # 错误码：优先使用本次执行错误，其次阶段结果中的错误
+    final_error_code = error_code or next(
+        (r["error_code"] for r in rows if r["status"] == "failed" and r["error_code"]), None
+    )
+    new_revision = int(root["revision"]) + 1
+    update_fields = ["status = ?", "revision = ?", "updated_at = CURRENT_TIMESTAMP"]
+    params: list = [status, new_revision]
+    if final_error_code:
+        update_fields.append("error_code = ?")
+        params.append(final_error_code)
+        update_fields.append("error_message = ?")
+        params.append(error_message or (final_error_code if final_error_code else ""))
+    else:
+        update_fields.append("error_code = NULL")
+        update_fields.append("error_message = NULL")
+    if interview_id is not None:
+        update_fields.append("interview_id = ?")
+        params.append(int(interview_id))
+    if status in (
+        "completed",
+        "failed",
+        "partial_failed",
+        "waiting_review",
+        "needs_action",
+    ):
+        update_fields.append("completed_at = CURRENT_TIMESTAMP")
+    params.append(import_id)
+    conn.execute(
+        f"UPDATE upload_imports SET {', '.join(update_fields)} WHERE id = ?", params
+    )
+
+    return {
+        "import_id": import_id,
+        "revision": new_revision,
+        "status": status,
+        "stage": aggregated["stage"],
+        "counts": aggregated["counts"],
+        "result_available": aggregated["result_available"],
+        "review_status": review_status,
+        "warnings": aggregated["warnings"],
+        "error": (
+            {"code": final_error_code, "message": error_message or final_error_code}
+            if final_error_code
+            else None
+        ),
+        "interview_id": interview_id if interview_id is not None else root["interview_id"],
+        "allowed_actions": allowed_actions(
+            status,
+            error_code=final_error_code,
+            has_result=aggregated["result_available"],
+        ),
+    }
+
+
 def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=None) -> dict:
     """恢复同一业务任务：已有活跃批次直接返回，否则创建新批次。
 
