@@ -12,6 +12,7 @@ from app.worker_enqueue import (
     enqueue_cluster_batch_job,
     enqueue_cluster_rebuild_job,
     enqueue_cluster_review_task,
+    enqueue_credential_preflight_job,
     enqueue_generate_answer_job,
     enqueue_generate_recitation_job,
     enqueue_interview_import_analysis_job,
@@ -198,6 +199,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
 
     enqueuers = {
         SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
+        "credential_preflight": enqueue_credential_preflight_job,
         ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
         CLUSTER_BATCH_JOB_TYPE: enqueue_cluster_batch_job,
         CLUSTER_REBUILD_JOB_TYPE: enqueue_cluster_rebuild_job,

@@ -89,10 +89,15 @@ def test_accept_creates_root_attempt_and_job_in_one_transaction():
     assert conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
     jobs = _jobs(conn)
-    assert len(jobs) == 1
-    assert jobs[0]["root_import_id"] == result["import_id"]
-    assert jobs[0]["work_key"]
-    assert result["job_id"] == jobs[0]["id"]
+    # v2 + R01：submit_import 提取 job + credential_preflight 预检 job 同事务
+    assert len(jobs) == 2, [dict(j) for j in jobs]
+    submit_jobs = [j for j in jobs if j["job_type"] == "submit_import"]
+    preflight_jobs = [j for j in jobs if j["job_type"] == "credential_preflight"]
+    assert len(submit_jobs) == 1 and len(preflight_jobs) == 1
+    assert submit_jobs[0]["root_import_id"] == result["import_id"]
+    assert submit_jobs[0]["work_key"]
+    assert preflight_jobs[0]["root_import_id"] == result["import_id"]
+    assert result["job_id"] == submit_jobs[0]["id"]
     conn.close()
 
 
@@ -114,7 +119,8 @@ def test_same_key_same_hash_returns_same_root_and_no_new_job():
     assert second["created"] is False
     assert second["import_id"] == first["import_id"]
     assert second["job_id"] == first["job_id"]
-    assert len(_jobs(conn)) == 1
+    # 同键复用不新建 job（submit + preflight 各 1，保持稳定）
+    assert len(_jobs(conn)) == 2
     assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
     conn.close()
 
@@ -125,7 +131,8 @@ def test_same_key_different_hash_conflicts():
     with pytest.raises(Exception) as exc:
         _accept(conn, text="完全不同的另一篇面经")
     assert getattr(exc.value, "code", "") == "IDEMPOTENCY_CONFLICT"
-    assert len(_jobs(conn)) == 1
+    # 冲突后不产生幽灵 job：submit + preflight 维持各 1
+    assert len(_jobs(conn)) == 2
     conn.close()
 
 
@@ -134,7 +141,8 @@ def test_same_key_isolated_between_users():
     mine = _accept(conn, actor_id=101)
     other = _accept(conn, actor_id=102)
     assert mine["import_id"] != other["import_id"]
-    assert len(_jobs(conn)) == 2
+    # 两人各 1 个 root → preflight + submit = 4 个 job（隔离不串单）
+    assert len(_jobs(conn)) == 4
     conn.close()
 
 

@@ -508,6 +508,58 @@ def _normalize_error_code(message: str) -> str:
     return (message or "UNKNOWN_ERROR")[:64]
 
 
+async def credential_preflight_task(ctx, job_id: int):
+    """R01：凭据预检 ARQ 任务——真实 provider 探测，失败阻塞提取派发。"""
+
+    from app.db.connection import get_db_connection, run_db
+    from app.services.job_lifecycle import (
+        claim_job,
+        complete_job,
+        default_worker_id,
+        fail_job,
+    )
+    from app.services.credential_preflight import run_credential_preflight
+
+    worker_id = default_worker_id()
+
+    def _claim():
+        with get_db_connection() as conn:
+            task = claim_job(
+                conn, job_id, worker_id, job_type="credential_preflight"
+            )
+            conn.commit()
+            return dict(task) if task else None
+
+    claimed = await asyncio.to_thread(_claim)
+    if not claimed:
+        return {"status": "already_claimed_or_finished", "job_id": job_id}
+
+    def _run_preflight():
+        with get_db_connection() as conn:
+            outcome = run_credential_preflight(conn, job_id=job_id)
+            if outcome.status == "ok":
+                complete_job(conn, job_id, worker_id, result="preflight ok")
+            else:
+                fail_job(
+                    conn,
+                    job_id,
+                    worker_id,
+                    f"{outcome.error_code}: {outcome.message}",
+                    max_attempts=1,
+                )
+            conn.commit()
+            return outcome
+
+    outcome = await asyncio.to_thread(_run_preflight)
+    logger.info(
+        "凭据预检完成: job_id=%s scope=%s status=%s",
+        job_id,
+        "credential",
+        outcome.status,
+    )
+    return {"job_id": job_id, "status": outcome.status, "error_code": outcome.error_code}
+
+
 async def submit_import_task(ctx, job_id: int):
     """后台任务：执行上传导入（面经/JD 提取 + 打标 + 聚类）
 
@@ -593,6 +645,12 @@ async def submit_import_task(ctx, job_id: int):
         job_row, root_row, policy = await asyncio.to_thread(_load_root_context)
         root_import_id = job_row["root_import_id"] if job_row else None
         attempt_id = job_row["upload_attempt_id"] if job_row else None
+        root_status = root_row["status"] if root_row else None
+
+        # R01：预检失败（needs_action）不派发提取——即使 job 已被调度也拒绝执行。
+        if root_import_id and root_status == "needs_action":
+            _fail("凭据预检未通过，请先修复模型配置", terminal=True)
+            return
         work_key = job_row["work_key"] if job_row else FIRST_WORK_KEY
 
         # 从 root 派生的策略覆盖 payload 旧字段（R02）
@@ -1304,6 +1362,7 @@ class WorkerSettings:
         process_chat_side_effects_task,
         build_master_bank_task,
         submit_import_task,
+        credential_preflight_task,
         generate_answer_task,
         generate_recitation_task,
         quality_review_scan_task,

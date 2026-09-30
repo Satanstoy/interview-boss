@@ -208,6 +208,7 @@ def _plan_work_after_restore(
       （DB 部分唯一索引 uq_jobs_v2_work_active 兜底）；
     - 否则创建首个未完成 work_key 的 ``submit_import`` job，绑定
       root + attempt + work_key，payload 从根任务快照复制（含原稿/图片）。
+    - 同时确保凭据预检 job 存在（R01：配置修复后恢复需重新探测）。
     """
 
     import_id = root["id"]
@@ -218,6 +219,20 @@ def _plan_work_after_restore(
     ).fetchone()
     if in_flight:
         return {"job_id": int(in_flight["id"]), "created": False, "work_key": FIRST_WORK_KEY}
+
+    # R01：为本次恢复建立（或复用）凭据预检 job；预检通过前 worker 不跑提取。
+    from app.services.credential_preflight import create_credential_preflight_job
+
+    policy = _loads(root["policy_json"], {}) or {}
+    preflight_scope = policy.get("credential_scope") or "user"
+    create_credential_preflight_job(
+        conn,
+        root_import_id=import_id,
+        requester_id=int(root["requester_id"]),
+        credential_scope=preflight_scope,
+        user_id=int(root["requester_id"]) if preflight_scope == "user" else None,
+        attempt_id=attempt["id"],
+    )
 
     payload = _loads(root["payload_json"], {}) or {}
     cursor = conn.execute(
@@ -447,6 +462,18 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
             "status_url": f"/api/upload-imports/{root_import_id}",
         }
 
+    # R01：预检被阻塞（needs_action）时，pending 的提取 job 不是真实工作——
+    # 取消它（终态 failed），让恢复重新预检 + 重建提取 job（配置修复后同 root 继续）。
+    if root["status"] == "needs_action":
+        conn.execute(
+            "UPDATE jobs SET status = 'failed', worker_id = NULL, locked_until = NULL, "
+            "last_error = '凭据预检未通过，等待重新预检', "
+            "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE root_import_id = ? AND job_type = 'submit_import' "
+            "AND status IN ('pending', 'queued', 'running')",
+            (root_import_id,),
+        )
+
     active = conn.execute(
         "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
         "ORDER BY attempt_no DESC LIMIT 1",
@@ -645,6 +672,18 @@ def accept_upload(
         conn.execute(
             "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
             (job_id, json.dumps(payload, ensure_ascii=False)),
+        )
+
+        # R01：同事务创建凭据预检 job（真实 provider 探测；scope 取服务端 policy）
+        from app.services.credential_preflight import create_credential_preflight_job
+
+        create_credential_preflight_job(
+            conn,
+            root_import_id=import_id,
+            requester_id=actor_id,
+            credential_scope=policy.credential_scope,
+            user_id=actor_id if policy.credential_scope == "user" else None,
+            attempt_id=attempt["id"],
         )
     else:
         # 凭据被阻塞时只建根任务：attempt 由恢复时创建（contracts §2.1）

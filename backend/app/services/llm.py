@@ -154,6 +154,27 @@ def _should_use_response_format(base_url: str = None) -> bool:
     return get_provider_capabilities(base_url)["json_mode"]
 
 
+def build_bare_client(
+    api_key: str,
+    base_url: str,
+    timeout: float = 15,
+    provider: str = "openai",
+    api_format: str | None = None,
+):
+    """供凭据预检（R01）等独立探测路径解析到的明文凭据建裸 client。
+
+    与 ``_make_client`` 同构，但公开导出且参数显式（不读用户/全局缓存）。
+    """
+
+    return _make_client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        provider=provider,
+        api_format=api_format,
+    )
+
+
 def _make_client(
     api_key: str,
     base_url: str,

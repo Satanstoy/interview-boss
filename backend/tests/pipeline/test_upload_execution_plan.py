@@ -87,12 +87,15 @@ def test_restore_creates_executable_job_for_failed_root():
         "SELECT * FROM jobs WHERE root_import_id = ? AND status = 'pending'",
         (import_id,),
     ).fetchall()
-    # 至少一个可派发 job 绑定 root + attempt + work_key
-    assert len(jobs) >= 1, "恢复后必须存在可派发的 job"
-    job = jobs[0]
-    assert job["job_type"] == "submit_import"
+    # 恢复后必须存在可派发的提取 job（preflight 之外的 submit_import）
+    submit_jobs = [j for j in jobs if j["job_type"] == "submit_import"]
+    assert len(submit_jobs) >= 1, "恢复后必须存在可派发的 submit job"
+    job = submit_jobs[0]
     assert job["work_key"]
     assert job["upload_attempt_id"] == restored["attempt_id"]
+    # R01：预检 job 同时被规划
+    preflight = [j for j in jobs if j["job_type"] == "credential_preflight"]
+    assert len(preflight) == 1
     payload_row = conn.execute(
         "SELECT payload FROM job_payloads WHERE job_id = ?", (job["id"],)
     ).fetchone()
