@@ -398,3 +398,42 @@ def test_accept_resolves_type_from_content_hint():
     ).fetchone()
     assert row2["resolved_type"] == "interview"
     conn.close()
+
+
+def test_admin_public_import_persists_audit_trail():
+    """README §3：管理员显式公共导入「视为记录了审批的公共处理」——
+    root 必须持久化可查询的审计痕迹（audit_public_import + requester +
+    entry + target_intent），而不是仅存在于内存判断。"""
+
+    import json as _json
+
+    conn = _db()
+    result = _accept(
+        conn,
+        actor_id=201,
+        actor_is_admin=True,
+        target_intent="share",
+        idempotency_key="admin-public-1",
+        entry="api",
+    )
+    conn.commit()
+
+    root = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (result["import_id"],)
+    ).fetchone()
+    policy = _json.loads(root["policy_json"])
+    assert policy["audit_public_import"] is True, (
+        "管理员公共导入必须留下 audit_public_import 审计标记"
+    )
+    assert policy["write_scope"] == "public"
+    assert root["requester_id"] == 201, "审计必须记录发起管理员"
+    assert root["target_intent"] == "share"
+    assert root["idempotency_key"] == "admin-public-1"
+    # 审计痕迹可通过 admin 运维白名单查询（scope/状态/发起者）
+    ops = conn.execute(
+        "SELECT json_extract(policy_json, '$.audit_public_import') AS audit, "
+        "requester_id FROM upload_imports WHERE id = ?",
+        (result["import_id"],),
+    ).fetchone()
+    assert int(ops["audit"]) == 1
+    conn.close()
