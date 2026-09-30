@@ -960,6 +960,8 @@ async def submit_import_task(ctx, job_id: int):
         # R04：worker 完成时在持久化事务中聚合根状态并推进 revision；
         # 同时把本次执行的各阶段检查点标记 succeeded（幂等）。
         if root_import_id:
+            match_failed = int(final_state_values.get("match_failed", 0) or 0) > 0
+
             def _finalize_root(success_result: str | None):
                 with get_db_connection() as conn:
                     seen_units = conn.execute(
@@ -968,6 +970,22 @@ async def submit_import_task(ctx, job_id: int):
                         (root_import_id,),
                     ).fetchall()
                     for stage_row in seen_units:
+                        # AC-006：匹配模型失败 → match 阶段标记 failed（成果
+                        # 保留 → 根 partial_failed，失败步骤可重试），其余
+                        # 阶段照常 succeeded。
+                        if match_failed and stage_row["stage"] in ("match", "save"):
+                            conn.execute(
+                                "UPDATE upload_stage_results SET status = 'failed', "
+                                "error_code = 'MATCH_FAILED', updated_at = CURRENT_TIMESTAMP "
+                                "WHERE import_id = ? AND stage = ? AND unit_key = ? "
+                                "AND status = 'running'",
+                                (
+                                    root_import_id,
+                                    stage_row["stage"],
+                                    stage_row["unit_key"],
+                                ),
+                            )
+                            continue
                         # F08：extract/tag 阶段把完整结果（含逐题数据）写进
                         # 检查点，恢复时可复用不重跑 LLM。阶段名以 PHASES
                         # （extract/fill/tag/match/save/cluster）为准。

@@ -214,3 +214,49 @@ async def test_worker_share_binds_contribution_to_root(
         (root["contribution_request_id"],),
     ).fetchone()
     assert request_status is not None
+
+
+async def test_worker_match_failed_drives_partial_failed(
+    client, monkeypatch, test_db
+):
+    """AC-006/UR-013：匹配模型失败（match_failed>0）→ 根任务
+    partial_failed（保留已成功成果）且可重试失败步骤。"""
+
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+    # 阶段检查点：extract 成功（有保留结果），match 阶段为 failed 占位
+    test_db.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status) VALUES "
+        "('imp-1', 'extract', 'extract:document:v1', 1, 'upload-pipeline-v1', 'succeeded'), "
+        "('imp-1', 'match', 'match:failed:v1', 1, 'upload-pipeline-v1', 'running')"
+    )
+    test_db.commit()
+
+    async def _stream(input_state, result_collector=None):
+        yield format_sse(make_done_event("interview", "personal", {}))
+        if result_collector is not None:
+            result_collector["final_state"] = {
+                "doc_type": "interview",
+                "target": "personal",
+                "extracted_data": {},
+                "match_failed": 1,
+            }
+            result_collector["answer_tasks"] = []
+
+    monkeypatch.setattr("app.agents.submit.graph.stream_submit_graph", _stream)
+
+    await submit_import_task({}, job_id)
+
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert root["status"] == "partial_failed", (
+        "匹配失败必须聚合为 partial_failed（成果保留、失败可重试）"
+    )
+    failed_stage = test_db.execute(
+        "SELECT status FROM upload_stage_results "
+        "WHERE import_id = 'imp-1' AND stage = 'match'"
+    ).fetchone()
+    assert failed_stage["status"] == "failed", "match 阶段必须标记 failed"
