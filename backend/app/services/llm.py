@@ -919,9 +919,12 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
     """统一的原始 LLM 调用接口，自动适配 OpenAI / Anthropic。
 
     kwargs 使用 OpenAI 格式（model, messages, temperature, response_format 等）。
-    返回 LLM 输出文本。
+    返回 LLM 输出文本。``llm_scope`` 透传 R01 节点级凭据 scope。
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+    llm_scope = kwargs.pop("llm_scope", "user")
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
+        user_id, llm_scope=llm_scope
+    )
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -1154,7 +1157,12 @@ async def _call_llm_with_retry(
 )
 async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **kwargs) -> str:
     """带重试的 LLM 调用，支持 multimodal messages（图片+文本），自动适配 OpenAI / Anthropic"""
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+    # R01：节点按 state.credential_scope 传入 llm_scope（"global"→系统配置，
+    # "user"→本人配置），缺省保持旧行为。
+    llm_scope = kwargs.pop("llm_scope", "user")
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
+        user_id, llm_scope=llm_scope
+    )
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
         resolved_client,

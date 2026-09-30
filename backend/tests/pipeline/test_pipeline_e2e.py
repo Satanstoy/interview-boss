@@ -249,7 +249,7 @@ def _make_interview(
 
 
 def _mock_tag_batch(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     results = []
     for q in questions:

@@ -54,6 +54,8 @@ async def complete_node(state: SubmitState) -> dict:
                     {"role": "user", "content": retry_prompt}
                 ],
                 temperature=0.2,
+                # R01：global 公共导入补全也用系统凭据
+                llm_scope=state.get("credential_scope", "user"),
             )
             if _should_use_response_format(_rbu):
                 retry_kwargs["response_format"] = {"type": "json_object"}
@@ -111,6 +113,7 @@ async def classify_node(state: SubmitState) -> dict:
                 "questions": q_list,
                 "taxonomy_config": taxonomy_config,
                 "user_id": state["user_id"],
+                "llm_scope": state.get("credential_scope", "user"),
             }
             if state.get("_eval_model"):
                 tagging_kwargs["model"] = state["_eval_model"]

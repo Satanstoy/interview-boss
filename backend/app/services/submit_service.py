@@ -150,13 +150,13 @@ async def background_generate_answer(
             raise
 
 
-async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None, model: str = None) -> List[List[str]]:
+async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None, model: str = None, llm_scope: str = "user") -> List[List[str]]:
     input_data = [{"id": idx, "题目": q} for idx, q in enumerate(questions)]
     q_json = json.dumps(input_data, ensure_ascii=False)
     prompt = build_tagging_prompt(taxonomy_config) if taxonomy_config else TAGGING_PROMPT
     user_msg = prompt.replace("{questions}", q_json)
 
-    _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id) if user_id else (client, LLM_MODEL, None, None, "openai")
+    _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id, llm_scope=llm_scope) if user_id else (client, LLM_MODEL, None, None, "openai")
     kwargs = dict(
         model=_m,
         messages=[
@@ -174,6 +174,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
         response_format=kwargs.get("response_format"),
         user_id=user_id,
         model=model,
+        llm_scope=llm_scope,
     )
     try:
         raw_items = _extract_json(raw_content).get("questions", [])

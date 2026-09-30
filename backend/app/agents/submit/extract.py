@@ -67,6 +67,9 @@ async def extract_node(state: SubmitState) -> dict:
             llm_kwargs = dict(
                 model=state.get("_eval_model") or _m,
                 temperature=float(state.get("_eval_temperature", 0.1)),
+                # R01：global 公共导入必须用系统凭据（worker 注入的
+                # credential_scope），禁止静默回退到提交者本人 Key。
+                llm_scope=state.get("credential_scope", "user"),
             )
             if _should_use_response_format(_bu):
                 llm_kwargs["response_format"] = {"type": "json_object"}

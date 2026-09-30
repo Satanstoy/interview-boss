@@ -334,7 +334,7 @@ TEST_SYSTEM_TAXONOMY = {
 
 
 def _mock_tag_batch(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     """与 test_pipeline_e2e.py 一致的 mock tag"""
     results = []
@@ -357,7 +357,7 @@ def _mock_tag_batch(
 
 
 def _mock_tag_batch_low_quality(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     """返回低质量分类结果（有效但错误的分类）"""
     return [

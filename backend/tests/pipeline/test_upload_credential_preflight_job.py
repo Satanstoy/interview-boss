@@ -320,3 +320,108 @@ def test_preflight_success_clears_needs_action_after_config_fix():
     ).fetchone()
     assert extract["status"] == "pending"
     conn.close()
+
+
+def test_preflight_success_writes_llm_accounting_with_fingerprint():
+    """AC-004：预检成功必须写 upload_llm_calls 账本（provider/model/
+    config_fingerprint 绑定），并在阶段结果里保留指纹；不存 Key。"""
+
+    from app.services.credential_preflight import run_credential_preflight
+
+    conn = _db()
+    result = _accept(conn)
+    conn.commit()
+    root_import_id = result["import_id"]
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+        (root_import_id,),
+    ).fetchone()
+    preflight_job_id = int(preflight["id"])
+
+    captured = {}
+
+    def _probe(credential):
+        captured["fingerprint"] = getattr(credential, "config_fingerprint", None)
+        captured["provider"] = getattr(credential, "provider", None)
+        captured["model"] = getattr(credential, "model", None)
+        return {
+            "status": "ok",
+            "latency_ms": 128,
+            "provider": captured["provider"] or "openai",
+        }
+
+    outcome = run_credential_preflight(
+        conn,
+        job_id=preflight_job_id,
+        probe=_probe,
+        user_config_loader=lambda uid: {
+            "api_key": "user-key",
+            "base_url": "https://user.example.com/v1",
+            "model": "user-model",
+        },
+    )
+    assert outcome.status == "ok"
+
+    # 账本：reserved 次数=1（预检一次物理调用），绑定 provider/model/fingerprint
+    calls = conn.execute(
+        "SELECT * FROM upload_llm_calls WHERE root_import_id = ?",
+        (root_import_id,),
+    ).fetchall()
+    assert len(calls) == 1, "预检必须登记一次独立调用记账"
+    call = calls[0]
+    assert call["stage"] == "preflight"
+    assert call["status"] in ("reserved", "succeeded")
+    assert call["provider"]
+    assert call["model"]
+    assert call["config_fingerprint"], "账本必须绑定配置指纹"
+
+    # 阶段结果保留指纹（不发 Key/认证头）
+    stage = conn.execute(
+        "SELECT result_json FROM upload_stage_results "
+        "WHERE import_id = ? AND stage = 'preflight'",
+        (root_import_id,),
+    ).fetchone()
+    stored = json.loads(stage["result_json"])
+    assert stored.get("config_fingerprint"), "阶段结果必须保留配置指纹"
+    assert "api_key" not in stored and "apiKey" not in stored
+    conn.close()
+
+
+def test_preflight_blocked_writes_failed_accounting_ledger():
+    """AC-004：预检失败也记账（status=failed + error_code），阶段结果不伪造成功。"""
+
+    from app.services.credential_preflight import run_credential_preflight
+
+    conn = _db()
+    result = _accept(conn)
+    conn.commit()
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+        (result["import_id"],),
+    ).fetchone()
+    preflight_job_id = int(preflight["id"])
+
+    def _probe(credential):
+        raise PermissionError("401 Invalid API key")
+
+    outcome = run_credential_preflight(
+        conn,
+        job_id=preflight_job_id,
+        probe=_probe,
+        user_config_loader=lambda uid: {
+            "api_key": "user-key",
+            "base_url": "https://user.example.com/v1",
+            "model": "user-model",
+        },
+    )
+    assert outcome.status == "blocked"
+    assert outcome.error_code == "MODEL_AUTH_INVALID"
+
+    calls = conn.execute(
+        "SELECT status, error_code FROM upload_llm_calls "
+        "WHERE stage = 'preflight'"
+    ).fetchall()
+    assert len(calls) == 1, "失败的预检也必须记账（物理调用确实发生了）"
+    assert calls[0]["status"] == "failed"
+    assert calls[0]["error_code"] == "MODEL_AUTH_INVALID"
+    conn.close()

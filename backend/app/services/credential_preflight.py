@@ -140,6 +140,40 @@ def run_credential_preflight(
         return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
 
     probe_fn = probe or _default_probe
+    # AC-004：预检的物理调用独立记账（不存 Key/认证头，绑定指纹）；同一
+    # root+stage 每次预检一个 call_key，配额由账本层原子预留。
+    from app.services.upload_credentials import (
+        CallLedgerConflict,
+        complete_llm_call,
+        reserve_llm_call,
+    )
+    from app.services.job_lifecycle import default_worker_id
+
+    call_key = (
+        f"preflight:{root_import_id or job_id}:{credential_scope}:"
+        f"{int(_monotonic() * 1000)}"
+    )
+    payer_type = "user" if credential_scope == "user" else "system"
+    try:
+        reserve_llm_call(
+            conn,
+            root_import_id=root_import_id,
+            stage=PREFLIGHT_STAGE,
+            unit_key=f"initial:{credential_scope}",
+            call_key=call_key,
+            credential_scope=credential_scope,
+            payer_type=payer_type,
+            payer_user_id=int(user_id) if credential_scope == "user" else None,
+            provider=credential.provider,
+            model=credential.model,
+            config_fingerprint=credential.config_fingerprint,
+        )
+    except CallLedgerConflict:
+        # 同 call_key 已登记（幂等重跑），沿用既有行
+        pass
+    except Exception as exc:
+        logger.warning("预检记账预留失败（不阻断探测，配额层兜底）: %s", exc)
+
     try:
         result = probe_fn(credential)
         if isinstance(result, dict) and result.get("status") == "ok":
@@ -153,10 +187,25 @@ def run_credential_preflight(
                 pipeline_version=PREFLIGHT_PIPELINE_VERSION,
                 status="succeeded",
                 result_json=_json_dumps(
-                    {"provider": result.get("provider", credential.provider), "latency_ms": latency}
+                    {
+                        "provider": result.get("provider", credential.provider),
+                        "model": credential.model,
+                        "config_fingerprint": credential.config_fingerprint,
+                        "latency_ms": latency,
+                    }
                 ),
                 job_id=job_id,
             )
+            try:
+                complete_llm_call(
+                    conn,
+                    call_key=call_key,
+                    status="succeeded",
+                    input_tokens=0,
+                    output_tokens=0,
+                )
+            except Exception as exc:
+                logger.warning("预检记账完成失败（不阻断）: %s", exc)
             conn.execute(
                 "UPDATE jobs SET status = 'completed', progress_current = 1, "
                 "progress_total = 1, completed_at = CURRENT_TIMESTAMP, "
@@ -188,6 +237,12 @@ def run_credential_preflight(
             error_code = "UPSTREAM_TIMEOUT"
         else:
             error_code = "UPSTREAM_UNAVAILABLE"
+        try:
+            complete_llm_call(
+                conn, call_key=call_key, status="failed", error_code=error_code
+            )
+        except Exception as ledger_exc:
+            logger.warning("预检失败记账完成失败（不阻断）: %s", ledger_exc)
         _mark_blocked(conn, root_import_id, job_id, error_code, str(exc))
         return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
 
