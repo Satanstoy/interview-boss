@@ -77,16 +77,30 @@ def aggregate_status(work_items, *, review_status: str | None = None, warnings=N
 
 
 def allowed_actions(
-    status: str, *, error_code: str | None = None, has_result: bool = False
+    status: str,
+    *,
+    error_code: str | None = None,
+    has_result: bool = False,
+    credential_scope: str = "user",
 ) -> list[str]:
-    """服务端允许的操作；绝不虚构暂停/取消。"""
+    """服务端允许的操作；绝不虚构暂停/取消。
+
+    ``credential_scope`` 携带服务端 policy 的凭据 scope（contracts §4.4）：
+    全局凭据缺失/失效时，管理员公共导入与用户公共化申请的动作是
+    ``configure_system_model`` / ``wait_for_global_model``（系统配置待
+    管理员修复），而不是错误地引导去配置本人模型。
+    """
 
     actions: list[str] = []
     if has_result:
         actions.append("open_result")
     if status == "needs_action":
         if error_code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
-            actions.append("configure_user_model")
+            if credential_scope == "global":
+                actions.append("configure_system_model")
+                actions.append("wait_for_global_model")
+            else:
+                actions.append("configure_user_model")
         if error_code == "QUOTA_EXCEEDED":
             actions.append("view_budget")
         actions.append("retry_after_configuration")

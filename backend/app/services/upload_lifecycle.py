@@ -440,6 +440,9 @@ def finalize_attempt_and_aggregate_root(
             status,
             error_code=final_error_code,
             has_result=aggregated["result_available"],
+            credential_scope=_loads(root["policy_json"] or "{}", {}).get(
+                "credential_scope", "user"
+            ),
         ),
     }
 

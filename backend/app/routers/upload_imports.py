@@ -116,6 +116,11 @@ def _snapshot(row, counts=None) -> dict:
             row["status"],
             error_code=row["error_code"],
             has_result=row["interview_id"] is not None,
+            credential_scope=(
+                json.loads(row["policy_json"] or "{}").get("credential_scope", "user")
+                if row["policy_json"]
+                else "user"
+            ),
         ),
         updated_at=row["updated_at"],
     )

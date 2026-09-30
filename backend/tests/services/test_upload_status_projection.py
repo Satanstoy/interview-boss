@@ -117,3 +117,41 @@ def test_progress_is_indeterminate_when_total_unknown():
     assert progress["total"] is None
     assert progress["indeterminate"] is True
     assert "percent" not in progress
+
+
+def test_allowed_actions_global_scope_points_to_system_configuration():
+    """contracts §4.4：global scope（管理员公共导入）错误动作是
+    configure_system_model，不是 configure_user_model。"""
+
+    actions = allowed_actions(
+        "needs_action",
+        error_code="MODEL_AUTH_INVALID",
+        credential_scope="global",
+    )
+    assert "configure_system_model" in actions
+    assert "configure_user_model" not in actions
+    assert "retry_after_configuration" in actions
+
+
+def test_allowed_actions_shared_user_global_missing_warns_wait_global():
+    """contracts §4.4：普通用户公共（share 后公共阶段）global 缺失 →
+    wait_for_global_model 提示（系统配置待管理修复），非本人配置。"""
+
+    actions = allowed_actions(
+        "needs_action",
+        error_code="MODEL_CONFIG_MISSING",
+        credential_scope="global",
+    )
+    assert "wait_for_global_model" in actions
+    assert "configure_user_model" not in actions
+    assert "retry_after_configuration" in actions
+
+
+def test_allowed_actions_user_scope_unchanged():
+    actions = allowed_actions(
+        "needs_action",
+        error_code="MODEL_AUTH_INVALID",
+        credential_scope="user",
+    )
+    assert "configure_user_model" in actions
+    assert "configure_system_model" not in actions
