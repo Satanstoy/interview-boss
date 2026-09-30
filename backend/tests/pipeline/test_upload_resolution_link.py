@@ -172,3 +172,62 @@ def test_link_without_match_persists_failed_not_new_question():
         "AND question = 'Redis 持久化机制'"
     ).fetchone()["c"]
     assert phantom == 0, "匹配失败不得造新题"
+
+def test_link_explicit_failed_match_records_error_code_and_no_canonical():
+    """AC-006：显式 failed（status=failed + error_code）→ resolution 记
+    failed 且 reason 携带错误码；绝不创建规范题。"""
+
+    conn = _db()
+    link_details_to_import(
+        conn,
+        import_id="imp-1",
+        detail_ids=[12],
+        ordinals={12: 2},
+        actor_id=101,
+        stage="persist",
+        matches={12: {"status": "failed", "error_code": "UPSTREAM_TIMEOUT"}},
+        write_unmatched=False,
+    )
+    conn.commit()
+    res = conn.execute(
+        "SELECT * FROM question_resolutions WHERE detail_id = 12 AND invalidated_at IS NULL"
+    ).fetchone()
+    assert res is not None
+    assert res["status"] == "failed"
+    assert "UPSTREAM_TIMEOUT" in (res["reason"] or ""), (
+        "失败理由必须携带错误码便于运维定位"
+    )
+    assert res["canonical_id"] is None, "模型失败绝对不产生 canonical 关联"
+    conn.close()
+
+
+def test_root_gets_contribution_request_id_bound():
+    """F-PUBLIC：private share 完成后 root.contribution_request_id 回写，
+    使 review_status 可计算（此前该列全库零写入）。"""
+
+    from app.services.public_contributions import (
+        bind_contribution_request_to_root,
+        create_public_contribution_request,
+    )
+
+    conn = _db()
+    root_row = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert root_row is not None
+
+    request = create_public_contribution_request(
+        conn, "interview", 1, 101
+    )
+    bind_contribution_request_to_root(
+        conn, import_id="imp-1", contribution_request_id=int(request["id"])
+    )
+    conn.commit()
+
+    bound = conn.execute(
+        "SELECT contribution_request_id FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert int(bound["contribution_request_id"]) == int(request["id"]), (
+        "root 必须回写 contribution_request_id 供 review_status 计算"
+    )
+    conn.close()

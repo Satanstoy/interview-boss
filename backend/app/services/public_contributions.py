@@ -199,6 +199,20 @@ def list_public_contribution_requests(
     return [_serialize_request(row) for row in rows]
 
 
+def bind_contribution_request_to_root(
+    conn, *, import_id: str, contribution_request_id: int
+) -> None:
+    """F-PUBLIC：share 完成后把公共化申请回写根任务
+    ``upload_imports.contribution_request_id``（此前该列全库零写入，
+    导致快照 review_status 恒空）。同事务幂等；请求不存在不报错。"""
+
+    conn.execute(
+        "UPDATE upload_imports SET contribution_request_id = ?, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (contribution_request_id, import_id),
+    )
+
+
 def get_public_contribution_request(conn, request_id: int, *, include_snapshot=True) -> dict:
     row = _request_row(conn, request_id)
     item_rows = conn.execute(

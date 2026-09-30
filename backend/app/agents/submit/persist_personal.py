@@ -14,7 +14,7 @@ logger = logging.getLogger("interview-boss")
 
 async def match_and_persist_personal_node(state: SubmitState) -> dict:
     """个人题库: 匹配 + 写入（跨库匹配：先匹配个人，再匹配公共）"""
-    from app.services.clustering import match_new_questions
+    from app.services.clustering import match_outcomes
     from app.db.connection import get_db_connection, run_db, get_current_job_position
     from app.db.operations import submit_interview_txn
 
@@ -92,31 +92,59 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             for idx, r in enumerate(valid_rows)
         ]
 
-        # Phase 1: 匹配个人题库
-        personal_match = await match_new_questions(
-            new_rows_for_match, personal_by_cat2, user_id=user_id
+        # Phase 1: 匹配个人题库（AC-006 三态：matched / no_match / failed——模型失败归
+        # failed 绝不当作 no_match 去新建规范题）
+        personal_outcomes = await match_outcomes(
+            new_rows_for_match, personal_by_cat2, user_id=user_id, strict=True
         )
-        personal_matched_ids = {m["new_id"] for m in personal_match["matched"]}
-
-        # Phase 2: 未匹配的再匹配公共题库
-        unmatched_for_public = [
-            r for r in new_rows_for_match if r["id"] not in personal_matched_ids
+        personal_results = personal_outcomes.get("results", [])
+        personal_matched = [
+            r for r in personal_results if r["outcome"] == "matched"
         ]
-        public_match = {"matched": [], "unmatched": unmatched_for_public}
+        personal_no_match = [
+            r for r in personal_results if r["outcome"] == "no_match"
+        ]
+        personal_failed = [r for r in personal_results if r["outcome"] == "failed"]
+        personal_matched_ids = {
+            int(m["new_id"]) for m in personal_matched
+        }
+        personal_no_match_ids = {int(m["new_id"]) for m in personal_no_match}
+        personal_failed_ids = {int(m["new_id"]) for m in personal_failed}
+
+        # Phase 2: no_match 的再匹配公共题库（failed 不重试公共库，避免重复消耗预算）
+        unmatched_for_public = [
+            r
+            for r in new_rows_for_match
+            if r["id"] in personal_no_match_ids
+        ]
+        public_results = []
+        public_failed_ids: set[int] = set()
         if unmatched_for_public and public_by_cat2:
-            public_match = await match_new_questions(
-                unmatched_for_public, public_by_cat2, user_id=user_id
+            public_outcomes = await match_outcomes(
+                unmatched_for_public, public_by_cat2, user_id=user_id, strict=True
             )
+            public_results = public_outcomes.get("results", [])
+        public_failed_ids = {
+            int(m["new_id"]) for m in public_results if m["outcome"] == "failed"
+        }
+        public_matched = [m for m in public_results if m["outcome"] == "matched"]
+        public_no_match = [m for m in public_results if m["outcome"] == "no_match"]
 
         # 合并结果：匹配到公共库的题不再写镜像副本
         # （duplicate_of 镜像机制已废除，all 视图可见公共题本身）
-        pub_dup_ids = {m["new_id"] for m in public_match["matched"]}
-        truly_unmatched = public_match["unmatched"]
+        pub_dup_ids = {int(m["new_id"]) for m in public_matched}
+        truly_unmatched = public_no_match  # 仅真正的新题写入个人库
+        # failed 集合：两阶段模型失败的题（不得进聚类队列/不得建 canonical）
+        failed_outcome_ids = personal_failed_ids | public_failed_ids
 
         match_result = {
-            "matched": personal_match["matched"],  # 匹配个人题的走合并路径
+            "matched": personal_matched,  # 匹配个人题的走合并路径
             "unmatched": truly_unmatched,  # 仅真正的新题写入个人库
+            "failed": personal_failed + [
+                m for m in public_results if m["outcome"] == "failed"
+            ],
         }
+        match_failed_count = len(failed_outcome_ids)
         idx_to_row = {idx: r for idx, r in enumerate(valid_rows)}
 
         dup_msg = f"，{len(pub_dup_ids)} 道已收录公共库" if pub_dup_ids else ""
@@ -126,10 +154,13 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                 filter(
                     None,
                     [
-                        f"{len(personal_match['matched'])} 道已有题目"
-                        if personal_match["matched"]
+                        f"{len(personal_matched)} 道已有题目"
+                        if personal_matched
                         else "",
                         new_msg,
+                        f"{match_failed_count} 道匹配失败待恢复"
+                        if match_failed_count
+                        else "",
                     ],
                 )
             )
@@ -206,7 +237,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         # 在个人面经的 questions_detail 中，但不复制成个人题，也不再次聚类。
         from app.services.pipeline import enqueue_questions
 
-        excluded_ids = personal_matched_ids | pub_dup_ids
+        excluded_ids = personal_matched_ids | pub_dup_ids | failed_outcome_ids
         queue_detail_ids = []
         valid_index = 0
         for row, detail_id in zip(tagged_rows, detail_ids):
@@ -232,7 +263,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             matches: dict[int, dict | None] = {}
             matched_new_ids = {
                 int(m["new_id"])
-                for m in list(personal_match["matched"]) + list(public_match["matched"])
+                for m in list(personal_matched) + list(public_matched)
             }
             # 匹配结果的 new_id 是“非空行序号”；与 submit_interview_txn 的
             # valid_index 语义一致，逐行映射回 detail_id。
@@ -248,8 +279,8 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                 if new_id in matched_new_ids:
                     canonical_id = next(
                         (
-                            int(m["question_bank_id"])
-                            for m in list(personal_match["matched"]) + list(public_match["matched"])
+                            int(m["canonical_id"]) or int(m["question_bank_id"])
+                            for m in list(personal_matched) + list(public_matched)
                             if int(m["new_id"]) == new_id
                         ),
                         None,
@@ -259,7 +290,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                             "private"
                             if any(
                                 int(m["new_id"]) == new_id
-                                for m in personal_match["matched"]
+                                for m in personal_matched
                             )
                             else "public"
                         )
@@ -270,6 +301,21 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                         }
                     else:
                         matches[detail_id] = None
+                elif new_id in failed_outcome_ids:
+                    # AC-006：模型失败 → resolution 记 failed（可恢复失败），
+                    # 由 link 持久化，不产生 phantom canonical。
+                    error_code = next(
+                        (
+                            m.get("error_code", "UPSTREAM_UNAVAILABLE")
+                            for m in match_result["failed"]
+                            if int(m["new_id"]) == new_id
+                        ),
+                        "UPSTREAM_UNAVAILABLE",
+                    )
+                    matches[detail_id] = {
+                        "status": "failed",
+                        "error_code": error_code,
+                    }
                 else:
                     # 未命中且 persist_unmatched=False → 由 link 记 failed
                     matches[detail_id] = None
@@ -311,6 +357,21 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
 
             contribution = await run_db(_create_contribution)
             contribution_request_id = contribution["id"]
+
+            def _bind_root():
+                from app.services.public_contributions import (
+                    bind_contribution_request_to_root,
+                )
+
+                with get_db_connection() as conn:
+                    if state.get("import_id"):
+                        bind_contribution_request_to_root(
+                            conn,
+                            import_id=state["import_id"],
+                            contribution_request_id=int(contribution_request_id),
+                        )
+
+            await run_db(_bind_root)
             emit_progress(state, "review", "面经已保留在个人题库，已提交公共化审核")
 
     emit_progress(state, "save", "个人题库写入完成")
@@ -322,6 +383,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         "record_owner_id": record_owner_id,
         "record_status": record_status,
         "public_contribution_request_id": contribution_request_id,
+        "match_failed": match_failed_count,
         "node_timings": {
             **state.get("node_timings", {}),
             "match_persist": timer.elapsed,
@@ -387,6 +449,7 @@ async def jd_persist_node(state: SubmitState) -> dict:
     return {
         "node_timings": {**state.get("node_timings", {}), "jd_persist": timer.elapsed},
         "public_contribution_request_id": contribution_request_id,
+        "match_failed": match_failed_count,
     }
 
 

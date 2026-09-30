@@ -1042,8 +1042,25 @@ async def submit_import_task(ctx, job_id: int):
 
                 contribution = await asyncio.to_thread(_ensure_contribution)
                 if contribution:
+                    # 回写根任务关联（此前 upload_imports.contribution_request_id
+                    # 零写入，快照 review_status 恒空）。
+                    if root_import_id:
+                        from app.services.public_contributions import (
+                            bind_contribution_request_to_root,
+                        )
+
+                        def _bind_root():
+                            with get_db_connection() as conn:
+                                bind_contribution_request_to_root(
+                                    conn,
+                                    import_id=root_import_id,
+                                    contribution_request_id=int(contribution["id"]),
+                                )
+                                conn.commit()
+
+                        await asyncio.to_thread(_bind_root)
                     logger.info(
-                        "share 已建公共化申请: request=%s import=%s",
+                        "share 已建公共化申请并绑定根任务: request=%s import=%s",
                         contribution["id"],
                         root_import_id,
                     )

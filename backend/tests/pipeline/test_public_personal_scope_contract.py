@@ -142,13 +142,22 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
 
     calls = []
 
-    async def _match(rows, existing, user_id=None):
+    async def _match(rows, existing, user_id=None, strict=True):
         calls.append(rows)
         if len(calls) == 1:
-            return {"matched": [], "unmatched": rows}
+            # 第一轮：个人题库无命中 → 全部 no_match，交给公共轮
+            return {
+                "results": [
+                    {"new_id": r["id"], "ordinal": r.get("ordinal", 0), "cat2": r.get("cat2", ""), "outcome": "no_match"}
+                    for r in rows
+                ]
+            }
+        # 第二轮：公共题库 → 第 0 行命中 999，第 1 行 no_match
         return {
-            "matched": [{"new_id": 0, "question_bank_id": 999}],
-            "unmatched": [rows[1]],
+            "results": [
+                {"new_id": 0, "ordinal": 0, "cat2": "系统设计", "outcome": "matched", "canonical_id": 999},
+                {"new_id": 1, "ordinal": 1, "cat2": "系统设计", "outcome": "no_match"},
+            ]
         }
 
     async def _run_db(func):
@@ -169,7 +178,7 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
     }
 
     with (
-        patch("app.services.clustering.match_new_questions", new=AsyncMock(side_effect=_match)),
+        patch("app.services.clustering.match_outcomes", new=AsyncMock(side_effect=_match)),
         patch("app.db.connection.get_current_job_position", return_value="后端开发"),
         patch("app.db.connection.run_db", new=_run_db),
         patch("app.services.pipeline.enqueue_questions") as mock_enqueue,

@@ -711,8 +711,8 @@ class TestSubmitNodes:
 
         with (
             patch(
-                "app.services.clustering.match_new_questions",
-                AsyncMock(return_value={"matched": [], "unmatched": []}),
+                "app.services.clustering.match_outcomes",
+                AsyncMock(return_value={"results": []}),
             ),
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
@@ -1172,7 +1172,7 @@ class TestSubmitGraphE2E:
 
         mock_llm = AsyncMock(return_value=MOCK_EXTRACT_RESPONSE)
         mock_tag = AsyncMock(side_effect=_mock_tag_batch)
-        mock_match = AsyncMock(return_value={"matched": [], "unmatched": []})
+        mock_match = AsyncMock(return_value={"results": []})
 
         with (
             patch("app.services.llm._call_llm_with_retry_messages", mock_llm),
@@ -1182,7 +1182,7 @@ class TestSubmitGraphE2E:
                 return_value=(MagicMock(), "model", 30, "", "openai"),
             ),
             patch("app.services.submit_service.tag_questions_batch", mock_tag),
-            patch("app.services.clustering.match_new_questions", mock_match),
+            patch("app.services.clustering.match_outcomes", mock_match),
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
             ),

@@ -45,7 +45,23 @@ def link_details_to_import(
         linked += 1
 
         match = (matches or {}).get(detail_id)
-        if match:
+        if match and match.get("status") == "failed":
+            # AC-006：模型/匹配失败 → 持久化为可恢复失败（error_code 留痕），
+            # 绝不当作 no_match 去新建规范题。
+            record_resolution(
+                conn,
+                detail_id=detail_id,
+                occurrence_scope="private",
+                occurrence_owner_id=actor_id,
+                canonical_id=None,
+                canonical_scope="private",
+                status="failed",
+                pipeline_version="upload-pipeline-v1",
+                reason=(
+                    f"匹配失败: {match.get('error_code', 'UPSTREAM_UNAVAILABLE')}"
+                ),
+            )
+        elif match:
             record_resolution(
                 conn,
                 detail_id=detail_id,
