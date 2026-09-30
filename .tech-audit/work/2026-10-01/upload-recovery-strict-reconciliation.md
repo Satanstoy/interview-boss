@@ -180,3 +180,40 @@ V2 的界面（任务中心/幂等提交/needs_action）在旧路径下**看不�
 
 证据来源：本会话两个事实采集子代理（前端 10 问/后端 12 问）+ Lead 独立二次验证的 grep/读码；
 未使用推测性描述；所有结论可回查文件:行号。
+---
+
+## 7. 修复结论（2026-10-01 收口）
+
+本报告列出的 14 项缺口已全部处理完毕，逐项状态见 `reconciliation-v2.tsv`。
+
+### 7.1 critical 部署错配（§1.1/§1.2/§1.3）已收口
+用户批准「开启 v2」方向后，采取**全量收口**而非仅翻默认值：
+
+- **删除 `UPLOAD_RECOVERY_V2` 开关**（`core/config.py`）。历史 flag=off 状态本身就与已发版的
+  前端 v2 界面错配（任务中心读 `upload_imports`、幂等提交 by-key 查询），不存在安全的运行期
+  回退态；保留开关只会让"错配"重新可被部署配置触发。回退方式改为 git revert（记录于
+  config.py 注释 + `routers/CLAUDE.md`）。
+- **删除两套遗留可写路径**（`routers/submit.py`）：`/api/submit-jobs` 的裸 `INSERT jobs` 分支、
+  `/api/submit-stream-v2` 的内联 `stream_submit_graph` 分支。两个入口现在都只调
+  `accept_upload` 落根任务 + worker 执行，旧 SSE 仅订阅快照 —— 满足 contracts §8
+  「禁止保留两套可写图执行入口」。
+- 新增回归 `test_submit_jobs_default_config_uses_unified_accept_service`：**默认配置**（不设
+  开关、不 monkeypatch）下提交必须落 `upload_imports` 且绑定 submit job；已做变异验证
+  （临时回退修复 → 测试变红）。
+- 新增结构性断言：`submit` 路由模块不得引用/定义 `stream_submit_graph`。
+
+### 7.2 §3 契约缺口（14 项）状态
+F-SCOPE / F-PREFLIGHT / F-ERRORPOLICY / F-SNAPSHOT / F-MATCHING / F-PUBLIC /
+F-QUEUE-RECOVER / F-ENQUEUE-ROOT / F-DATATABLE / F-RESOLVED-TYPE / F-E2E-PUBLIC /
+F-REVIEW-TOAST / F-V2-FLAG / F-V2-DUAL —— **全部 FIXED**，每项含 TDD 回归 + 提交
+（提交 hash 见 tsv）。
+
+### 7.3 与 Draft spec 的偏差（需所有者确认）
+- contracts §5.9 原定「flag 默认 off，前后端共同启用」。实际执行：因前端已先发版 v2，
+  改为**一次性收口并删除 flag**。此为经用户批准的方向，但 spec 文本未改（Draft 归所有者），
+  按 README §9「记录经批准的偏差」在此登记，未自行把 spec 改为 Accepted/Implemented。
+
+### 7.4 仍未执行（环境受限）
+- Docker test-runtime 完整复跑：根分区 < 4G 硬门禁（deploy 脚本拒绝构建）。
+- AC-028 真实 ARQ+Redis 腿：无 test-profile redis 服务。
+- AC-020（approve/withdraw CAS）未复测。

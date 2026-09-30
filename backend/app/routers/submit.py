@@ -1,6 +1,5 @@
 import json
 import logging
-import openai
 import magic as _magic
 import base64
 import uuid
@@ -34,7 +33,6 @@ from app.services.upload_lifecycle import (
 from app.services.upload_policy import ClientPolicyFieldError
 from app.services.upload_repository import IdempotencyConflict
 
-from app.agents.submit.graph import stream_submit_graph
 
 logger = logging.getLogger("interview-boss")
 
@@ -54,7 +52,7 @@ from app.services.submit_service import (
     tag_questions_batch,  # noqa: F401 — backward-compatible router re-export
     incremental_update_master_bank,  # noqa: F401 — backward-compatible router re-export
     background_generate_answer,  # noqa: F401 — backward-compatible router re-export
-    persist_answer_generation_jobs,
+    persist_answer_generation_jobs,  # noqa: F401 — backward-compatible router re-export
     _get_current_position_for_user,
 )
 
@@ -81,7 +79,6 @@ async def submit_data_stream_v2(
     submit_target = _normalize_target(target)
     # share 是“申请公共化”，不是普通用户直写公共题库。
     is_admin = bool(user.get("is_admin", 0))
-    request_public_review = submit_target == "share" and not is_admin
     bank_target = "public" if submit_target == "share" and is_admin else "personal"
     if url:
         check_owner = user["id"] if bank_target == "personal" else None
@@ -124,105 +121,26 @@ async def submit_data_stream_v2(
                     )
                 image_data.append({"content": content, "mime": real_mime})
 
-    input_state = {
-        "raw_text": text or "",
-        "image_data": image_data,
-        "url": url,
-        "season": season or "",
-        "content_type_hint": (content_type or "").lower(),
-        "target": bank_target,
-        "request_public_review": request_public_review,
-        "user_id": user["id"],
-        "is_admin": is_admin,
-        "job_position": _get_current_position_for_user(user["id"]),
-    }
-
-    # ── v2：旧 SSE 入口也走统一接受服务（创建后订阅，禁止自己启动 graph） ──
-    if _recovery_v2_enabled():
-        return await _legacy_sse_via_accept_service(
-            user=user,
-            idempotency_key=idempotency_key,
-            submit_target=submit_target,
-            text=text,
-            url=url,
-            season=season,
-            content_type=content_type,
-            image_data=image_data,
-            files=files,
-            job_position=input_state["job_position"],
-        )
-
-    async def event_stream():
-        result_collector = {}
-        try:
-            async for sse_data in stream_submit_graph(
-                input_state, result_collector=result_collector
-            ):
-                yield sse_data
-        except openai.AuthenticationError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'API Key 无效或已过期，请在系统配置中检查并更新'})}\n\n"
-        except openai.NotFoundError as e:
-            msg = str(e)
-            if "image" in msg.lower():
-                yield f"data: {json.dumps({'type': 'error', 'message': '当前模型不支持图片输入，请在系统配置中切换支持视觉的模型，或仅提交文本内容'})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'LLM 接口返回错误，请检查模型配置是否正确'})}\n\n"
-        except openai.APIConnectionError:
-            yield f"data: {json.dumps({'type': 'error', 'message': '无法连接 LLM 服务，请检查 Base URL 是否正确'})}\n\n"
-        except openai.APITimeoutError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'LLM 服务响应超时，请稍后重试'})}\n\n"
-        except openai.APIStatusError as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': f'LLM 接口返回错误（{e.status_code}），请查看服务端日志'})}\n\n"
-        except Exception as e:
-            logger.exception("LangGraph 流式提交处理失败")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'处理失败: {str(e)[:200]}'})}\n\n"
-        finally:
-            # 旧 SSE 上传路径也必须使用 durable child jobs；请求结束、断线或
-            # FastAPI 重启都不能让已入库的个人题目丢失答案生成。
-            answer_tasks = result_collector.get("answer_tasks", [])
-            uid = result_collector.get("user_id") or user["id"]
-            if answer_tasks and uid is not None:
-                try:
-                    parent_id, child_ids = await persist_answer_generation_jobs(
-                        answer_tasks,
-                        uid,
-                        source="legacy-submit-answer",
-                        llm_scope="global"
-                        if user.get("is_admin") and bank_target == "public"
-                        else "user",
-                        search_scope="public"
-                        if user.get("is_admin") and bank_target == "public"
-                        else "user",
-                    )
-                    logger.info(
-                        "旧上传路径已持久化答案任务: parent=%s children=%s",
-                        parent_id,
-                        len(child_ids),
-                    )
-                except Exception:
-                    logger.exception("旧上传路径持久化答案任务失败，未执行进程内 fallback")
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"X-Accel-Buffering": "no"},
+    # 统一接受服务（contracts §8）：旧 SSE 只创建根任务并订阅快照，
+    # 执行一律交给 worker；web 进程内不再启动第二套可写 graph。
+    return await _legacy_sse_via_accept_service(
+        user=user,
+        idempotency_key=idempotency_key,
+        submit_target=submit_target,
+        text=text,
+        url=url,
+        season=season,
+        content_type=content_type,
+        image_data=image_data,
+        files=files,
+        job_position=_get_current_position_for_user(user["id"]),
     )
 
 
 # ── 上传任务化接口（后台 Job 模式） ──
 
-SUBMIT_PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
-
 # 旧 SSE 适配的快照轮询上限（每次 2 秒）；测试可调小
 LEGACY_SSE_MAX_POLLS = 900
-
-
-def _recovery_v2_enabled() -> bool:
-    """灰度开关读取运行时配置，便于测试与部署覆盖。"""
-
-    from app.core import config
-
-    return bool(getattr(config, "UPLOAD_RECOVERY_V2", False))
 
 
 async def _legacy_sse_via_accept_service(
@@ -463,143 +381,81 @@ async def create_submit_job(
         "job_position": _get_current_position_for_user(user["id"]),
     }
 
-    # ── v2：统一接受服务（稳定 import_id + 幂等键 + 同事务落库） ──
-    if _recovery_v2_enabled():
-        idempotency_key = idempotency_key or str(uuid.uuid4())
+    # 统一接受服务（稳定 import_id + 幂等键 + 同事务落库）
+    idempotency_key = idempotency_key or str(uuid.uuid4())
 
-        def _accept():
-            with get_db_connection() as conn:
-                conn.execute("BEGIN")
-                try:
-                    result = accept_upload(
-                        conn,
-                        actor_id=user["id"],
-                        actor_is_admin=bool(user.get("is_admin", 0)),
-                        idempotency_key=idempotency_key,
-                        target_intent=submit_target,
-                        source_type="interview",
-                        text=text,
-                        url=url,
-                        season=season or "",
-                        content_type=content_type or "",
-                        position_id=None,
-                        position_name=payload["job_position"] or "",
-                        files=file_metas,
-                        images=image_data,
-                        entry="api",
-                        job_position=payload["job_position"] or "",
-                    )
-                    conn.commit()
-                    return result
-                except Exception:
-                    conn.rollback()
-                    raise
-
-        try:
-            accepted = await run_db(_accept)
-        except ClientPolicyFieldError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        except IdempotencyConflict:
-            raise HTTPException(
-                status_code=409,
-                detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
-            ) from None
-
-        arq_scheduled = False
-        dispatch_error = None
-        try:
-            from app.worker import enqueue_submit_import_job
-            from app.services.job_lifecycle import mark_job_dispatched
-
-            arq_job = await enqueue_submit_import_job(accepted["job_id"])
-            arq_job_id = getattr(arq_job, "job_id", None)
-            if not arq_job_id:
-                raise RuntimeError("ARQ 未返回 job_id")
-            await run_db(
-                lambda: _mark_job_dispatched(
-                    accepted["job_id"], str(arq_job_id), mark_job_dispatched
-                )
-            )
-            arq_scheduled = True
-        except Exception as e:  # ARQ 不可用 ≠ 上传失败
-            dispatch_error = str(e)[:300]
-            logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
-
-        return JSONResponse(
-            status_code=202,
-            content={
-                **accepted,
-                "idempotency_key": idempotency_key,
-                "job_status": "queued" if arq_scheduled else "pending",
-                "dispatch_error": dispatch_error,
-                "message": (
-                    "上传任务已接受"
-                    if accepted["created"]
-                    else "该提交已存在，返回原任务"
-                ),
-            },
-        )
-
-    # ── 创建 job + 存 payload（单事务） ──
-    def _create_job():
+    def _accept():
         with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("BEGIN")
+            conn.execute("BEGIN")
             try:
-                cursor.execute(
-                    "INSERT INTO jobs (job_type, status, created_by, progress_total) VALUES ('submit_import', 'pending', ?, ?)",
-                    (user["id"], len(SUBMIT_PHASES)),
-                )
-                job_id = cursor.lastrowid
-                cursor.execute(
-                    "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-                    (job_id, json.dumps(payload, ensure_ascii=False)),
+                result = accept_upload(
+                    conn,
+                    actor_id=user["id"],
+                    actor_is_admin=bool(user.get("is_admin", 0)),
+                    idempotency_key=idempotency_key,
+                    target_intent=submit_target,
+                    source_type="interview",
+                    text=text,
+                    url=url,
+                    season=season or "",
+                    content_type=content_type or "",
+                    position_id=None,
+                    position_name=payload["job_position"] or "",
+                    files=file_metas,
+                    images=image_data,
+                    entry="api",
+                    job_position=payload["job_position"] or "",
                 )
                 conn.commit()
-                return job_id
+                return result
             except Exception:
                 conn.rollback()
                 raise
 
-    job_id = await run_db(_create_job)
+    try:
+        accepted = await run_db(_accept)
+    except ClientPolicyFieldError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except IdempotencyConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
+        ) from None
 
-    # ── 入队后台执行 ──
-    # jobs 是事实源；ARQ 只负责投递。入队失败时保留 pending，交给
-    # worker dispatcher 重试，不能退回当前 FastAPI 进程内的临时 task。
     arq_scheduled = False
     dispatch_error = None
     try:
         from app.worker import enqueue_submit_import_job
         from app.services.job_lifecycle import mark_job_dispatched
 
-        arq_job = await enqueue_submit_import_job(job_id)
+        arq_job = await enqueue_submit_import_job(accepted["job_id"])
         arq_job_id = getattr(arq_job, "job_id", None)
         if not arq_job_id:
             raise RuntimeError("ARQ 未返回 job_id")
-
         await run_db(
-            lambda: _mark_job_dispatched(job_id, str(arq_job_id), mark_job_dispatched)
+            lambda: _mark_job_dispatched(
+                accepted["job_id"], str(arq_job_id), mark_job_dispatched
+            )
         )
         arq_scheduled = True
-        logger.info(
-            "上传导入任务已通过 ARQ 调度: job_id=%s arq_job_id=%s",
-            job_id,
-            arq_job_id,
-        )
-    except Exception as e:
+    except Exception as e:  # ARQ 不可用 ≠ 上传失败
         dispatch_error = str(e)[:300]
         logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
 
-    return {
-        "job_id": job_id,
-        "status": "queued" if arq_scheduled else "pending",
-        "dispatch_error": dispatch_error,
-        "message": (
-            "上传任务已进入 ARQ 队列"
-            if arq_scheduled
-            else "上传任务已创建，等待后台 worker 调度"
-        ),
-    }
+    return JSONResponse(
+        status_code=202,
+        content={
+            **accepted,
+            "idempotency_key": idempotency_key,
+            "job_status": "queued" if arq_scheduled else "pending",
+            "dispatch_error": dispatch_error,
+            "message": (
+                "上传任务已接受"
+                if accepted["created"]
+                else "该提交已存在，返回原任务"
+            ),
+        },
+    )
 
 
 @router.get("/api/submit-jobs/active")

@@ -43,10 +43,10 @@ MAX_TOTAL_UPLOAD_SIZE = (
     int(os.environ.get("MAX_TOTAL_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 )  # 默认 50MB
 
-# 上传恢复 v2 灰度开关（contracts §5.9）：默认 off；开启后所有新入口走同一
-# policy/接受服务。测试通过 monkeypatch 打开，生产由部署配置覆盖。
-UPLOAD_RECOVERY_V2 = os.environ.get("UPLOAD_RECOVERY_V2", "0") == "1"
-
+# 上传恢复 v2 灰度开关已收口：所有新入口统一走 policy/接受服务
+# （contracts §8 禁止两套可写图入口）。2026-10-01 决策：前端已是 v2 界面，
+# 后端契约缺口全部修复，故取消 flag 并删除遗留路径；如需回退按 git revert
+# 处理，不保留运行期开关（历史 flag=off 状态本身就与前端错配）。
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 

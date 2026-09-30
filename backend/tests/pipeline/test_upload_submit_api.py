@@ -1,7 +1,7 @@
 """接受入口 API（AC-003/021/022 的接口面）。
 
 - `POST /api/submit-jobs`（v2 开关开启时）返回稳定 import_id/status_url/幂等键；
-  同键同 hash 复用，不同 hash 409。
+  同键同 hash 复用，不同 hash 409。（v2 已收口为唯一路径）
 - 非法 target 400、超限 413，且不产生幽灵 job。
 - `GET /api/upload-imports/by-key/{key}` 只能查到本人的任务。
 """
@@ -31,7 +31,9 @@ def _login(client, user):
 
 
 def _v2_on(monkeypatch):
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
+    """上传恢复 v2 已全量收口（无灰度 flag）：保留空实现，标记这些用例
+    覆盖统一接受服务行为（2026-10-01 收口，flag 已删除）。"""
+    return None
 
 
 def _seed_user_models(test_db, uids=(101, 201)):
@@ -184,21 +186,29 @@ def test_legacy_sse_entry_rejects_invalid_target(client, monkeypatch, test_db):
 def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
     client, monkeypatch, _no_dispatch, test_db
 ):
-    """AC-003：v2 开启时旧 SSE 只创建根任务并订阅快照，不自己启动 graph。"""
+    """AC-003 + contracts §8：旧 SSE 只创建根任务并订阅快照，绝不自己启动 graph。
+
+    灰度收口（2026-10-01）后 submit 路由不存在可写 graph 入口：
+    全系统仅 worker 一条写路径。
+    """
+
+    import inspect
 
     import app.routers.submit as submit_module
+
+    # 结构性断言：路由层不得保留第二套可写图执行入口
+    assert not hasattr(submit_module, "stream_submit_graph"), (
+        "旧 SSE 入口不得保留可写 graph；上传执行只能由 worker 进行"
+    )
+    assert "stream_submit_graph" not in inspect.getsource(submit_module), (
+        "submit 路由不得引用可写 graph（contracts §8）"
+    )
 
     test_db.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
     )
     _seed_user_models(test_db, uids=(101,))
-    _v2_on(monkeypatch)
     monkeypatch.setattr(submit_module, "LEGACY_SSE_MAX_POLLS", 1)
-
-    async def _forbidden(*args, **kwargs):
-        raise AssertionError("旧 SSE 入口不得自己启动 graph")
-
-    monkeypatch.setattr(submit_module, "stream_submit_graph", _forbidden)
 
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         resp = client.post(
@@ -212,3 +222,38 @@ def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
     row = test_db.execute("SELECT * FROM upload_imports").fetchone()
     assert row is not None, "旧入口必须落根任务"
     assert row["id"] == "sse-1" or row["idempotency_key"] == "sse-1"
+
+
+def test_submit_jobs_default_config_uses_unified_accept_service(
+    client, _no_dispatch, test_db
+):
+    """critical 错配回归：默认配置（不设任何开关/不 monkeypatch）下，
+    `/api/submit-jobs` 必须走统一接受服务并落 `upload_imports` 根任务。
+
+    历史缺陷：`UPLOAD_RECOVERY_V2` 默认 off 时该入口创建的是裸 job，
+    不写 upload_imports，前端任务中心读不到任何任务（前后端错配）。
+    """
+
+    for uid in (101,):
+        test_db.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
+            (uid, f"u{uid}"),
+        )
+    _seed_user_models(test_db, uids=(101,))
+
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        resp = _post(client, target="private", key="default-cfg-1")
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["import_id"], "默认配置必须返回稳定 import_id"
+
+    root = test_db.execute("SELECT * FROM upload_imports").fetchone()
+    assert root is not None, (
+        "默认配置下 /api/submit-jobs 必须写 upload_imports（前端任务中心数据源）"
+    )
+    assert root["id"] == "default-cfg-1" or root["idempotency_key"] == "default-cfg-1"
+    # 根任务必须真的关联提交 job（执行交给 worker，不在 web 进程内跑图）
+    job = test_db.execute(
+        "SELECT * FROM jobs WHERE root_import_id = ?", (root["id"],)
+    ).fetchone()
+    assert job is not None, "统一接受服务必须同事务创建绑定 root 的 submit job"

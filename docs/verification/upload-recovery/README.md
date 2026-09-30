@@ -358,3 +358,44 @@ npx --no-install playwright test tests/e2e/upload-task-center.spec.js \
 ```
 
 原报告的服务测试结果作为历史证据保留；当前需按[复审报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)补实际调用链和对应回归后，再逐项关闭。
+
+## 7. v2 收口（2026-10-01）
+
+按 2026-10-01 严格对账报告（[analysis 报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)
+与 `.tech-audit/work/2026-10-01/`），对账出的 14 项真实缺口已全部修复，
+逐项状态与提交 hash 见 `.tech-audit/work/2026-10-01/reconciliation-v2.tsv`。
+
+### 7.1 critical 部署错配收口（不再是「条件对齐」）
+- **删除 `UPLOAD_RECOVERY_V2` 灰度开关**：flag=off 与已发版前端 v2 界面错配
+  （任务中心空、幂等提交 by-key 失效），不存在安全回退态；回退改走 git revert。
+- **删除两套遗留可写图入口**：`/api/submit-jobs` 裸 `INSERT jobs` 分支、旧 SSE
+  内联 `stream_submit_graph` 分支。两入口统一走 `accept_upload` + worker，
+  满足 contracts §8。回归 `test_submit_jobs_default_config_uses_unified_accept_service`
+  已做变异验证（回退修复 → 变红）。
+
+### 7.2 修复后验证（宿主 venv，Docker 门禁未过）
+```bash
+.venv/bin/python -m pytest -q backend/tests/pipeline backend/tests/security backend/tests/infra
+# 见本轮执行输出（零新增失败；FTS/session_search 顺序污染为既有）
+
+UPLOAD_TEST_DB_PATH=/tmp/r.db UPLOAD_TEST_REDIS_PREFIX=r \
+  .venv/bin/python -m pytest -q backend/tests/integration/test_upload_recovery_fullstack.py \
+  backend/tests/integration/test_upload_recovery_stack.py \
+  backend/tests/integration/test_upload_question_data_flow.py
+# 隔离全栈：全 passed（详见对账 tsv）
+
+cd frontend && npm run build && npx playwright test \
+  tests/e2e/upload-task-center.spec.js \
+  tests/e2e/public-contribution-review.spec.js \
+  tests/e2e/upload-question-data-flow.spec.js \
+  tests/e2e/jd-interview-submit.spec.js
+# 28 passed
+```
+
+### 7.3 与 Draft spec 的偏差（已登记，待所有者确认）
+contracts §5.9 原定「flag 默认 off，前后端共同启用」；实际因前端先发版 v2，
+经批准改为一次性收口并删除 flag。spec 文本未改（Draft 归所有者）。
+
+### 7.4 仍未执行
+Docker test-runtime 完整复跑（磁盘 < 4G 门禁）、AC-028 真实 redis 腿（无 redis 服务）、
+AC-020 CAS 复测。

@@ -71,7 +71,6 @@ def _create_private_root(client, test_db):
 
 
 def test_non_owner_cannot_read_root_snapshot(client, monkeypatch, _no_dispatch, test_db):
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     created = _create_private_root(client, test_db)
 
     for viewer in (
@@ -108,7 +107,6 @@ def test_legacy_job_stream_and_status_are_owner_only(
     """R07（AC-018）：旧 /api/jobs/{id}/stream 与 /api/jobs/{id} 不得向管理员
     暴露他人私人结果正文；非本人一律 404 且整个响应体不含私人 marker。"""
 
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     created = _create_private_root(client, test_db)
     job_id = created["job_id"]
     _seed_private_job_result(test_db, created["import_id"], job_id)
@@ -142,7 +140,6 @@ def test_legacy_job_stream_owner_streams_private_result(
 ):
     """本人订阅自己的任务流：完成事件中可包含本人私人结果。"""
 
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     created = _create_private_root(client, test_db)
     job_id = created["job_id"]
     _seed_private_job_result(test_db, created["import_id"], job_id)
@@ -156,7 +153,6 @@ def test_legacy_job_stream_owner_streams_private_result(
 def test_owner_can_read_own_snapshot_without_leaking_to_others(
     client, monkeypatch, _no_dispatch, test_db
 ):
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     created = _create_private_root(client, test_db)
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         resp = client.get(f"/api/upload-imports/{created['import_id']}")
@@ -165,7 +161,6 @@ def test_owner_can_read_own_snapshot_without_leaking_to_others(
 
 
 def test_admin_operations_endpoint_uses_allowlist(client, monkeypatch, _no_dispatch, test_db):
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     created = _create_private_root(client, test_db)
 
     allowed_keys = {
@@ -201,7 +196,6 @@ def test_admin_operations_endpoint_rejects_non_admin(client, _no_dispatch, test_
 
 
 def test_error_responses_never_echo_raw_text(client, monkeypatch, _no_dispatch, test_db):
-    monkeypatch.setattr("app.core.config.UPLOAD_RECOVERY_V2", True)
     _seed_users(test_db)
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         # 非法 target 的 400 响应不得回显提交内容
