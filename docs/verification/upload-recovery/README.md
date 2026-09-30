@@ -299,7 +299,38 @@ npx playwright test tests/e2e/upload-task-center.spec.js \
   tests/e2e/ui-title-hierarchy.spec.js  # 24 passed
 ```
 
+## 5c. R01-R12 调用链修复后回归（2026-09-30 晚）
+
+按复审 findings.tsv 的 R01-R12 贯通真实调用链之后：
+
+```bash
+# 后端四域组合（pipeline/services/security/integration）
+.venv/bin/python -m pytest -q backend/tests/pipeline backend/tests/services \
+  backend/tests/security backend/tests/integration
+# 16 failed, 1682 passed, 7 skipped, 14 deselected
+# 失败全部位于 test_fts_service + test_session_search —— **既有分支级跨文件
+# 顺序污染**，已在修复前基线 ee59eaec 上复现完全相同集合（44 failed,
+# 1135 passed，services 全目录单独验证）。本轮只减少污染（FTS 增加模块级
+# _idf_cache 复位后 23→16），未引入任何新失败。
+
+# 新增全栈链路（隔离协议，UPLOAD_TEST_* 门禁）
+UPLOAD_TEST_DB_PATH=/tmp/r12.db UPLOAD_TEST_REDIS_PREFIX=r12 \
+  .venv/bin/python -m pytest -q backend/tests/integration/test_upload_recovery_fullstack.py
+# 1 passed：accept → 预检 → 真实 worker graph 提取/分类/落库（import_id/
+# source_ordinal + resolution）→ 公共化审核物化 → 失败恢复，实体全由代码产生
+
+cd frontend
+npm run build                          # exit 0（R08/R09 接入幂等提交 + 服务端分页）
+npx playwright test tests/e2e/upload-task-center.spec.js \
+  tests/e2e/upload-question-data-flow.spec.js \
+  tests/e2e/ui-title-hierarchy.spec.js  # 24 passed
+```
+
 ## 6. 验收状态汇总（2026-09-30 复审修正）
+
+> 下方基线为复审结论；2026-09-30 晚间专项修复后逐项推进情况已在
+> 5c 与 `.tech-audit/work/2026-09-30/reconciliation.tsv` 更新，本节保留
+> 复审时的原始诊断，5c 为修复后的最新状态。
 
 - F01～F19 未满足各自完整 AC 的关闭条件（有实际部分修复，也有只新增 helper 的项目）。其中 F19 原黑名单删除已修，但实际节点结构校验未接。
 - F20 的 approve/withdraw 已接写事务和 revision CAS；本轮后端复测未执行，不能新增 passed 证据。
