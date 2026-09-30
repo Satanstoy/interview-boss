@@ -22,7 +22,8 @@ class TestMigration049AnalysisQueueOwner:
                 question_detail_id INTEGER,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP,
-                processed_at TIMESTAMP
+                processed_at TIMESTAMP,
+                locked_until TEXT
             )
         """)
         conn.commit()

@@ -190,6 +190,7 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
         interview_id,
         owner_id=7,
         question_detail_ids=[2],
+        root_import_id=None,
     )
     assert test_db.execute(
         "SELECT COUNT(*) FROM question_bank WHERE owner_id = 7"

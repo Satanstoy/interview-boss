@@ -55,6 +55,8 @@ def _create_test_db():
             status TEXT DEFAULT 'pending',
             owner_id INTEGER DEFAULT NULL,
             processed_at TIMESTAMP,
+            locked_until TEXT,
+            contribution_request_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE job_positions (

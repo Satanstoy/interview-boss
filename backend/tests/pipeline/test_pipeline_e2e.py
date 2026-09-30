@@ -129,6 +129,7 @@ def create_test_db():
             contribution_request_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
+            locked_until TEXT,
             UNIQUE(question_detail_id),
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );

@@ -138,12 +138,16 @@ def get_processing_count() -> int:
 
 def _recover_stuck_processing():
     conn = get_db_connection()
-    # contracts §2.5：按 locked_until（租约）回收，不用 created_at——
-    # created_at 早但租约仍有效的 processing 行不得误伤。
+    # contracts §2.5：processing 行按租约回收（locked_until 过期）；
+    # 兼容旧数据：locked_until IS NULL 的“老式 processing 行”按 created_at
+    # 超时兜底回收（不无限悬挂）。created_at 早但租约仍有效的行绝不误伤。
     conn.execute(
         "UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
-        "WHERE status = 'processing' AND locked_until IS NOT NULL "
-        "AND locked_until < CURRENT_TIMESTAMP",
+        "WHERE status = 'processing' AND ("
+        "  (locked_until IS NOT NULL AND locked_until < CURRENT_TIMESTAMP) "
+        "  OR (locked_until IS NULL AND created_at < datetime('now', ?))"
+        ")",
+        (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",),
     )
     conn.commit()
 
@@ -212,7 +216,7 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
             "  ORDER BY aq.id LIMIT ?"
             ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id, "
             + contribution_returning,
-            (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes", target_owner, target_owner, batch_size),
+            (f"+{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes", target_owner, target_owner, batch_size),
         ).fetchall()
         conn.commit()
     except Exception:

@@ -250,6 +250,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             interview_id,
             owner_id=user_id,
             question_detail_ids=queue_detail_ids,
+            root_import_id=state.get("import_id"),
         )
 
         # R05：v2 root 上下文存在时，为逐题明细写 import_id/source_ordinal
