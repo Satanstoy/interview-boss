@@ -1,12 +1,13 @@
-3	D10	backend/app/services/upload_lifecycle.py:346	R01 配置预检未探测模型且实际节点未使用显式scope	持久预检任务探测目标scope并在每次模型调用使用同一凭据策略和账本	2d	certain
-3	D4	backend/app/worker.py:566	R02 worker丢失分享审核意图和持久策略	由root加载服务端policy并贯穿普通分享审核与管理员公共导入审计	1d	certain
-3	D14	backend/app/services/upload_lifecycle.py:202	R03 恢复只创建attempt而未重建工作且graph仍秒级ID	恢复同root未完成工作并接入检查点唯一执行ID与旧retry适配	4d	certain
-3	D15	backend/app/routers/upload_imports.py:28	R04 根状态未聚合且GET与SSE任务快照不一致	持久更新root状态revision结果并共用完整快照DTO	2d	certain
-3	D9	backend/app/agents/submit/persist_personal.py:107	R05 实际逐题流程未使用resolution三态匹配和提取schema	贯穿ordinal和resolution并阻止匹配异常走新题写入	3d	certain
-3	D14	backend/app/services/upload_queue.py:94	R06 队列补单类型未被派发且实际领取未接租约隔离	真实入队写root并接派发worker和续调同时替换旧created_at回收	3d	certain
-3	D5	backend/app/routers/bank_build.py:33	R07 管理员通用任务流仍可读他人私人正文	旧job内容接口同样按owner鉴权并分离运维白名单	0.5d	certain
-3	D15	frontend/src/components/business/StagingPanel.vue:239	R08 实际提交仍走旧job入口且未使用草稿幂等恢复	提交订阅恢复全改按import_id并保留失败草稿与账号隔离缓存	2d	certain
-3	D15	frontend/src/composables/useMasterBankData.js:75	R09 面经页面仍截断100条且定位岗位名称被当数值ID	前端消费服务端分页total并统一position_id和位置筛选协议	1d	certain
-3	D14	backend/app/services/public_contributions.py:1173	R10 公共发布仍按队列完成而非resolution且同URL物化无合并	恢复失败子项时复用旧行并派发按resolution事务刷新发布投影	2d	certain
-3	D14	backend/app/services/public_contributions.py:629	R11 v2审批把JD当面经且丢失源元数据和岗位	按source_type分别物化并按真实snapshot结构读取允许继承字段	1d	certain
-3	D3	backend/tests/integration/test_upload_question_data_flow.py:192	R12 逐题E2E手工填结果未运行实际上传worker链路	用隔离API SQLite Redis worker和模型stub执行AC028029并逐题断言	3d	certain
+severity	issue_id	evidence	requirement	status_2026_09_30_final	fixed_by
+3	D10	backend/app/services/upload_lifecycle.py:346	R01 配置预检未探测模型且实际节点未使用显式scope	fixed	credential_preflight.py: accept同事务建preflight job，worker真实provider探测（401/404/超时），失败needs_action阻塞提取，修复后恢复重开预检清除阻塞
+3	D4	backend/app/worker.py:566	R02 worker丢失分享审核意图和持久策略	fixed	worker从upload_imports.policy_json读完整policy（request_public_review/credential_scope/write_scope），input_state贯穿；share完成后建公共化申请
+3	D14	backend/app/services/upload_lifecycle.py:202	R03 恢复只创建attempt而未重建工作且graph仍秒级ID	partially_fixed	restore同root重建可派发submit job+重新预检；旧retry解析root绑定attempt；graph thread_id用build_thread_id(import,attempt,job)；graph节点级阶段检查点起点已接入worker进度持久化，节点内复用未做
+3	D15	backend/app/routers/upload_imports.py:28	R04 根状态未聚合且GET与SSE任务快照不一致	fixed	finalize_attempt_and_aggregate_root持久化聚合根状态/revision/error/result；GET/SSE/by-key/retry共用snapshot_from_parts+allowed_actions
+3	D9	backend/app/agents/submit/persist_personal.py:107	R05 实际逐题流程未使用resolution三态匹配和提取schema	fixed	extract节点用normalize_extracted_questions（schema拒绝/ordinal归一）；persist节点link_details_to_import写import_id/source_ordinal+resolution（matched/created/failed），匹配失败不造新题
+3	D14	backend/app/services/upload_queue.py:94	R06 队列补单类型未被派发且实际领取未接租约隔离	partially_fixed	enqueue_questions回填root_import_id；ensure_bucket_job改发已注册cluster_batch类型；对账扫描真实上传队列；worker generation租约/fencing仍用旧claim（claim_job_with_generation未接入submit worker心跳）
+3	D5	backend/app/routers/bank_build.py:33	R07 管理员通用任务流仍可读他人私人正文	fixed	/api/jobs/{id}与stream全改owner专属（非本人404/首事件error，响应体无marker）；admin运维收敛到upload-operations白名单
+3	D15	frontend/src/components/business/StagingPanel.vue:239	R08 实际提交仍走旧job入口且未使用草稿幂等恢复	fixed	提交走submitUploadWithIdempotency（by-key先查、草稿键持久化、needs_action/失败保留草稿）
+3	D15	frontend/src/composables/useMasterBankData.js:75	R09 面经页面仍截断100条且定位岗位名称被当数值ID	fixed	fetchInterviewData传page/page_size/sort/season/position_id/scope（与location同协议），以服务端total循环取满；布局按当前岗位同步position_id
+3	D14	backend/app/services/public_contributions.py:1173	R10 公共发布仍按队列完成而非resolution且同URL物化无合并	fixed	retry_failed_public_items重试后显式派发cluster_batch job；v2物化同URL公共面经复用；publish_items_with_resolutions按resolution判定（rejected跳过）
+3	D14	backend/app/services/public_contributions.py:629	R11 v2审批把JD当面经且丢失源元数据和岗位	fixed	approve按source_type分派（JD只写jd）；build_review_projection真实snapshot source层级继承；岗位从源冻结
+3	D3	backend/tests/integration/test_upload_question_data_flow.py:192	R12 逐题E2E手工填结果未运行实际上传worker链路	fixed	test_upload_recovery_fullstack.py：隔离全栈（accept→预检→真实worker graph→落库→审核→公共化→恢复），实体全部由代码产生；AC-028/029真实worker腿仍受UPLOAD_TEST_*环境门禁
