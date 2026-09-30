@@ -137,3 +137,82 @@ def test_snapshot_never_contains_raw_text_or_key():
     dumped = snapshot.model_dump()
     assert "api_key" not in str(dumped).lower()
     assert "authorization" not in str(dumped).lower()
+
+
+def test_stage_counts_reflect_extract_counts_and_resolutions(tmp_path):
+    """AC-013：counts 必须是逐题统计——extracted/retained/excluded/
+    needs_review 来自 extract 阶段「提取计数」，resolved 来自逐题
+    resolution 计数，不再以检查点行数充当。"""
+
+    import json as _json
+    import sqlite3
+
+    from app.db.migrations import run_migrations
+    from app.routers.upload_imports import _stage_counts
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    run_migrations(conn)
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (101, 'u101', 'x', 0)"
+    )
+    conn.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, "
+        "status, revision) VALUES ('imp-c1', 101, 'k-c1', 'h-c1', 'private', "
+        "'interview', 'upload-pipeline-v1', '{}', '{}', 'completed', 2)"
+    )
+    conn.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status, result_json) VALUES "
+        "('imp-c1', 'extract', 'document', 1, 'upload-pipeline-v1', 'succeeded', ?)",
+        (
+            _json.dumps(
+                {
+                    "提取计数": {
+                        "extracted": 5,
+                        "retained": 4,
+                        "excluded": 1,
+                        "needs_review": 2,
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    )
+    # 2 条明细，1 条 matched（成功 resolution）、1 条 failed
+    conn.execute(
+        "INSERT INTO interview (id, url, company, owner_id, status) VALUES "
+        "(9001, 'https://c1.example.com', '字节', 101, 'approved')"
+    )
+    for detail_id in (501, 502):
+        conn.execute(
+            "INSERT INTO questions_detail (id, url, question, interview_id, owner_id, "
+            "status, import_id, source_ordinal) VALUES (?, ?, ?, 9001, 101, 'approved', "
+            "'imp-c1', ?)",
+            (detail_id, f"https://c1.example.com/q{detail_id}", f"题{detail_id}", detail_id - 500),
+        )
+    conn.execute(
+        "INSERT INTO question_bank (id, question, cat1, cat2, status, job_position) "
+        "VALUES (7001, 'TCP握手', '网络', 'TCP', 'approved', '后端')"
+    )
+    conn.execute(
+        "INSERT INTO question_resolutions (detail_id, occurrence_scope, occurrence_owner_id, "
+        "canonical_id, status, pipeline_version, input_version) "
+        "VALUES (501, 'private', 101, 7001, 'matched', 'upload-pipeline-v1', 1)"
+    )
+    conn.execute(
+        "INSERT INTO question_resolutions (detail_id, occurrence_scope, occurrence_owner_id, "
+        "status, pipeline_version, input_version) "
+        "VALUES (502, 'private', 101, 'failed', 'upload-pipeline-v1', 1)"
+    )
+    conn.commit()
+
+    counts = _stage_counts(conn, "imp-c1")
+    assert counts["extracted"] == 5, "extracted 必须来自提取计数"
+    assert counts["retained"] == 4
+    assert counts["excluded"] == 1, "excluded 必须来自提取计数（不再恒 0）"
+    assert counts["needs_review"] == 2, "needs_review 必须来自提取计数（不再硬编码 0）"
+    assert counts["resolved"] == 1, "resolved 必须是逐题成功的 resolution 数（501）"
+    conn.close()

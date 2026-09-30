@@ -45,7 +45,15 @@ def _error_dto(code, message):
 
 
 def _stage_counts(conn, import_id: str) -> dict:
-    """按实际问题单元统计根任务阶段检查点（R04：不再是“成功阶段行数=answered”）。"""
+    """按实际问题单元统计根任务（R04/AC-013：逐题口径，非检查点行数）。
+
+    - extracted/retained/excluded/needs_review 来自 extract 阶段
+      result_json 的「提取计数」（AC-019 守恒计数，节点已持久化）；
+    - resolved 是逐题当前 resolution（matched/created）成功数；
+    - answered/failed/total 维持既有聚合语义。
+    """
+
+    import json as _json
 
     rows = conn.execute(
         "SELECT stage, status, COUNT(*) AS c FROM upload_stage_results "
@@ -59,7 +67,45 @@ def _stage_counts(conn, import_id: str) -> dict:
         if r["status"] == "succeeded" and r["stage"] not in ("extract", "classify")
     )
     failed = sum(int(r["c"]) for r in rows if r["status"] == "failed")
-    return {"total": total, "answered": answered, "failed": failed}
+
+    # extract 阶段检查点保留的守恒计数（AC-019）；无则回退 0
+    extract_row = conn.execute(
+        "SELECT result_json FROM upload_stage_results "
+        "WHERE import_id = ? AND stage = 'extract' AND status = 'succeeded' "
+        "ORDER BY id DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    extracted = retained = excluded = needs_review = 0
+    if extract_row and extract_row["result_json"]:
+        try:
+            payload = _json.loads(extract_row["result_json"])
+            counts = (payload or {}).get("提取计数") or {}
+            extracted = int(counts.get("extracted", 0))
+            retained = int(counts.get("retained", 0))
+            excluded = int(counts.get("excluded", 0))
+            needs_review = int(counts.get("needs_review", 0))
+        except (ValueError, TypeError):
+            pass
+
+    # resolved：逐题当前 resolution 成功数（matched/created）
+    resolved = conn.execute(
+        "SELECT COUNT(*) AS c FROM question_resolutions qr "
+        "JOIN questions_detail qd ON qd.id = qr.detail_id "
+        "WHERE qd.import_id = ? AND qr.status IN ('matched','created') "
+        "AND qr.invalidated_at IS NULL",
+        (import_id,),
+    ).fetchone()["c"]
+
+    return {
+        "total": total,
+        "answered": answered,
+        "failed": failed,
+        "extracted": extracted,
+        "retained": retained,
+        "excluded": excluded,
+        "needs_review": needs_review,
+        "resolved": int(resolved),
+    }
 
 
 def _snapshot(row, counts=None) -> dict:
@@ -76,6 +122,11 @@ def _snapshot(row, counts=None) -> dict:
         "total": 0,
         "answered": 0,
         "failed": 0,
+        "extracted": 0,
+        "retained": 0,
+        "excluded": 0,
+        "needs_review": 0,
+        "resolved": 0,
     }
     total_done = int(count_values["total"] or 0)
     total_denominator = max(total_done, int(row["current_attempt_no"] or 0) + 1)
@@ -92,11 +143,11 @@ def _snapshot(row, counts=None) -> dict:
             "total": total_denominator,
         },
         counts={
-            "extracted": total_done,
-            "retained": total_done,
+            "extracted": int(count_values.get("extracted", 0)),
+            "retained": int(count_values.get("retained", 0)),
             "excluded": int(count_values.get("excluded", 0)),
-            "needs_review": 0,
-            "resolved": int(count_values.get("answered", 0)),
+            "needs_review": int(count_values.get("needs_review", 0)),
+            "resolved": int(count_values.get("resolved", 0)),
             "answered": int(count_values.get("answered", 0)),
             "failed": int(count_values.get("failed", 0)),
             "total": int(count_values.get("total", 0)),
