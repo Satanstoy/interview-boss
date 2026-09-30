@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 
 class ResolutionConflict(Exception):
@@ -79,6 +78,17 @@ def record_resolution(
         else:
             if canonical_scope != "public":
                 raise ResolutionConflict("公共原题只能关联公共规范题")
+            row = conn.execute(
+                "SELECT owner_id, status, deleted_at FROM question_bank WHERE id = ?",
+                (canonical_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["owner_id"] is not None
+                or row["status"] != "approved"
+                or row["deleted_at"] is not None
+            ):
+                raise ResolutionConflict("公共原题只能关联有效的公共规范题")
     elif status not in ("needs_review", "failed", "invalidated"):
         raise ValueError(f"不合法的 resolution 状态: {status!r}")
 

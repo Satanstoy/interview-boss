@@ -118,6 +118,7 @@ def _snapshot(row, counts=None, conn=None) -> dict:
 
     from app.services.upload_retry_budget import snapshot_from_parts
     from app.services.upload_status import allowed_actions
+    from app.services.upload_lifecycle import upload_action_credential_scope
 
     review_status = None
     if conn is not None and row["contribution_request_id"]:
@@ -178,10 +179,14 @@ def _snapshot(row, counts=None, conn=None) -> dict:
             row["status"],
             error_code=row["error_code"],
             has_result=row["interview_id"] is not None,
-            credential_scope=(
-                json.loads(row["policy_json"] or "{}").get("credential_scope", "user")
-                if row["policy_json"]
-                else "user"
+            credential_scope=upload_action_credential_scope(
+                conn,
+                import_id=row["id"],
+                fallback=(
+                    json.loads(row["policy_json"] or "{}").get("credential_scope", "user")
+                    if row["policy_json"]
+                    else "user"
+                ),
             ),
         ),
         updated_at=row["updated_at"],

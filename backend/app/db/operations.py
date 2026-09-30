@@ -841,7 +841,19 @@ def submit_interview_in_conn(
 
 
 def submit_interview_txn_tag_only(
-    saved_url, data, questions, season, owner_id, status, job_position, tagged_rows
+    saved_url,
+    data,
+    questions,
+    season,
+    owner_id,
+    status,
+    job_position,
+    tagged_rows,
+    *,
+    import_id: str | None = None,
+    source_ordinals: list[int] | None = None,
+    enqueue: bool = False,
+    return_detail_ids: bool = False,
 ):
     """提交新面经（仅打标签）：insert_interview + insert_details，不做聚类。
 
@@ -863,11 +875,33 @@ def submit_interview_txn_tag_only(
                 job_position,
             )
             interview_id = cursor.lastrowid
-            _insert_details_txn(
+            detail_ids = _insert_details_txn(
                 cursor, tagged_rows, job_position, interview_id=interview_id
             )
+            if import_id:
+                for index, detail_id in enumerate(detail_ids):
+                    ordinal = (
+                        int(source_ordinals[index])
+                        if source_ordinals is not None and index < len(source_ordinals)
+                        else index + 1
+                    )
+                    conn.execute(
+                        "UPDATE questions_detail SET import_id = ?, source_ordinal = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (import_id, ordinal, detail_id),
+                    )
+            if enqueue:
+                from app.services.pipeline.queue import enqueue_questions
+
+                enqueue_questions(
+                    interview_id,
+                    owner_id=owner_id,
+                    question_detail_ids=detail_ids,
+                    root_import_id=import_id,
+                    conn=conn,
+                )
             conn.commit()
-            return interview_id
+            return (interview_id, detail_ids) if return_detail_ids else interview_id
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):

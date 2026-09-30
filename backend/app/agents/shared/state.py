@@ -19,6 +19,7 @@ class SubmitState(TypedDict, total=False):
     # v2 执行上下文（R02/R03/R05）：LangGraph 只透传已声明的输入键
     import_id: str                          # 根任务 ID（upload_imports.id）
     attempt_id: int | None                  # 当前恢复批次 ID
+    thread_id: str                          # 当前执行的 LangGraph checkpoint 隔离键
     work_key: str                           # 本次执行的 work_key
     job_id: int                             # 当前 jobs 行 ID
     credential_scope: str                   # 服务端策略 scope（user/global）
@@ -32,6 +33,7 @@ class SubmitState(TypedDict, total=False):
     completion_attempted: bool              # 是否尝试了字段补全
     tagged_rows: list[list[str]]            # 分类结果 [url, company, round, q, cat1, cat2, tags, diff_tag]
     match_result: dict                      # 聚类匹配结果 {matched: [...], unmatched: [...]}
+    match_failed: int                       # 匹配失败题数（供上传根任务状态聚合）
     saved_interview_id: int                 # 写入 DB 后的 interview ID
     public_contribution_request_id: int     # 公共化申请 ID（如有）
     answer_tasks: list[tuple[int, str]]     # 需要生成答案的 (question_id, question_text) 列表

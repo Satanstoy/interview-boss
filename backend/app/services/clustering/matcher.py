@@ -719,7 +719,12 @@ def _coerce_id(value):
 
 
 async def match_outcomes(
-    new_rows, existing_clusters_by_cat2, user_id=None, *, strict: bool = True
+    new_rows,
+    existing_clusters_by_cat2,
+    user_id=None,
+    *,
+    strict: bool = True,
+    llm_scope: str = "user",
 ):
     """三态匹配（AC-006）：matched / no_match / failed。
 
@@ -772,7 +777,10 @@ async def match_outcomes(
             )
             try:
                 content = await _call_llm_with_retry(
-                    prompt, response_format={"type": "json_object"}, user_id=user_id
+                    prompt,
+                    response_format={"type": "json_object"},
+                    user_id=user_id,
+                    llm_scope=llm_scope,
                 )
                 parsed = _extract_json(content) or {}
             except Exception as exc:  # 模型错误 → failed，绝不当作 no_match

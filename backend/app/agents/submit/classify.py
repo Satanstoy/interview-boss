@@ -46,16 +46,19 @@ async def complete_node(state: SubmitState) -> dict:
 对于公司，请从内容中推断。对于面试轮次，请从内容中推断。"""
 
         try:
-            _rc, _rm, _rt, _rbu, _rprovider = get_llm_client_for_user(state["user_id"])
+            credential_scope = state.get("credential_scope", "user")
+            _rc, _rm, _rt, _rbu, _rprovider = get_llm_client_for_user(
+                state["user_id"], llm_scope=credential_scope
+            )
             retry_kwargs = dict(
-                model=_rm,
+                model=state.get("_eval_model") or _rm,
                 messages=[
                     {"role": "system", "content": "你是一个信息补全助手。根据已有信息推断缺失字段，返回JSON。"},
                     {"role": "user", "content": retry_prompt}
                 ],
                 temperature=0.2,
                 # R01：global 公共导入补全也用系统凭据
-                llm_scope=state.get("credential_scope", "user"),
+                llm_scope=credential_scope,
             )
             if _should_use_response_format(_rbu):
                 retry_kwargs["response_format"] = {"type": "json_object"}
@@ -87,6 +90,7 @@ async def classify_node(state: SubmitState) -> dict:
 
     with NodeTimer() as timer:
         data = state.get("extracted_data", {})
+        taxonomy_config = state.get("taxonomy_config") or {}
 
         # F08：恢复时 worker 注入已成功的 classify 检查点 → 不重跑打标
         resumed = state.get("_resume_tagged_rows")
@@ -137,8 +141,8 @@ async def classify_node(state: SubmitState) -> dict:
 
     quality = evaluate_tagging_quality(tagged_rows, valid_cat1=valid_cat1, valid_cat2_by_cat1=valid_cat2_by_cat1)
     retry_count = state.get("tagging_retries", 0)
-    # F08：复用检查点路径不重新加载 taxonomy，回退到状态中的旧值（空 dict 兜底）
-    taxonomy_config = taxonomy_config or state.get("taxonomy_config") or {}
+    # 恢复路径不重新加载 taxonomy；无旧配置时按不限制分类的质量评估处理。
+    taxonomy_config = taxonomy_config or {}
 
     emit_progress(state, "tag", f"标注完成，共 {len(tagged_rows)} 道题",
                   build_tagging_data(tagged_rows, quality, timer.elapsed, retry_count))

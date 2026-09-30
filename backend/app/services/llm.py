@@ -548,7 +548,13 @@ async def llm_with_tools(
             "usage": {"input_tokens": int | None, ...},  # token/cache usage
         }
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+    llm_scope = kwargs.pop("llm_scope", "user")
+    if llm_scope == "user":
+        resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+    else:
+        resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id, llm_scope=llm_scope
+        )
     model = kwargs.pop("model", None) or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -557,6 +563,7 @@ async def llm_with_tools(
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
     # 能力矩阵作为默认值，而不是硬编码 4096 —— ReAct 主循环不传 max_tokens，
     # 思考开启时 4096 预算会被 reasoning 吃光导致截断/空响应。
@@ -568,7 +575,7 @@ async def llm_with_tools(
     prompt_cache_options = kwargs.get("prompt_cache_options")
     # ReAct 主循环不传 thinking → 按用户 llm_thinking 配置解析（默认关闭），
     # 让"关闭深度思考"开关对 agent 主链路同样生效。
-    thinking = _resolve_thinking(user_id, kwargs.get("thinking"))
+    thinking = _resolve_thinking(user_id, kwargs.get("thinking"), llm_scope)
 
     # Anthropic 需要预先转换消息格式
     if api_format == "anthropic":
@@ -933,6 +940,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
 
     # 处理 model=None 的情况，使用默认模型
@@ -1171,6 +1179,7 @@ async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **k
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
 
     if api_format == "anthropic":

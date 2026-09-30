@@ -5,7 +5,7 @@
 
 规则：**未运行的步骤必须写 not-run**，不能写 passed；既有失败与新增回归分开记录。
 
-> **2026-09-30 复审修正（代码基线 `8c810733`）**：原表把若干 helper/服务单测通过记作整项通过，不能成立。当前实际状态以本节下方 §2、§6 及[复审报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)为准。§3～5b 保留历史命令与开发记录，不代表整条实际调用链已经验收。原问题的机器可读对账见 [reconciliation.tsv](../../../.tech-audit/work/2026-09-30/reconciliation.tsv)。本轮仅 mock UI 8 passed；后端 Docker 测试被构建前磁盘门禁阻断，pytest 未启动；真实 AC-028/029 未完成。
+> **2026-09-30 复审基线（代码基线 `8c810733`）**：原表把若干 helper/服务单测通过记作整项通过，不能成立。§3～5b 保留历史命令与开发记录；其结论已由 §2 状态表和[复审报告](../../analysis/2026-09-30-upload-recovery-spec-reconciliation.md)修正。原问题的机器可读对账见 [reconciliation.tsv](../../../.tech-audit/work/2026-09-30/reconciliation.tsv)。2026-10-01 的实现与回归增量见 §2.1；本次没有运行完整 Redis/浏览器 AC-028/029。
 
 
 ## 1. 基线（2026-09-29）
@@ -19,7 +19,7 @@
 | 工作区既有改动 | 仅 4 个 untracked（`.tech-audit/work/…`、`backups`、`docs/specs/2026-09-23-frontend-ui-hierarchy-cleanup.md`）与本任务新增文件 |
 | 生产数据写入 | 无（本任务所有测试走内存/临时库） |
 
-## 2. 需求状态表（2026-09-30 复审）
+## 2. 需求状态表（2026-09-30 复审基线）
 
 `open`：实际路径仍有原问题；`partial`：部分已接入但整个 AC 未完成；`implemented_not_retested`：实际代码已接入，本轮未复测。完整 spec 不能标 passed。
 
@@ -56,7 +56,71 @@
 | AC-026 | implemented_not_retested（保留策略局部）：本轮未复测，长期失败队列恢复仍需覆盖 |
 | AC-027 | mock UI 8 passed 中包含相关用例；真实接口集成未验收 |
 | AC-028 | open / not-run：现有测试没有真实 API、Redis 和 worker 联合执行 |
-| AC-029 | open / not-run：现有服务测试手填中间产物，前端只验 mock 和跳转 URL |
+| AC-029 | 2026-09-30 基线 open / not-run；2026-10-01 增量见 §2.1 |
+
+## 2.1 2026-10-01 增量实现与验证
+
+本节只更新本轮实际改动和实际执行的验证，不覆盖 §2 中尚未复核的其它 AC。
+
+| AC / finding | 当前状态 | 本轮实现与证据 | 仍未验收 |
+|---|---|---|---|
+| AC-004 / F04 | implemented；stub 路径通过 | 提取派发和聚类派发/worker 领取都校验 root、attempt、credential scope、最近成功预检及当前配置指纹；普通用户 share 审核后和公共子项重试均新建 global 预检。凭据预检与集成回归通过，见下方命令。 | 未连接真实模型供应商；Redis outbox/dispatcher 运行腿未执行。 |
+| AC-005/006 / F05/F06 | implemented；回归通过 | 私人和公共 detail 均按逐题 resolution 记录；漏映射显式失败，不视作新题；公共 canonical 只能用当前有效 public resolution 发布。 | 更广的历史数据回填与生产库对账不在本轮执行。 |
+| AC-008/011 / F08/F11 | partial；本轮回归通过 | 聚类子题有 root 检查点，队列领取/释放推进 running/pending，root 聚合等待所有异步子题结果；失败后同 root 可重试。 | extract/classify 的所有故障点、worker 进程强杀与独立 Redis dispatcher 接管仍需单独演练。 |
+| AC-009 / F09 | worker→graph 稳定 thread ID 已接通并回归通过 | Worker 从 attempt 行取 `attempt_no`（不是 attempt 主键），构造 `import_id + attempt_no + job_id`，交给 LangGraph SSE bridge 作为 checkpoint thread ID；分别验证 worker 输入和最终 graph config。 | 老的非上传调用仍保留兼容 fallback；真实 ARQ 崩溃/重启后的持久 checkpoint 接管不在本轮验证范围。 |
+| AC-015 / F15 | implemented；恢复回归通过 | 公共失败子项只恢复失败 detail；即使原 queue 行已 done 也会重开；每次 root-bound 公共重试先创建同 attempt、global scope 的预检，再放行 cluster job。 | 多 root 并发、真实 ARQ 中断恢复仍未跑。 |
+| AC-029 | partial；隔离 HTTP + worker 函数链路通过 | 新增 `test_upload_question_data_flow_worker.py`：实际 `/api/submit-jobs` 接受、上传 worker、逐题标签/私人聚类、管理员审核 HTTP、审核后 global 预检、公共聚类、一题失败、管理员重试与最终公共读取 API；不手填这些中间产物。修复 public projection 丢失输入 `source_ordinal`。 | 聚类/提取 worker 函数由测试直接调用，ARQ/Redis 和浏览器没有启动；完整 AC-029 仍不能标 passed。 |
+| AC-028 | open / not-run | — | 真实隔离 Redis + ARQ worker + 浏览器的联合恢复演练仍未执行。 |
+
+本轮命令和结果：
+
+```bash
+.venv/bin/pytest -q backend/tests/integration/test_upload_question_data_flow_worker.py
+# 1 passed（实际 HTTP 路由 + 真实 worker 函数；模型和 Redis 投递 stubbed）
+
+.venv/bin/pytest -q backend/tests/pipeline/test_upload_graph_recovery_regressions.py \
+  backend/tests/pipeline/test_upload_queue_root_wiring.py \
+  backend/tests/pipeline/test_upload_worker_policy_wiring.py \
+  backend/tests/services/test_public_contribution_recovery.py \
+  backend/tests/pipeline/test_upload_credential_preflight.py
+# 38 passed
+
+.venv/bin/pytest -q backend/tests/pipeline/test_public_personal_scope_contract.py
+# 12 passed
+
+UPLOAD_TEST_DB_PATH=/tmp/iboss-upload-fullstack-20261001-final.db \
+UPLOAD_TEST_REDIS_PREFIX=iboss-upload-20261001-final \
+.venv/bin/pytest -q backend/tests/integration/test_upload_recovery_fullstack.py
+# 2 passed（隔离 SQLite + 真实 preflight/submit worker 函数；没有启动 Redis/ARQ）
+
+.venv/bin/pytest -q backend/tests/integration/test_upload_recovery_fullstack.py \
+  backend/tests/integration/test_upload_question_data_flow_worker.py \
+  backend/tests/pipeline/test_upload_worker_policy_wiring.py \
+  backend/tests/pipeline/test_upload_stage_recovery.py \
+  backend/tests/pipeline/test_upload_graph_recovery_regressions.py \
+  backend/tests/pipeline/test_upload_queue_root_wiring.py \
+  backend/tests/pipeline/test_public_personal_scope_contract.py \
+  backend/tests/services/test_public_contribution_recovery.py \
+  backend/tests/pipeline/test_upload_credential_preflight.py \
+  backend/tests/services/test_llm_thinking.py \
+  backend/tests/services/test_llm_formats_http.py
+# 91 passed（隔离 SQLite；真实模型网络与 Redis/ARQ 投递 stubbed）
+
+.venv/bin/pytest -q \
+  backend/tests/services/test_llm_thinking.py::test_tools_loop_honors_global_credential_scope \
+  backend/tests/pipeline/test_upload_worker_policy_wiring.py::test_worker_passes_root_policy_share_review_and_aggregates \
+  backend/tests/pipeline/test_upload_stage_recovery.py::test_submit_graph_uses_worker_thread_id
+# 3 passed（稳定 thread_id 从 worker 贯穿 graph；global 工具调用选择系统 scope）
+
+# Ruff 对本轮所有变更的 Python 文件：All checks passed
+
+.venv/bin/pytest -q backend/tests/pipeline backend/tests/security backend/tests/infra
+# 858 passed, 5 skipped, 1 failed；唯一失败为既有部署脚本契约：
+# test_cleanup_supports_dry_run_and_aggressive 期待 DEPLOY_PRUNE_HOST_ARTIFACTS，
+# 当前 deploy/docker-deploy.sh 不含该项，两个文件均未在本轮修改。
+```
+
+这些结果证明上述测试范围内的路由、持久化、凭据 scope 与 worker/graph 函数行为；它们没有启动 Redis/ARQ 或浏览器，不能替代 AC-028/完整 AC-029。大范围回归的单个部署脚本断言失败与本次上传链路变更无关，不能记作本轮全绿。
 
 ## 3. 阶段证据（历史开发记录，当前关闭状态见 §2）
 

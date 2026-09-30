@@ -171,8 +171,6 @@ def test_legacy_wrapper_still_commits_and_maps_duplicate_url():
     conn = _db()
     from app.db.operations import get_db_connection  # noqa: F401  # 保持旧入口可用
 
-    import app.db.operations as ops
-
     answer_tasks, interview_id, detail_ids = _submit_in_conn(conn)
     conn.commit()
     assert conn.execute("SELECT COUNT(*) FROM interview").fetchone()[0] == 1
@@ -193,3 +191,31 @@ def test_thread_id_is_scoped_to_import_attempt_and_job():
     assert build_thread_id("imp-A", 1, 11) != a
     # 不依赖秒级时间戳：同一毫秒调用结果稳定
     assert build_thread_id("imp-A", 1, 10) == a
+
+
+async def test_submit_graph_uses_worker_thread_id(monkeypatch):
+    """实际 SSE/graph 桥接必须用 worker 提供的稳定 thread_id。"""
+    from types import SimpleNamespace
+
+    import app.agents.submit.graph as graph_module
+
+    observed = {}
+
+    class _Graph:
+        async def ainvoke(self, state, *, config):
+            observed["input"] = state
+            observed["thread_id"] = config["configurable"]["thread_id"]
+
+        async def aget_state(self, config):
+            return SimpleNamespace(
+                values={"doc_type": "interview", "target": "personal", "extracted_data": {}}
+            )
+
+    monkeypatch.setattr(graph_module, "submit_graph", _Graph())
+
+    async for _event in graph_module.stream_submit_graph(
+        {"user_id": 101, "thread_id": "imp-1:a7:j42"}
+    ):
+        pass
+
+    assert observed["thread_id"] == "imp-1:a7:j42"

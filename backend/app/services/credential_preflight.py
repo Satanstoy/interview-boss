@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from uuid import uuid4
 
 logger = logging.getLogger("interview-boss")
 
@@ -47,12 +48,14 @@ def create_credential_preflight_job(
     user_id: int | None,
     attempt_id: int | None,
 ) -> int:
-    """在调用方事务内为 root 创建预检 job（幂等；同 root 只有一个在途）。"""
+    """在调用方事务内为 root/scope 创建幂等预检 job（每个 scope 最多一个在途）。"""
 
     existing = conn.execute(
-        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = ? "
-        "AND status IN ('pending', 'queued', 'running') ORDER BY id LIMIT 1",
-        (root_import_id, PREFLIGHT_JOB_TYPE),
+        "SELECT j.id FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = ? "
+        "AND j.status IN ('pending', 'queued', 'running') "
+        "AND json_extract(p.payload, '$.credential_scope') = ? ORDER BY j.id LIMIT 1",
+        (root_import_id, PREFLIGHT_JOB_TYPE, credential_scope),
     ).fetchone()
     if existing:
         return int(existing["id"])
@@ -66,13 +69,14 @@ def create_credential_preflight_job(
     cursor = conn.execute(
         "INSERT INTO jobs (job_type, status, progress_total, created_by, "
         "root_import_id, upload_attempt_id, work_key, idempotency_key) "
-        "VALUES (?, 'pending', 1, ?, ?, ?, 'preflight:credential:v1', ?)",
+        "VALUES (?, 'pending', 1, ?, ?, ?, ?, ?)",
         (
             PREFLIGHT_JOB_TYPE,
             requester_id,
             root_import_id,
             attempt_id,
-            f"preflight:{root_import_id}:{credential_scope}:{attempt_id or 0}",
+            f"preflight:credential:v1:{credential_scope}",
+            f"preflight:{root_import_id}:{credential_scope}:{attempt_id or 0}:{uuid4().hex}",
         ),
     )
     job_id = int(cursor.lastrowid)
@@ -124,6 +128,11 @@ def run_credential_preflight(
     root_import_id = payload.get("root_import_id")
     credential_scope = payload.get("credential_scope", "user")
     user_id = payload.get("user_id")
+    upload_attempt_id = job["upload_attempt_id"]
+    preflight_unit = (
+        f"credential:v1:scope:{credential_scope}:attempt:{int(upload_attempt_id or 0)}:"
+        f"job:{int(job_id)}:run:{int(job['attempts'] or 0)}"
+    )
 
     # 解析凭据：与提取阶段同规则（绝不跨 scope 回退；scope 只来自服务端 policy）
     try:
@@ -136,7 +145,14 @@ def run_credential_preflight(
         )
     except UploadCredentialError as exc:
         error_code = exc.code
-        _mark_blocked(conn, root_import_id, job_id, error_code, str(exc))
+        _mark_blocked(
+            conn,
+            root_import_id,
+            job_id,
+            error_code,
+            str(exc),
+            unit_key=preflight_unit,
+        )
         return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
 
     probe_fn = probe or _default_probe
@@ -147,7 +163,6 @@ def run_credential_preflight(
         complete_llm_call,
         reserve_llm_call,
     )
-    from app.services.job_lifecycle import default_worker_id
 
     call_key = (
         f"preflight:{root_import_id or job_id}:{credential_scope}:"
@@ -159,7 +174,7 @@ def run_credential_preflight(
             conn,
             root_import_id=root_import_id,
             stage=PREFLIGHT_STAGE,
-            unit_key=f"initial:{credential_scope}",
+            unit_key=f"initial:{credential_scope}:attempt:{int(upload_attempt_id or 0)}",
             call_key=call_key,
             credential_scope=credential_scope,
             payer_type=payer_type,
@@ -182,14 +197,16 @@ def run_credential_preflight(
                 conn,
                 import_id=root_import_id,
                 stage=PREFLIGHT_STAGE,
-                unit_key="credential:v1",
+                unit_key=preflight_unit,
                 input_version=1,
                 pipeline_version=PREFLIGHT_PIPELINE_VERSION,
                 status="succeeded",
                 result_json=_json_dumps(
                     {
                         "provider": result.get("provider", credential.provider),
-                        "model": credential.model,
+                        "model": result.get("model") or credential.model,
+                        "api_format": result.get("api_format") or credential.api_format,
+                        "credential_scope": credential_scope,
                         "config_fingerprint": credential.config_fingerprint,
                         "latency_ms": latency,
                     }
@@ -201,8 +218,8 @@ def run_credential_preflight(
                     conn,
                     call_key=call_key,
                     status="succeeded",
-                    input_tokens=0,
-                    output_tokens=0,
+                    input_tokens=int(result.get("input_tokens") or 0),
+                    output_tokens=int(result.get("output_tokens") or 0),
                 )
             except Exception as exc:
                 logger.warning("预检记账完成失败（不阻断）: %s", exc)
@@ -243,11 +260,26 @@ def run_credential_preflight(
             )
         except Exception as ledger_exc:
             logger.warning("预检失败记账完成失败（不阻断）: %s", ledger_exc)
-        _mark_blocked(conn, root_import_id, job_id, error_code, str(exc))
+        _mark_blocked(
+            conn,
+            root_import_id,
+            job_id,
+            error_code,
+            str(exc),
+            unit_key=preflight_unit,
+        )
         return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
 
 
-def _mark_blocked(conn, root_import_id: str, job_id: int, error_code: str, message: str):
+def _mark_blocked(
+    conn,
+    root_import_id: str,
+    job_id: int,
+    error_code: str,
+    message: str,
+    *,
+    unit_key: str = "credential:v1",
+):
     """预检失败：记录 failed 阶段结果 + 根 needs_action + job 终态失败。"""
 
     from app.services.upload_repository import save_stage_result
@@ -257,7 +289,7 @@ def _mark_blocked(conn, root_import_id: str, job_id: int, error_code: str, messa
             conn,
             import_id=root_import_id,
             stage=PREFLIGHT_STAGE,
-            unit_key="credential:v1",
+            unit_key=unit_key,
             input_version=1,
             pipeline_version=PREFLIGHT_PIPELINE_VERSION,
             status="failed",
@@ -278,28 +310,92 @@ def _mark_blocked(conn, root_import_id: str, job_id: int, error_code: str, messa
 
 
 def _default_probe(credential):
-    """真实 provider ping：用解析出的凭据做最小模型调用（可被测试 stub 替换）。"""
+    """真实 provider ping：调用用户选择的模型，而非仅查询模型列表。"""
 
     from app.services.llm import build_bare_client
 
-    client = build_bare_client(
-        api_key=credential.api_key,
-        base_url=credential.base_url,
-        timeout=credential.timeout or 15,
-    )
+    import asyncio
+
     started = _monotonic()
+
+    async def _ping():
+        from app.services.llm_protocol import _is_endpoint_mismatch
+
+        client = build_bare_client(
+            api_key=credential.api_key,
+            base_url=credential.base_url,
+            timeout=credential.timeout or 15,
+            provider=credential.provider,
+            api_format=credential.api_format,
+        )
+        try:
+            if credential.api_format:
+                formats = [credential.api_format]
+            elif credential.provider == "anthropic":
+                formats = ["anthropic"]
+            else:
+                # Auto-configured OpenAI-compatible providers are tried with
+                # the two supported wire protocols. Only a clear route/protocol
+                # mismatch falls through; auth/model/timeout errors stay fatal.
+                formats = ["chat", "responses"]
+
+            response = None
+            selected_format = None
+            for index, api_format in enumerate(formats):
+                try:
+                    if api_format == "anthropic":
+                        response = await client.messages.create(
+                            model=credential.model,
+                            max_tokens=1,
+                            messages=[{"role": "user", "content": "ping"}],
+                        )
+                    elif api_format == "responses":
+                        response = await client.responses.create(
+                            model=credential.model,
+                            input="ping",
+                            max_output_tokens=1,
+                        )
+                    else:
+                        response = await client.chat.completions.create(
+                            model=credential.model,
+                            messages=[{"role": "user", "content": "ping"}],
+                            max_tokens=1,
+                        )
+                    selected_format = api_format
+                    break
+                except Exception as exc:
+                    if index + 1 < len(formats) and _is_endpoint_mismatch(exc):
+                        continue
+                    raise
+
+            usage = getattr(response, "usage", None)
+            if selected_format == "anthropic":
+                input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            elif selected_format == "responses":
+                input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            else:
+                input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            return {
+                "status": "ok",
+                "latency_ms": int((_monotonic() - started) * 1000),
+                "provider": credential.provider,
+                "model": credential.model,
+                "api_format": selected_format,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "fingerprint": credential.config_fingerprint,
+            }
+        finally:
+            close = getattr(client, "close", None)
+            if close is not None:
+                await close()
+
     try:
-        # 最小探测：请求 models 列表（无需 token 消耗，仍能验证 401/404/连通）
-        response = client.models.list()
-        names = [getattr(m, "id", "") for m in getattr(response, "data", [])][:1]
-        model = names[0] if names else credential.model
-        return {
-            "status": "ok",
-            "latency_ms": int((_monotonic() - started) * 1000),
-            "provider": credential.provider,
-            "model": model,
-            "fingerprint": credential.config_fingerprint,
-        }
+        # Worker 调用本同步边界时已在 asyncio.to_thread 中，故可安全建 event loop。
+        return asyncio.run(_ping())
     except Exception as exc:
         raise RuntimeError(f"{exc}") from exc
 

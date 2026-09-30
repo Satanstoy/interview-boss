@@ -14,6 +14,7 @@ R06：补单 job 复用已注册可执行的 ``cluster_batch`` 类型（不新�
 from __future__ import annotations
 
 import logging
+import json
 
 from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
 
@@ -36,6 +37,7 @@ def collect_pending_buckets(conn) -> list[dict]:
                q.owner_id AS owner_id,
                COALESCE(i.job_position, '') AS job_position,
                COUNT(*) AS pending_count,
+               MAX(CASE WHEN q.contribution_request_id IS NOT NULL THEN 1 ELSE 0 END) AS has_contribution,
                MIN(q.created_at) AS available_at
         FROM analysis_queue q
         JOIN interview i ON i.id = q.interview_id
@@ -61,6 +63,7 @@ def collect_pending_buckets(conn) -> list[dict]:
                 "scope_key": key,
                 "work_key": f"cluster:{key}:v1",
                 "pending_count": int(row["pending_count"]),
+                "has_contribution": bool(row["has_contribution"]),
                 "available_at": row["available_at"],
             }
         )
@@ -95,18 +98,62 @@ def ensure_bucket_job(conn, *, bucket: dict, created_by=None) -> dict:
     if active is not None:
         return {"created": False, "job_id": int(active["id"])}
 
+    root = conn.execute(
+        "SELECT requester_id, policy_json FROM upload_imports WHERE id = ?",
+        (bucket["root_import_id"],),
+    ).fetchone()
+    attempt = conn.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ? ORDER BY attempt_no DESC LIMIT 1",
+        (bucket["root_import_id"],),
+    ).fetchone()
+    policy = {}
+    if root:
+        try:
+            policy = json.loads(root["policy_json"] or "{}")
+        except (json.JSONDecodeError, TypeError):
+            policy = {}
+    if bucket.get("owner_id") is not None:
+        credential_scope = "user"
+        user_id = int(bucket["owner_id"])
+    elif bucket.get("has_contribution"):
+        credential_scope = policy.get("post_approval_credential_scope") or "global"
+        user_id = int(root["requester_id"]) if credential_scope == "user" and root else None
+    else:
+        credential_scope = policy.get("credential_scope") or "global"
+        user_id = int(root["requester_id"]) if credential_scope == "user" and root else None
+
     cursor = conn.execute(
-        "INSERT INTO jobs (job_type, status, created_by, root_import_id, work_key, "
-        "progress_message) VALUES (?, 'pending', ?, ?, ?, ?)",
+        "INSERT INTO jobs (job_type, status, created_by, root_import_id, upload_attempt_id, "
+        "work_key, progress_total, progress_message) "
+        "VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)",
         (
             CLUSTER_BATCH_JOB_TYPE,
             created_by,
             bucket["root_import_id"],
+            int(attempt["id"]) if attempt else None,
             bucket["work_key"],
+            int(bucket.get("pending_count") or 1),
             f"队列补单: {bucket['scope_key']} ({bucket['pending_count']} 题)",
         ),
     )
-    return {"created": True, "job_id": int(cursor.lastrowid)}
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (
+            job_id,
+            json.dumps(
+                {
+                    "user_id": user_id,
+                    "actor_id": created_by,
+                    "root_import_id": bucket["root_import_id"],
+                    "owner_id": bucket.get("owner_id"),
+                    "credential_scope": credential_scope,
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    )
+    return {"created": True, "job_id": job_id}
 
 
 def mark_orphan_rows_blocked(conn) -> int:

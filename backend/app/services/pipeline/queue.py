@@ -24,6 +24,7 @@ def enqueue_questions(
     contribution_request_id: int | None = None,
     conn=None,
     root_import_id: str | None = None,
+    retry_existing: bool = False,
 ) -> int:
     """将指定面经明细加入分析队列，返回本次新建的队列记录数。
 
@@ -34,6 +35,8 @@ def enqueue_questions(
         contribution_request_id: 可选的公共化申请追踪 ID。
         root_import_id: 可选的上传根任务（R06：v2 明细已带 import_id 时
             自动回填；真实上传产生的队列行必须写 root，才能被对账补单）。
+        retry_existing: 仅用于显式重试已失败的明细；把同一来源已有的 done/failed
+            队列行重新置为 pending，普通重复入队仍保持幂等。
     """
     owns_connection = conn is None
     conn = conn or get_db_connection()
@@ -77,6 +80,21 @@ def enqueue_questions(
             ).fetchone()
             if linked and linked["import_id"]:
                 root_import_id = str(linked["import_id"])
+    if root_import_id is None and contribution_request_id is not None:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "upload_imports" in tables:
+            linked_root = conn.execute(
+                "SELECT id FROM upload_imports WHERE contribution_request_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (contribution_request_id,),
+            ).fetchone()
+            if linked_root:
+                root_import_id = str(linked_root["id"])
     count = 0
     queue_columns = {
         row[1]
@@ -84,6 +102,24 @@ def enqueue_questions(
     }
     has_root_column = "root_import_id" in queue_columns
     has_contribution_column = "contribution_request_id" in queue_columns
+    detail_ids = [int(row[0]) for row in rows]
+    if retry_existing and detail_ids:
+        placeholders = ",".join("?" * len(detail_ids))
+        owner_clause = "owner_id IS NULL" if owner_id is None else "owner_id = ?"
+        retry_params = [interview_id, *detail_ids]
+        if owner_id is not None:
+            retry_params.append(owner_id)
+        contribution_clause = ""
+        if contribution_request_id is not None and has_contribution_column:
+            contribution_clause = " AND contribution_request_id = ?"
+            retry_params.append(contribution_request_id)
+        conn.execute(
+            "UPDATE analysis_queue SET status = 'pending', processed_at = NULL, "
+            "locked_until = NULL WHERE interview_id = ? "
+            f"AND question_detail_id IN ({placeholders}) AND {owner_clause} "
+            "AND status IN ('done','failed')" + contribution_clause,
+            retry_params,
+        )
     for r in rows:
         if has_root_column:
             if has_contribution_column:
@@ -115,6 +151,24 @@ def enqueue_questions(
                 (interview_id, r[0], owner_id),
             )
         count += max(0, cursor.rowcount)
+        if root_import_id and has_root_column:
+            detail_id = int(r[0])
+            conn.execute(
+                "INSERT INTO upload_stage_results (import_id, stage, unit_key, "
+                "input_version, pipeline_version, status) "
+                "VALUES (?, 'cluster', ?, 1, 'upload-pipeline-v1', 'pending') "
+                "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+                "status = CASE WHEN upload_stage_results.status IN ('failed','needs_action') "
+                "THEN 'pending' ELSE upload_stage_results.status END, "
+                "error_code = CASE WHEN upload_stage_results.status IN ('failed','needs_action') "
+                "THEN NULL ELSE upload_stage_results.error_code END, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (root_import_id, f"detail:{detail_id}"),
+            )
+    if root_import_id:
+        from app.services.upload_lifecycle import refresh_completed_upload_roots
+
+        refresh_completed_upload_roots(conn, [root_import_id])
     if owns_connection:
         conn.commit()
     return count
@@ -141,14 +195,27 @@ def _recover_stuck_processing():
     # contracts §2.5：processing 行按租约回收（locked_until 过期）；
     # 兼容旧数据：locked_until IS NULL 的“老式 processing 行”按 created_at
     # 超时兜底回收（不无限悬挂）。created_at 早但租约仍有效的行绝不误伤。
-    conn.execute(
+    queue_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
+    returning = "root_import_id, question_detail_id" if "root_import_id" in queue_columns else "NULL AS root_import_id, question_detail_id"
+    recovered = conn.execute(
         "UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
         "WHERE status = 'processing' AND ("
         "  (locked_until IS NOT NULL AND locked_until < CURRENT_TIMESTAMP) "
         "  OR (locked_until IS NULL AND created_at < datetime('now', ?))"
-        ")",
+        f") RETURNING {returning}",
         (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",),
-    )
+    ).fetchall()
+    for row in recovered:
+        if row["root_import_id"]:
+            conn.execute(
+                "UPDATE upload_stage_results SET status = 'pending', "
+                "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
+                "AND stage = 'cluster' AND unit_key = ? AND status = 'running'",
+                (row["root_import_id"], f"detail:{row['question_detail_id']}"),
+            )
     conn.commit()
 
 
@@ -161,7 +228,11 @@ def should_trigger_clustering(batch_size: int = BATCH_SIZE) -> bool:
     return processing == 0 and pending > 0
 
 
-def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dict]:
+def dequeue_batch(
+    batch_size: int = BATCH_SIZE,
+    owner_id=_ANY_OWNER,
+    root_import_id: str | None = None,
+) -> List[Dict]:
     """原子取出一批 pending 任务并标记为 processing（防并发重复取出）。
 
     Returns items from a single owner_id bucket (NULL for public, or a specific
@@ -180,6 +251,19 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
         if "contribution_request_id" in queue_columns
         else "NULL AS contribution_request_id"
     )
+    root_returning = (
+        "root_import_id" if "root_import_id" in queue_columns else "NULL AS root_import_id"
+    )
+    if root_import_id is not None and "root_import_id" not in queue_columns:
+        return []
+    root_filter = ""
+    root_params = []
+    if "root_import_id" in queue_columns:
+        if root_import_id is None:
+            root_filter = " AND aq.root_import_id IS NULL"
+        else:
+            root_filter = " AND aq.root_import_id = ?"
+            root_params.append(str(root_import_id))
     cursor.execute("BEGIN")
     try:
         # Pick the owner_id bucket with the most pending items.
@@ -195,6 +279,8 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
         if owner_id is not _ANY_OWNER:
             bucket_sql += " AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL))"
             bucket_params.extend([owner_id, owner_id])
+        bucket_sql += root_filter
+        bucket_params.extend(root_params)
         bucket_sql += " GROUP BY aq.owner_id ORDER BY cnt DESC LIMIT 1"
         bucket = cursor.execute(bucket_sql, bucket_params).fetchone()
         if not bucket:
@@ -202,10 +288,19 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
             return []
         target_owner = bucket["owner_id"]
 
+        dequeue_params = [
+            f"+{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",
+            target_owner,
+            target_owner,
+        ]
+        update_root_filter = root_filter
+        if root_import_id is not None:
+            dequeue_params.append(str(root_import_id))
+        dequeue_params.append(batch_size)
         rows = cursor.execute(
             "UPDATE analysis_queue SET status = 'processing', processed_at = CURRENT_TIMESTAMP, "
             "locked_until = datetime('now', ?) "
-            f"WHERE id IN ("
+            "WHERE id IN ("
             "  SELECT aq.id FROM analysis_queue aq "
             "  JOIN interview i ON aq.interview_id = i.id "
             "  JOIN questions_detail qd ON aq.question_detail_id = qd.id "
@@ -213,11 +308,22 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
             "  AND i.status = 'approved' AND qd.deleted_at IS NULL "
             "  AND (i.owner_id = aq.owner_id OR (i.owner_id IS NULL AND aq.owner_id IS NULL)) "
             "  AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL)) "
+            + update_root_filter + " "
             "  ORDER BY aq.id LIMIT ?"
             ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id, "
-            + contribution_returning,
-            (f"+{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes", target_owner, target_owner, batch_size),
+            + contribution_returning
+            + ", "
+            + root_returning,
+            dequeue_params,
         ).fetchall()
+        for row in rows:
+            if row["root_import_id"]:
+                cursor.execute(
+                    "UPDATE upload_stage_results SET status = 'running', "
+                    "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
+                    "AND stage = 'cluster' AND unit_key = ? AND status = 'pending'",
+                    (row["root_import_id"], f"detail:{row['qd_id']}"),
+                )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -246,6 +352,7 @@ def dequeue_batch(batch_size: int = BATCH_SIZE, owner_id=_ANY_OWNER) -> List[Dic
             d["qd_id"] = r["qd_id"]
             d["owner_id"] = batch_owner_id
             d["contribution_request_id"] = r["contribution_request_id"]
+            d["root_import_id"] = r["root_import_id"]
             result.append(d)
     return result
 
@@ -256,7 +363,8 @@ def mark_batch_done(queue_ids: List[int]):
     conn = get_db_connection()
     placeholders = ",".join("?" * len(queue_ids))
     conn.execute(
-        f"UPDATE analysis_queue SET status = 'done', processed_at = CURRENT_TIMESTAMP "
+        f"UPDATE analysis_queue SET status = 'done', processed_at = CURRENT_TIMESTAMP, "
+        f"locked_until = NULL "
         f"WHERE id IN ({placeholders})",
         queue_ids,
     )
@@ -268,10 +376,31 @@ def mark_batch_failed(queue_ids: List[int]):
         return
     conn = get_db_connection()
     placeholders = ",".join("?" * len(queue_ids))
+    queue_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
+    roots = (
+        conn.execute(
+            f"SELECT root_import_id, question_detail_id FROM analysis_queue "
+            f"WHERE id IN ({placeholders})",
+            queue_ids,
+        ).fetchall()
+        if "root_import_id" in queue_columns
+        else []
+    )
     conn.execute(
-        f"UPDATE analysis_queue SET status = 'pending' WHERE id IN ({placeholders})",
+        f"UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
+        f"WHERE id IN ({placeholders})",
         queue_ids,
     )
+    for row in roots:
+        if row["root_import_id"]:
+            conn.execute(
+                "UPDATE upload_stage_results SET status = 'pending', "
+                "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
+                "AND stage = 'cluster' AND unit_key = ? AND status = 'running'",
+                (row["root_import_id"], f"detail:{row['question_detail_id']}"),
+            )
     conn.commit()
 
 
@@ -283,13 +412,65 @@ def mark_batch_failed(queue_ids: List[int]):
 # 可用环境变量 CLUSTER_DELAY_SECONDS 覆盖。
 CLUSTER_DELAY_SECONDS = int(os.environ.get("CLUSTER_DELAY_SECONDS", "300"))
 
-async def _run_cluster_batch_in_background(user_id: int = None) -> bool:
+async def _run_cluster_batch_in_background(
+    user_id: int = None, root_import_id: str | None = None
+) -> bool:
     """创建一个持久化攒批 Job，返回是否新建了任务。
 
     pending 不足一批时使用 ``available_at`` 保留攒批窗口；达到阈值则
     立即尝试入队。即使 Redis 或 Web 进程随后不可用，dispatcher 仍会
     根据 jobs 表接管 pending 任务。
     """
+    if root_import_id:
+        def _create_root_jobs():
+            conn = get_db_connection()
+            try:
+                from app.services.upload_queue import collect_pending_buckets, ensure_bucket_job
+
+                created = []
+                for bucket in collect_pending_buckets(conn):
+                    if str(bucket["root_import_id"]) != str(root_import_id):
+                        continue
+                    result = ensure_bucket_job(conn, bucket=bucket, created_by=user_id)
+                    if result.get("job_id"):
+                        state = conn.execute(
+                            "SELECT status FROM jobs WHERE id = ?", (result["job_id"],)
+                        ).fetchone()
+                        if state and state["status"] == "pending":
+                            created.append(int(result["job_id"]))
+                conn.commit()
+                return created
+            except Exception:
+                conn.rollback()
+                raise
+
+        job_ids = _create_root_jobs()
+        if not job_ids:
+            return False
+        from app.services.job_lifecycle import mark_job_dispatched
+        from app.worker import enqueue_cluster_batch_job
+
+        scheduled = False
+        for job_id in job_ids:
+            try:
+                arq_job = await enqueue_cluster_batch_job(job_id)
+                arq_job_id = getattr(arq_job, "job_id", None)
+                if not arq_job_id:
+                    raise RuntimeError("ARQ 未返回 job_id")
+                conn = get_db_connection()
+                if not mark_job_dispatched(conn, job_id, str(arq_job_id)):
+                    raise RuntimeError(f"聚类任务不可再投递: job_id={job_id}")
+                conn.commit()
+                scheduled = True
+            except Exception as exc:
+                logger.warning(
+                    "root 聚类任务保留在 outbox 等待 dispatcher: root=%s job=%s error=%s",
+                    root_import_id,
+                    job_id,
+                    exc,
+                )
+        return scheduled or bool(job_ids)
+
     def _create():
         conn = get_db_connection()
         try:

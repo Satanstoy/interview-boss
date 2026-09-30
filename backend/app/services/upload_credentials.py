@@ -176,7 +176,17 @@ def resolve_upload_credentials(
             message="模型配置不完整，请补充后继续",
         )
 
-    provider = str(cfg.get("provider") or cfg.get("api_format") or "openai")
+    api_format = str(cfg.get("api_format") or "").strip().lower()
+    if api_format == "auto":
+        api_format = ""
+    provider = str(cfg.get("provider") or "").strip().lower()
+    if not provider:
+        if api_format == "anthropic":
+            provider = "anthropic"
+        else:
+            from app.services.llm_protocol import _detect_provider
+
+            provider = _detect_provider(base_url)
     return ResolvedCredential(
         scope=credential_scope,
         payer_type=payer_type,
@@ -186,7 +196,7 @@ def resolve_upload_credentials(
         provider=provider,
         config_fingerprint=_fingerprint(cfg, provider),
         timeout=int(cfg.get("timeout") or 60),
-        api_format=cfg.get("api_format"),
+        api_format=api_format or None,
         api_key=api_key,
     )
 

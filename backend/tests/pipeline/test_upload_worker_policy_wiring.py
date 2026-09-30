@@ -15,6 +15,16 @@ import pytest
 from app.agents.shared.events import format_sse, make_done_event
 
 
+@pytest.fixture(autouse=True)
+def _stable_upload_preflight_config(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.upload_credentials.resolve_upload_credentials",
+        lambda **_kwargs: SimpleNamespace(config_fingerprint="test-fingerprint"),
+    )
+
+
 def _seed_root(test_db, *, target_intent="private", actor_id=101, is_admin=0):
     test_db.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
@@ -48,8 +58,8 @@ def _seed_root(test_db, *, target_intent="private", actor_id=101, is_admin=0):
         (job_id, json.dumps({"raw_text": "面经", "user_id": actor_id, "target": "private"})),
     )
     test_db.execute(
-        "INSERT INTO upload_attempts (import_id, attempt_no, status, requested_by) "
-        "VALUES ('imp-1', 1, 'active', ?)",
+        "INSERT INTO upload_attempts (id, import_id, attempt_no, status, requested_by) "
+        "VALUES (77, 'imp-1', 1, 'active', ?)",
         (actor_id,),
     )
     attempt_id = test_db.execute(
@@ -57,6 +67,34 @@ def _seed_root(test_db, *, target_intent="private", actor_id=101, is_admin=0):
     ).fetchone()["id"]
     test_db.execute(
         "UPDATE jobs SET upload_attempt_id = ? WHERE id = ?", (attempt_id, job_id)
+    )
+    preflight_job_id = test_db.execute(
+        "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+        "root_import_id, upload_attempt_id, work_key) "
+        "VALUES ('credential_preflight', 'completed', 1, ?, 'imp-1', ?, "
+        "'preflight:credential:v1') RETURNING id",
+        (actor_id, attempt_id),
+    ).fetchone()["id"]
+    test_db.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (
+            preflight_job_id,
+            json.dumps(
+                {
+                    "root_import_id": "imp-1",
+                    "requester_id": actor_id,
+                    "credential_scope": "user",
+                    "user_id": actor_id,
+                }
+            ),
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status, result_json, job_id) "
+        "VALUES ('imp-1', 'preflight', 'credential:v1:scope:user:attempt:1:run:1', 1, "
+        "'upload-pipeline-v1', 'succeeded', '{\"config_fingerprint\":\"test-fingerprint\",\"model\":\"test-model\"}', ?)",
+        (preflight_job_id,),
     )
     test_db.commit()
     return job_id, attempt_id
@@ -109,7 +147,7 @@ async def test_worker_passes_root_policy_share_review_and_aggregates(
 
     from app.worker import submit_import_task
 
-    job_id, _ = _seed_root(test_db, target_intent="share", actor_id=101)
+    job_id, attempt_id = _seed_root(test_db, target_intent="share", actor_id=101)
 
     async def _no_dispatch(*args, **kwargs):
         return type("J", (), {"job_id": "arq-1"})()
@@ -121,6 +159,10 @@ async def test_worker_passes_root_policy_share_review_and_aggregates(
     assert _fake_graph.last_input["request_public_review"] is True
     assert "import_id" in _fake_graph.last_input
     assert "credential_scope" in _fake_graph.last_input
+    from app.services.upload_lifecycle import build_thread_id
+
+    assert attempt_id != 1, "test separates the attempt row ID from attempt_no"
+    assert _fake_graph.last_input["thread_id"] == build_thread_id("imp-1", 1, job_id)
 
     # R04：根状态推进（非完成态至少 revision 增加/不再停在 queued）
     root = test_db.execute(

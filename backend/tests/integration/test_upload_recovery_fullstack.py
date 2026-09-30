@@ -81,6 +81,10 @@ def isolated_stack(monkeypatch, tmp_path):
             "VALUES (?, ?, 'x', ?)",
             (uid, f"u{uid}", 1 if uid == 201 else 0),
         )
+    conn.execute(
+        "INSERT OR REPLACE INTO user_llm_config (user_id, api_key, base_url, model) "
+        "VALUES (101, 'k', 'https://u.example.com/v1', 'm')"
+    )
     conn.commit()
 
     token = db_module._db_conn_var.set(conn)
@@ -163,13 +167,6 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
         position_id=1,
         position_name="后端",
         job_position="后端",
-        credential_loaders={
-            "user": lambda uid: {
-                "api_key": "k",
-                "base_url": "https://u.example.com/v1",
-                "model": "m",
-            }
-        },
     )
     conn.commit()
     import_id = accepted["import_id"]
@@ -195,12 +192,6 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
             "status": "ok",
             "latency_ms": 1,
             "provider": cred.provider,
-        },
-        user_config_loader=lambda uid: {
-            "api_key": "k",
-            "base_url": "https://u.example.com/v1",
-            "model": "m",
-            "timeout": 30,
         },
     )
     conn.commit()
@@ -316,7 +307,6 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
     from contextlib import ExitStack
 
     from app.services.upload_lifecycle import accept_upload, restore_upload
-    from app.services.job_lifecycle import default_worker_id
     from app.worker import submit_import_task
 
     conn = isolated_stack
@@ -330,17 +320,31 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
         position_id=1,
         position_name="后端",
         job_position="后端",
-        credential_loaders={
-            "user": lambda uid: {
-                "api_key": "k",
-                "base_url": "https://u.example.com/v1",
-                "model": "m",
-                "timeout": 30,
-            }
-        },
     )
     conn.commit()
     import_id = accepted["import_id"]
+
+    # The real worker now enforces the durable preflight contract before
+    # claiming this task. Run the same preflight worker against the persisted
+    # user config seeded by the isolated_stack fixture.
+    from app.services.credential_preflight import run_credential_preflight
+
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+        (import_id,),
+    ).fetchone()
+    assert preflight is not None
+    outcome = run_credential_preflight(
+        conn,
+        job_id=preflight["id"],
+        probe=lambda cred: {
+            "status": "ok",
+            "latency_ms": 1,
+            "provider": cred.provider,
+        },
+    )
+    conn.commit()
+    assert outcome.status == "ok"
 
     def _patcher_with_counter(counter):
         return [

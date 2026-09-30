@@ -197,7 +197,6 @@ async def _schedule_cluster_answer_jobs(
     ids = sorted({int(item) for item in (question_bank_ids or [])})
     if not ids:
         return []
-
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import create_answer_generation_jobs
 
@@ -241,6 +240,92 @@ async def _schedule_cluster_answer_jobs(
         return []
 
 
+async def _cluster_preflight_ready(job_id: int) -> bool:
+    """Do not claim root-bound clustering until its exact model config is probed."""
+
+    from app.db.connection import get_db_connection
+
+    def _check():
+        import json
+
+        from app.services.credential_preflight import create_credential_preflight_job
+        from app.services.job_lifecycle import (
+            defer_job_for_upload_preflight,
+            get_successful_upload_preflight,
+        )
+        from app.services.upload_credentials import resolve_upload_credentials
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT j.root_import_id, j.upload_attempt_id, r.requester_id, "
+                "r.status AS root_status, r.policy_json, p.payload AS job_payload "
+                "FROM jobs j LEFT JOIN upload_imports r ON r.id = j.root_import_id "
+                "LEFT JOIN job_payloads p ON p.job_id = j.id WHERE j.id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None or not row["root_import_id"]:
+                return True
+            try:
+                payload = json.loads(row["job_payload"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            try:
+                policy = json.loads(row["policy_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                policy = {}
+            credential_scope = payload.get("credential_scope")
+            user_id = payload.get("user_id")
+            if credential_scope not in ("user", "global"):
+                queue_row = conn.execute(
+                    "SELECT owner_id, contribution_request_id FROM analysis_queue "
+                    "WHERE root_import_id = ? AND status = 'pending' ORDER BY id LIMIT 1",
+                    (row["root_import_id"],),
+                ).fetchone()
+                if queue_row and queue_row["owner_id"] is not None:
+                    credential_scope = "user"
+                    user_id = int(queue_row["owner_id"])
+                elif queue_row and queue_row["contribution_request_id"] is not None:
+                    credential_scope = policy.get("post_approval_credential_scope") or "global"
+                    user_id = int(row["requester_id"]) if credential_scope == "user" else None
+                else:
+                    credential_scope = policy.get("credential_scope") or "global"
+                    user_id = int(row["requester_id"]) if credential_scope == "user" else None
+
+            preflight = get_successful_upload_preflight(
+                conn,
+                root_import_id=str(row["root_import_id"]),
+                attempt_id=row["upload_attempt_id"],
+                credential_scope=credential_scope,
+            )
+            if preflight:
+                try:
+                    current = resolve_upload_credentials(
+                        credential_scope=credential_scope,
+                        user_id=int(user_id) if user_id is not None and credential_scope == "user" else None,
+                        stage="cluster",
+                    )
+                    result = json.loads(preflight["result_json"] or "{}")
+                except Exception:
+                    current = None
+                    result = {}
+                if current and result.get("config_fingerprint") == current.config_fingerprint:
+                    return True
+
+            create_credential_preflight_job(
+                conn,
+                root_import_id=str(row["root_import_id"]),
+                requester_id=int(row["requester_id"]),
+                credential_scope=credential_scope,
+                user_id=int(user_id) if user_id is not None and credential_scope == "user" else None,
+                attempt_id=row["upload_attempt_id"],
+            )
+            defer_job_for_upload_preflight(conn, job_id)
+            conn.commit()
+            return False
+
+    return await asyncio.to_thread(_check)
+
+
 async def cluster_batch_task(ctx, job_id: int):
     """ARQ task: claim and process one database-owned clustering batch."""
     from app.db.connection import get_db_connection
@@ -260,6 +345,10 @@ async def cluster_batch_task(ctx, job_id: int):
     )
 
     worker_id = default_worker_id()
+
+    if not await _cluster_preflight_ready(job_id):
+        logger.info("聚类任务等待匹配 scope 的模型预检: job_id=%s", job_id)
+        return {"status": "waiting_preflight", "job_id": job_id}
 
     def _claim_and_load():
         with get_db_connection() as conn:
@@ -296,7 +385,14 @@ async def cluster_batch_task(ctx, job_id: int):
 
     batch = []
     try:
-        batch = dequeue_batch(BATCH_SIZE)
+        if payload.get("root_import_id"):
+            batch = dequeue_batch(
+                BATCH_SIZE,
+                owner_id=payload.get("owner_id"),
+                root_import_id=payload["root_import_id"],
+            )
+        else:
+            batch = dequeue_batch(BATCH_SIZE)
         if not batch:
             result = {"status": "empty", "new_count": 0}
             _complete(result)

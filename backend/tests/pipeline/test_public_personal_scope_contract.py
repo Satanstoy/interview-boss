@@ -13,6 +13,29 @@ def _isolated_app_db(app_db_isolation):
 
     return app_db_isolation
 
+
+def _link_public_resolution(conn, detail_id):
+    from app.services.question_resolution import record_resolution
+
+    detail = conn.execute(
+        "SELECT question, cat1, cat2 FROM questions_detail WHERE id = ?", (detail_id,)
+    ).fetchone()
+    canonical_id = conn.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, owner_id, status, frequency) "
+        "VALUES (?, ?, ?, NULL, 'approved', 1) RETURNING id",
+        (detail["question"], detail["cat1"] or "", detail["cat2"] or ""),
+    ).fetchone()["id"]
+    record_resolution(
+        conn,
+        detail_id=detail_id,
+        occurrence_scope="public",
+        occurrence_owner_id=None,
+        canonical_id=canonical_id,
+        canonical_scope="public",
+        status="created",
+        pipeline_version="upload-pipeline-v1",
+    )
+
 def test_enqueue_questions_uses_interview_id_and_is_idempotent(test_db):
     # The workspace .env points at a proxy endpoint that resolves to the
     # RFC-2544 fake-IP range.  This test does not exercise outbound calls; keep
@@ -142,7 +165,7 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
 
     calls = []
 
-    async def _match(rows, existing, user_id=None, strict=True):
+    async def _match(rows, existing, user_id=None, strict=True, llm_scope=None):
         calls.append(rows)
         if len(calls) == 1:
             # 第一轮：个人题库无命中 → 全部 no_match，交给公共轮
@@ -500,6 +523,7 @@ def test_public_contribution_uses_snapshot_and_creates_separate_public_projectio
     ).fetchone()
     assert item_row["public_detail_id"] == queue_row["question_detail_id"]
 
+    _link_public_resolution(test_db, queue_row["question_detail_id"])
     test_db.execute(
         "UPDATE analysis_queue SET status = 'done' WHERE id = ?", (queue_row["id"],)
     )
@@ -618,7 +642,7 @@ def test_public_contribution_failed_queue_can_close_after_retry(test_db):
     test_db.commit()
 
     request = create_public_contribution_request(test_db, "interview", 930, 7)
-    approved = approve_public_contribution(test_db, request["id"], 1)
+    approve_public_contribution(test_db, request["id"], 1)
     queue_id = test_db.execute(
         "SELECT id FROM analysis_queue WHERE contribution_request_id = ?",
         (request["id"],),
@@ -629,6 +653,10 @@ def test_public_contribution_failed_queue_can_close_after_retry(test_db):
     ).fetchone()[0] == "failed"
 
     test_db.execute("UPDATE analysis_queue SET status = 'done' WHERE id = ?", (queue_id,))
+    question_detail_id = test_db.execute(
+        "SELECT question_detail_id FROM analysis_queue WHERE id = ?", (queue_id,)
+    ).fetchone()["question_detail_id"]
+    _link_public_resolution(test_db, question_detail_id)
     mark_public_contribution_queue_done(test_db, [queue_id])
     assert test_db.execute(
         "SELECT status FROM public_contribution_requests WHERE id = ?", (request["id"],)

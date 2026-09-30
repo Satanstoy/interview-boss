@@ -169,6 +169,185 @@ def _record_pipeline_metric(
         logger.debug("pipeline_metrics 写入失败（非致命）: %s", exc)
 
 
+def _record_queue_resolutions(
+    conn,
+    batch: List[Dict],
+    *,
+    matched_rows: List[Dict],
+    new_cluster_rows: List[Dict],
+    new_qb_ids: List[int],
+) -> List[Dict]:
+    """Persist canonical links for root/contribution-owned queue occurrences.
+
+    Clustering writes the canonical rows and their source resolutions in one
+    transaction. Unmapped tracked rows become explicit failed resolutions so
+    queue completion cannot be mistaken for successful publication.
+    """
+
+    from app.services.question_resolution import record_resolution
+
+    canonical_by_detail: dict[int, tuple[int, str, float | None]] = {}
+    for match in matched_rows:
+        try:
+            detail_id = int(match["qd_id"])
+            canonical_id = int(match["cluster_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        canonical_by_detail[detail_id] = (
+            canonical_id,
+            "matched",
+            match.get("confidence"),
+        )
+
+    for cluster, canonical_id in zip(new_cluster_rows, new_qb_ids):
+        try:
+            canonical_id = int(canonical_id)
+        except (TypeError, ValueError):
+            continue
+        for raw_detail_id in cluster.get("ids") or []:
+            try:
+                detail_id = int(raw_detail_id)
+            except (TypeError, ValueError):
+                continue
+            canonical_by_detail[detail_id] = (canonical_id, "created", None)
+
+    recorded = []
+    for item in batch:
+        if not item.get("root_import_id") and not item.get("contribution_request_id"):
+            continue
+        try:
+            detail_id = int(item["qd_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        owner_id = item.get("owner_id")
+        occurrence_scope = "private" if owner_id is not None else "public"
+        canonical_scope = occurrence_scope
+        outcome = canonical_by_detail.get(detail_id)
+        root_import_id = item.get("root_import_id")
+        if not root_import_id and item.get("contribution_request_id"):
+            linked_root = conn.execute(
+                "SELECT id FROM upload_imports WHERE contribution_request_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (item["contribution_request_id"],),
+            ).fetchone()
+            if linked_root:
+                root_import_id = str(linked_root["id"])
+        if outcome:
+            canonical_id, status, confidence = outcome
+            record_resolution(
+                conn,
+                detail_id=detail_id,
+                occurrence_scope=occurrence_scope,
+                occurrence_owner_id=int(owner_id) if owner_id is not None else None,
+                canonical_id=canonical_id,
+                canonical_scope=canonical_scope,
+                status=status,
+                pipeline_version="upload-pipeline-v1",
+                confidence=confidence,
+            )
+            recorded.append(
+                {"detail_id": detail_id, "canonical_id": canonical_id, "status": status}
+            )
+            error_code = None
+        else:
+            record_resolution(
+                conn,
+                detail_id=detail_id,
+                occurrence_scope=occurrence_scope,
+                occurrence_owner_id=int(owner_id) if owner_id is not None else None,
+                canonical_id=None,
+                canonical_scope=canonical_scope,
+                status="failed",
+                pipeline_version="upload-pipeline-v1",
+                reason="聚类处理未返回该题的规范题关联",
+            )
+            recorded.append(
+                {"detail_id": detail_id, "canonical_id": None, "status": "failed"}
+            )
+            error_code = "CLUSTER_RESOLUTION_MISSING"
+        if root_import_id:
+            result_json = json.dumps(
+                {
+                    "detail_id": detail_id,
+                    "canonical_id": outcome[0] if outcome else None,
+                    "status": outcome[1] if outcome else "failed",
+                },
+                ensure_ascii=False,
+            )
+            conn.execute(
+                "INSERT INTO upload_stage_results "
+                "(import_id, stage, unit_key, input_version, pipeline_version, status, "
+                "result_json, error_code, retryable) "
+                "VALUES (?, 'cluster', ?, 1, 'upload-pipeline-v1', ?, ?, ?, ?) "
+                "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+                "status = excluded.status, result_json = excluded.result_json, "
+                "error_code = excluded.error_code, retryable = excluded.retryable, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (
+                    root_import_id,
+                    f"detail:{detail_id}",
+                    "succeeded" if outcome else "failed",
+                    result_json,
+                    error_code,
+                    0 if outcome else 1,
+                ),
+            )
+    return recorded
+
+
+async def _refresh_completed_roots(batch: List[Dict], *, include_contributions=False):
+    root_ids = {
+        str(item["root_import_id"])
+        for item in batch
+        if item.get("root_import_id")
+        and (include_contributions or not item.get("contribution_request_id"))
+    }
+    if not root_ids:
+        return
+
+    def _refresh():
+        conn = get_db_connection()
+        conn.execute("BEGIN")
+        try:
+            from app.services.upload_lifecycle import refresh_completed_upload_roots
+
+            reports = refresh_completed_upload_roots(conn, root_ids)
+            conn.execute("COMMIT")
+            return reports
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    await _run_db(_refresh)
+
+
+async def _persist_unmapped_queue_items(batch: List[Dict]):
+    """Persist sanitization rejects as failed resolutions and cluster stages."""
+
+    if not batch:
+        return
+
+    def _write():
+        conn = get_db_connection()
+        conn.execute("BEGIN")
+        try:
+            result = _record_queue_resolutions(
+                conn,
+                batch,
+                matched_rows=[],
+                new_cluster_rows=[],
+                new_qb_ids=[],
+            )
+            conn.execute("COMMIT")
+            return result
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    await _run_db(_write)
+    await _refresh_completed_roots(batch)
+
+
 async def cluster_batch(
     batch: List[Dict], user_id: int = None, skip_clean: bool = False,
     return_new_ids: bool = False,
@@ -187,6 +366,7 @@ async def cluster_batch(
 
     batch, filtered = sanitize_batch(batch)
     if filtered:
+        await _persist_unmapped_queue_items(filtered)
         mark_batch_done([item["queue_id"] for item in filtered])
         logger.info(f"清洗拦截 {len(filtered)} 条脏数据")
     if not batch:
@@ -306,13 +486,22 @@ async def cluster_batch(
             new_qb_ids = insert_new_clusters(
                 conn, new_cluster_rows, job_position, answer_cache, owner_id=owner_id
             )
+            resolutions = _record_queue_resolutions(
+                conn,
+                batch,
+                matched_rows=matched_rows,
+                new_cluster_rows=new_cluster_rows,
+                new_qb_ids=new_qb_ids,
+            )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
-        return new_qb_ids
+        return {"ids": new_qb_ids, "resolutions": resolutions}
 
-    qb_ids = await _run_db(_atomic_write)
+    write_result = await _run_db(_atomic_write)
+    qb_ids = write_result["ids"]
+    await _refresh_completed_roots(batch)
 
     # Incremental FAISS cache maintenance: add newly created clusters to the
     # in-memory index via add_with_ids instead of full reload.
@@ -353,7 +542,11 @@ async def cluster_batch(
 
     del matched, new_clusters, saved_answers, existing_by_cat2
     if return_new_ids:
-        return {"count": len(qb_ids), "ids": list(qb_ids)}
+        return {
+            "count": len(qb_ids),
+            "ids": list(qb_ids),
+            "resolutions": write_result["resolutions"],
+        }
     return len(qb_ids)
 
 

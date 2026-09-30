@@ -95,7 +95,11 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         # Phase 1: 匹配个人题库（AC-006 三态：matched / no_match / failed——模型失败归
         # failed 绝不当作 no_match 去新建规范题）
         personal_outcomes = await match_outcomes(
-            new_rows_for_match, personal_by_cat2, user_id=user_id, strict=True
+            new_rows_for_match,
+            personal_by_cat2,
+            user_id=user_id,
+            strict=True,
+            llm_scope=state.get("credential_scope", "user"),
         )
         personal_results = personal_outcomes.get("results", [])
         personal_matched = [
@@ -121,7 +125,11 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
         public_failed_ids: set[int] = set()
         if unmatched_for_public and public_by_cat2:
             public_outcomes = await match_outcomes(
-                unmatched_for_public, public_by_cat2, user_id=user_id, strict=True
+                unmatched_for_public,
+                public_by_cat2,
+                user_id=user_id,
+                strict=True,
+                llm_scope=state.get("credential_scope", "user"),
             )
             public_results = public_outcomes.get("results", [])
         public_failed_ids = {
@@ -182,6 +190,19 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
 
         import_id = state.get("import_id")
 
+        # match_outcomes 返回 canonical_id；旧事务写入器消费 question_bank_id。
+        # 在节点边界适配两种 DTO，避免命中已有规范题时入库失败。
+        matched_for_persist = []
+        for outcome in match_result["matched"]:
+            question_bank_id = outcome.get("question_bank_id")
+            if question_bank_id is None:
+                question_bank_id = outcome.get("canonical_id")
+            if question_bank_id is None:
+                raise ValueError("匹配结果缺少规范题 ID")
+            matched_for_persist.append(
+                {**outcome, "question_bank_id": int(question_bank_id)}
+            )
+
         def _persist_new():
             return run_db(
                 lambda: submit_interview_txn(
@@ -195,7 +216,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                     record_status,
                     current_pos,
                     tagged_rows,
-                    match_result["matched"],
+                    matched_for_persist,
                     match_result["unmatched"],
                     idx_to_row,
                     bool(is_admin),
@@ -375,6 +396,14 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
             await run_db(_bind_root)
             emit_progress(state, "review", "面经已保留在个人题库，已提交公共化审核")
 
+    if state.get("import_id") and queue_detail_ids:
+        from app.services.pipeline.queue import _run_cluster_batch_in_background
+
+        await _run_cluster_batch_in_background(
+            user_id=user_id,
+            root_import_id=str(state["import_id"]),
+        )
+
     emit_progress(state, "save", "个人题库写入完成")
 
     return {
@@ -450,7 +479,7 @@ async def jd_persist_node(state: SubmitState) -> dict:
     return {
         "node_timings": {**state.get("node_timings", {}), "jd_persist": timer.elapsed},
         "public_contribution_request_id": contribution_request_id,
-        "match_failed": match_failed_count,
+        "match_failed": 0,
     }
 
 

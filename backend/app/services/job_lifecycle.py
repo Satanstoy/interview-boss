@@ -361,12 +361,102 @@ def claim_dispatch_batch(
 ) -> list[dict]:
     """Reserve due pending jobs before attempting ARQ enqueue."""
     recover_expired_jobs(conn, job_type)
+    preflight_gate = ""
+    params: tuple[Any, ...] = (job_type, limit)
+    if job_type == SUBMIT_IMPORT_JOB_TYPE:
+        # Root-bound v2 submits may only be dispatched after the newest
+        # preflight for the same recovery attempt has succeeded.  Rootless
+        # legacy jobs remain compatible; the worker enforces the same gate to
+        # cover routes that enqueue directly instead of using this dispatcher.
+        preflight_gate = """
+          AND (j.root_import_id IS NULL OR (
+            EXISTS (SELECT 1 FROM upload_imports AS root_import
+                    WHERE root_import.id = j.root_import_id
+                      AND root_import.status != 'needs_action')
+            AND EXISTS (
+            SELECT 1
+            FROM jobs AS preflight_job
+            JOIN upload_imports AS preflight_root
+              ON preflight_root.id = preflight_job.root_import_id
+            JOIN upload_stage_results AS preflight_stage
+              ON preflight_stage.job_id = preflight_job.id
+             AND preflight_stage.import_id = preflight_job.root_import_id
+             AND preflight_stage.stage = 'preflight'
+             AND preflight_stage.status = 'succeeded'
+            JOIN job_payloads AS preflight_payload ON preflight_payload.job_id = preflight_job.id
+            WHERE preflight_job.root_import_id = j.root_import_id
+              AND preflight_job.job_type = 'credential_preflight'
+              AND preflight_job.upload_attempt_id IS j.upload_attempt_id
+              AND json_extract(preflight_payload.payload, '$.credential_scope') =
+                  COALESCE(json_extract(preflight_root.policy_json, '$.credential_scope'), 'user')
+              AND NOT EXISTS (
+                SELECT 1 FROM jobs AS newer_preflight
+                JOIN job_payloads AS newer_payload ON newer_payload.job_id = newer_preflight.id
+                WHERE newer_preflight.root_import_id = preflight_job.root_import_id
+                  AND newer_preflight.job_type = 'credential_preflight'
+                  AND newer_preflight.upload_attempt_id IS preflight_job.upload_attempt_id
+                  AND json_extract(newer_payload.payload, '$.credential_scope') =
+                      json_extract(preflight_payload.payload, '$.credential_scope')
+                  AND newer_preflight.id > preflight_job.id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM upload_stage_results AS newer_stage
+                WHERE newer_stage.job_id = preflight_job.id
+                  AND newer_stage.stage = 'preflight'
+                  AND newer_stage.id > preflight_stage.id
+              )
+          )))
+        """
+    elif job_type == CLUSTER_BATCH_JOB_TYPE:
+        # Root-bound upload clustering uses the credential scope frozen into
+        # its job payload (user for private queues, global after share approval).
+        # Rootless legacy/manual clustering remains dispatchable.
+        preflight_gate = """
+          AND (j.root_import_id IS NULL OR (
+            EXISTS (SELECT 1 FROM upload_imports AS root_import
+                    WHERE root_import.id = j.root_import_id
+                      AND root_import.status != 'needs_action')
+            AND EXISTS (
+              SELECT 1
+              FROM jobs AS preflight_job
+              JOIN job_payloads AS preflight_payload ON preflight_payload.job_id = preflight_job.id
+              JOIN upload_stage_results AS preflight_stage
+                ON preflight_stage.job_id = preflight_job.id
+               AND preflight_stage.import_id = preflight_job.root_import_id
+               AND preflight_stage.stage = 'preflight'
+               AND preflight_stage.status = 'succeeded'
+              JOIN job_payloads AS cluster_payload ON cluster_payload.job_id = j.id
+              WHERE preflight_job.root_import_id = j.root_import_id
+                AND preflight_job.job_type = 'credential_preflight'
+                AND preflight_job.upload_attempt_id IS j.upload_attempt_id
+                AND json_extract(preflight_payload.payload, '$.credential_scope') =
+                    json_extract(cluster_payload.payload, '$.credential_scope')
+                AND NOT EXISTS (
+                  SELECT 1 FROM jobs AS newer_preflight
+                  JOIN job_payloads AS newer_payload ON newer_payload.job_id = newer_preflight.id
+                  WHERE newer_preflight.root_import_id = preflight_job.root_import_id
+                    AND newer_preflight.job_type = 'credential_preflight'
+                    AND newer_preflight.upload_attempt_id IS preflight_job.upload_attempt_id
+                    AND json_extract(newer_payload.payload, '$.credential_scope') =
+                        json_extract(preflight_payload.payload, '$.credential_scope')
+                    AND newer_preflight.id > preflight_job.id
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM upload_stage_results AS newer_stage
+                  WHERE newer_stage.job_id = preflight_job.id
+                    AND newer_stage.stage = 'preflight'
+                    AND newer_stage.id > preflight_stage.id
+                )
+            )
+          ))
+        """
     rows = conn.execute(
-        "SELECT id, job_type, attempts, available_at "
-        "FROM jobs WHERE job_type = ? AND status = 'pending' "
-        "AND available_at <= CURRENT_TIMESTAMP "
-        "ORDER BY created_at, id LIMIT ?",
-        (job_type, limit),
+        "SELECT j.id, j.job_type, j.attempts, j.available_at "
+        "FROM jobs AS j WHERE j.job_type = ? AND j.status = 'pending' "
+        "AND j.available_at <= CURRENT_TIMESTAMP "
+        f"{preflight_gate} "
+        "ORDER BY j.created_at, j.id LIMIT ?",
+        params,
     ).fetchall()
     reserved = []
     for row in rows:
@@ -379,6 +469,69 @@ def claim_dispatch_batch(
         if cur.rowcount:
             reserved.append(dict(row))
     return reserved
+
+
+def get_successful_upload_preflight(
+    conn,
+    *,
+    root_import_id: str,
+    attempt_id: int | None,
+    credential_scope: str | None = None,
+):
+    """Return the latest successful preflight for a root/attempt/scope."""
+
+    scope_clause = ""
+    params: list[Any] = [root_import_id, attempt_id]
+    if credential_scope is not None:
+        scope_clause = "AND json_extract(preflight_payload.payload, '$.credential_scope') = ? "
+        params.append(credential_scope)
+    return conn.execute(
+        "SELECT preflight_stage.* FROM jobs AS preflight_job "
+        "JOIN job_payloads AS preflight_payload ON preflight_payload.job_id = preflight_job.id "
+        "JOIN upload_stage_results AS preflight_stage "
+        "  ON preflight_stage.job_id = preflight_job.id "
+        " AND preflight_stage.import_id = preflight_job.root_import_id "
+        " AND preflight_stage.stage = 'preflight' "
+        "WHERE preflight_job.root_import_id = ? "
+        "  AND preflight_job.job_type = 'credential_preflight' "
+        "  AND preflight_job.upload_attempt_id IS ? "
+        + scope_clause
+        +
+        "  AND NOT EXISTS (SELECT 1 FROM jobs AS newer_preflight "
+        "      JOIN job_payloads AS newer_payload ON newer_payload.job_id = newer_preflight.id "
+        "      WHERE newer_preflight.root_import_id = preflight_job.root_import_id "
+        "        AND newer_preflight.job_type = 'credential_preflight' "
+        "        AND newer_preflight.upload_attempt_id IS preflight_job.upload_attempt_id "
+        "        AND json_extract(newer_payload.payload, '$.credential_scope') = "
+        "            json_extract(preflight_payload.payload, '$.credential_scope') "
+        "        AND newer_preflight.id > preflight_job.id) "
+        "  AND NOT EXISTS (SELECT 1 FROM upload_stage_results AS newer_stage "
+        "      WHERE newer_stage.job_id = preflight_job.id "
+        "        AND newer_stage.stage = 'preflight' "
+        "        AND newer_stage.id > preflight_stage.id) "
+        "  AND preflight_stage.status = 'succeeded' "
+        "ORDER BY preflight_stage.id DESC LIMIT 1",
+        params,
+    ).fetchone()
+
+
+def defer_job_for_upload_preflight(
+    conn, job_id: int, *, delay_seconds: int = 15
+) -> bool:
+    """Return a prematurely delivered submit job to the durable outbox.
+
+    This does not consume an execution attempt.  A future dispatcher pass can
+    enqueue it after the matching preflight checkpoint succeeds.
+    """
+
+    cur = conn.execute(
+        "UPDATE jobs SET status = 'pending', arq_job_id = NULL, locked_until = NULL, "
+        "worker_id = NULL, available_at = datetime('now', ?), "
+        "last_error = 'waiting for matching credential preflight', "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending','queued')",
+        (f"+{max(1, int(delay_seconds))} seconds", job_id),
+    )
+    return bool(cur.rowcount)
 
 
 def mark_job_dispatched(

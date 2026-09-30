@@ -234,6 +234,29 @@ def _plan_work_after_restore(
         attempt_id=attempt["id"],
     )
 
+    contribution = conn.execute(
+        "SELECT status FROM public_contribution_requests WHERE id = ?",
+        (root["contribution_request_id"],),
+    ).fetchone() if root["contribution_request_id"] else None
+    if contribution and contribution["status"] in (
+        "approved_for_processing",
+        "queued",
+        "processing",
+        "partially_published",
+        "failed",
+    ):
+        public_scope = policy.get("post_approval_credential_scope") or "global"
+        create_credential_preflight_job(
+            conn,
+            root_import_id=import_id,
+            requester_id=int(root["requester_id"]),
+            credential_scope=public_scope,
+            user_id=(
+                int(root["requester_id"]) if public_scope == "user" else None
+            ),
+            attempt_id=attempt["id"],
+        )
+
     payload = _loads(root["payload_json"], {}) or {}
     cursor = conn.execute(
         "INSERT INTO jobs (job_type, status, created_by, progress_total, "
@@ -254,6 +277,14 @@ def _plan_work_after_restore(
         "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
         (job_id, json.dumps(payload, ensure_ascii=False)),
     )
+    # Re-plan all still-pending root-bound clustering after attempt rollover.
+    # Old queued deliveries carry the previous attempt and are cancelled by
+    # restore_upload before this function is called.
+    from app.services.upload_queue import collect_pending_buckets, ensure_bucket_job
+
+    for bucket in collect_pending_buckets(conn):
+        if str(bucket["root_import_id"]) == str(import_id):
+            ensure_bucket_job(conn, bucket=bucket, created_by=actor_id)
     return {"job_id": job_id, "created": True, "work_key": FIRST_WORK_KEY}
 
 
@@ -354,7 +385,7 @@ def finalize_attempt_and_aggregate_root(
             )
 
     rows = conn.execute(
-        "SELECT stage, status, error_code FROM upload_stage_results "
+        "SELECT stage, unit_key, status, error_code FROM upload_stage_results "
         "WHERE import_id = ? ORDER BY id",
         (import_id,),
     ).fetchall()
@@ -376,7 +407,7 @@ def finalize_attempt_and_aggregate_root(
                     "stage": r["stage"],
                     "status": "succeeded",
                     "has_result": True,
-                    "unit_key": r["stage"],
+                    "unit_key": r["unit_key"],
                 }
             )
         elif r["status"] == "failed":
@@ -385,7 +416,25 @@ def finalize_attempt_and_aggregate_root(
                     "stage": r["stage"],
                     "status": "failed",
                     "has_result": False,
-                    "unit_key": r["stage"],
+                    "unit_key": r["unit_key"],
+                }
+            )
+        elif r["status"] in ("pending", "running", "needs_action"):
+            work_items.append(
+                {
+                    "stage": r["stage"],
+                    "status": r["status"],
+                    "has_result": False,
+                    "unit_key": r["unit_key"],
+                }
+            )
+        elif r["status"] == "skipped":
+            work_items.append(
+                {
+                    "stage": r["stage"],
+                    "status": "succeeded",
+                    "has_result": True,
+                    "unit_key": r["unit_key"],
                 }
             )
     # 阶段检查点为空时，按根状态兜底（尚未写检查点的旧 worker 路径）
@@ -434,10 +483,30 @@ def finalize_attempt_and_aggregate_root(
         "needs_action",
     ):
         update_fields.append("completed_at = CURRENT_TIMESTAMP")
+    else:
+        update_fields.append("completed_at = NULL")
     params.append(import_id)
     conn.execute(
         f"UPDATE upload_imports SET {', '.join(update_fields)} WHERE id = ?", params
     )
+
+    policy = _loads(root["policy_json"] or "{}", {}) or {}
+    action_scope = policy.get("credential_scope", "user")
+    if status == "needs_action" and conn.execute(
+        "SELECT 1 FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight' "
+        "ORDER BY id DESC LIMIT 1",
+        (import_id,),
+    ).fetchone():
+        failed_preflight = conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
+            "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+            "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+            "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
+            "AND s.status = 'failed' ORDER BY j.id DESC LIMIT 1",
+            (import_id,),
+        ).fetchone()
+        if failed_preflight and failed_preflight["scope"] in ("user", "global"):
+            action_scope = failed_preflight["scope"]
 
     return {
         "import_id": import_id,
@@ -458,11 +527,55 @@ def finalize_attempt_and_aggregate_root(
             status,
             error_code=final_error_code,
             has_result=aggregated["result_available"],
-            credential_scope=_loads(root["policy_json"] or "{}", {}).get(
-                "credential_scope", "user"
-            ),
+            credential_scope=action_scope,
         ),
     }
+
+
+def upload_action_credential_scope(conn, *, import_id: str, fallback: str = "user") -> str:
+    """Resolve which credential owner must fix a root's current model error."""
+
+    row = conn.execute(
+        "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
+        "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
+        "AND s.status = 'failed' ORDER BY j.id DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if row and row["scope"] in ("user", "global"):
+        return row["scope"]
+    return fallback if fallback in ("user", "global") else "user"
+
+
+def refresh_completed_upload_roots(conn, import_ids) -> list[dict]:
+    """Refresh roots after asynchronous child work, without racing a live submit worker.
+
+    The submit worker owns aggregation while its job is running. Once it has
+    completed, queue workers may safely re-aggregate the same root using that
+    submit job's fence generation. Roots without a completed submit job (legacy
+    data or a still-running import) are left to their normal submit finalizer.
+    """
+
+    reports = []
+    for import_id in sorted({str(item) for item in (import_ids or []) if item}):
+        submit_job = conn.execute(
+            "SELECT id, lease_generation FROM jobs WHERE root_import_id = ? "
+            "AND job_type = 'submit_import' AND status = 'completed' "
+            "ORDER BY id DESC LIMIT 1",
+            (import_id,),
+        ).fetchone()
+        if submit_job is None:
+            continue
+        reports.append(
+            finalize_attempt_and_aggregate_root(
+                conn,
+                import_id=import_id,
+                actor_id=0,
+                lease_generation=int(submit_job["lease_generation"]),
+            )
+        )
+    return reports
 
 
 def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=None) -> dict:
@@ -512,6 +625,14 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
             "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
             "WHERE root_import_id = ? AND job_type = 'submit_import' "
             "AND status IN ('pending', 'queued', 'running')",
+            (root_import_id,),
+        )
+        conn.execute(
+            "UPDATE jobs SET status = 'cancelled', worker_id = NULL, locked_until = NULL, "
+            "arq_job_id = NULL, last_error = '凭据预检阻塞，等待重新预检', "
+            "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE root_import_id = ? AND job_type = 'cluster_batch' "
+            "AND status IN ('pending', 'queued')",
             (root_import_id,),
         )
 
@@ -576,6 +697,16 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
         "WHERE id = ?",
         (attempt["attempt_no"], root_import_id),
     )
+
+    if created_attempt:
+        conn.execute(
+            "UPDATE jobs SET status = 'cancelled', worker_id = NULL, locked_until = NULL, "
+            "arq_job_id = NULL, last_error = '恢复批次更换，重新规划聚类工作', "
+            "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE root_import_id = ? AND job_type = 'cluster_batch' "
+            "AND upload_attempt_id IS NOT ? AND status IN ('pending', 'queued')",
+            (root_import_id, attempt["id"]),
+        )
 
     # R03：为本次恢复规划可执行工作（幂等：已有在途 job 就不重复建）
     planned = _plan_work_after_restore(

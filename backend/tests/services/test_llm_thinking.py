@@ -142,6 +142,40 @@ async def test_tools_loop_disables_thinking_by_default(monkeypatch):
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
+async def test_tools_loop_honors_global_credential_scope(monkeypatch):
+    """公共题库工具调用必须选择系统凭据，不能读取管理员个人 thinking 配置。"""
+    from unittest.mock import AsyncMock
+
+    captured = {}
+    scopes = []
+    monkeypatch.setattr(
+        "app.services.llm._resolve_client_and_model",
+        lambda user_id, llm_scope="user": (
+            scopes.append(llm_scope)
+            or (_ToolsClient(captured), "test-model", 60, "https://api.example.test/v1", "openai")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.llm.resolve_api_format_async",
+        AsyncMock(return_value="chat"),
+    )
+
+    def _unexpected_user_config_read(_user_id):
+        raise AssertionError("global scope must not read a user's LLM config")
+
+    monkeypatch.setattr("app.core.config.get_user_llm_config", _unexpected_user_config_read)
+    from app.services.llm import llm_with_tools
+
+    await llm_with_tools(
+        [{"role": "user", "content": "hi"}],
+        tools=[],
+        user_id=201,
+        llm_scope="global",
+    )
+
+    assert scopes == ["global"]
+
+
 async def test_tools_loop_honours_user_thinking_opt_in(monkeypatch):
     """用户开了 llm_thinking → 保留思考，不下发 extra_body"""
     captured = {}

@@ -63,13 +63,16 @@ async def extract_node(state: SubmitState) -> dict:
                     "image_url": {"url": f"data:{img['mime']};base64,{base64_img}"}
                 })
 
-            _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id)
+            credential_scope = state.get("credential_scope", "user")
+            _c, _m, _t, _bu, _provider = get_llm_client_for_user(
+                user_id, llm_scope=credential_scope
+            )
             llm_kwargs = dict(
                 model=state.get("_eval_model") or _m,
                 temperature=float(state.get("_eval_temperature", 0.1)),
                 # R01：global 公共导入必须用系统凭据（worker 注入的
                 # credential_scope），禁止静默回退到提交者本人 Key。
-                llm_scope=state.get("credential_scope", "user"),
+                llm_scope=credential_scope,
             )
             if _should_use_response_format(_bu):
                 llm_kwargs["response_format"] = {"type": "json_object"}

@@ -49,7 +49,52 @@ def test_enqueue_propagates_root_from_detail_import_id():
     ).fetchall()
     assert len(rows) == 2
     assert {r["root_import_id"] for r in rows} == {"imp-1"}
+    stages = conn.execute(
+        "SELECT unit_key, status FROM upload_stage_results "
+        "WHERE import_id = 'imp-1' AND stage = 'cluster' ORDER BY unit_key"
+    ).fetchall()
+    assert [(row["unit_key"], row["status"]) for row in stages] == [
+        ("detail:11", "pending"),
+        ("detail:12", "pending"),
+    ]
     conn.close()
+
+
+def test_cluster_queue_lease_updates_and_releases_root_checkpoint():
+    """The checkpoint follows the durable queue lease across retryable failures."""
+
+    import app.services.pipeline.queue as queue
+
+    conn = _db()
+    enqueue_questions(1, owner_id=101, conn=conn, question_detail_ids=[11])
+    original_get_db_connection = queue.get_db_connection
+    queue.get_db_connection = lambda: conn
+    try:
+        batch = queue.dequeue_batch(1, owner_id=101, root_import_id="imp-1")
+
+        assert len(batch) == 1
+        assert batch[0]["root_import_id"] == "imp-1"
+        stage = conn.execute(
+            "SELECT status FROM upload_stage_results WHERE import_id = 'imp-1' "
+            "AND stage = 'cluster' AND unit_key = 'detail:11'"
+        ).fetchone()
+        assert stage["status"] == "running"
+
+        queue.mark_batch_failed([batch[0]["queue_id"]])
+        stage = conn.execute(
+            "SELECT status FROM upload_stage_results WHERE import_id = 'imp-1' "
+            "AND stage = 'cluster' AND unit_key = 'detail:11'"
+        ).fetchone()
+        queue_row = conn.execute(
+            "SELECT status, locked_until FROM analysis_queue WHERE id = ?",
+            (batch[0]["queue_id"],),
+        ).fetchone()
+        assert stage["status"] == "pending"
+        assert queue_row["status"] == "pending"
+        assert queue_row["locked_until"] is None
+    finally:
+        queue.get_db_connection = original_get_db_connection
+        conn.close()
 
 
 def test_ensure_bucket_job_emits_dispatchable_type():
@@ -121,8 +166,6 @@ def test_stuck_processing_recovered_by_locked_until_not_created_at():
     conn.commit()
 
     # sweep queue 模块的连接到连接本测试库
-    import app.db.connection as dbm
-
     def _test_get_db_connection():
         return conn
 

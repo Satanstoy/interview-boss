@@ -574,8 +574,90 @@ async def submit_import_task(ctx, job_id: int):
         fail_job,
         touch_job,
     )
+    from app.services.upload_lifecycle import FIRST_WORK_KEY
 
     worker_id = default_worker_id()
+
+    def _preflight_ready():
+        from app.services.job_lifecycle import (
+            defer_job_for_upload_preflight,
+            get_successful_upload_preflight,
+        )
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT j.root_import_id, j.upload_attempt_id, r.requester_id, "
+                "r.status AS root_status, r.policy_json "
+                "FROM jobs AS j LEFT JOIN upload_imports AS r "
+                "ON r.id = j.root_import_id WHERE j.id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None or not row["root_import_id"]:
+                return True, None
+
+            policy = {}
+            try:
+                policy = json.loads(row["policy_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            credential_scope = policy.get("credential_scope") or "user"
+            preflight = get_successful_upload_preflight(
+                conn,
+                root_import_id=row["root_import_id"],
+                attempt_id=row["upload_attempt_id"],
+                credential_scope=credential_scope,
+            )
+            user_id = int(row["requester_id"]) if credential_scope == "user" else None
+
+            current_fingerprint = None
+            if preflight and row["root_status"] != "needs_action":
+                try:
+                    from app.services.upload_credentials import resolve_upload_credentials
+
+                    current = resolve_upload_credentials(
+                        credential_scope=credential_scope,
+                        user_id=user_id,
+                        stage="extract",
+                    )
+                    current_fingerprint = current.config_fingerprint
+                except Exception:
+                    # A missing/invalid current config must be checked by a new
+                    # preflight job, which records the actionable failure.
+                    current_fingerprint = None
+
+                try:
+                    result = json.loads(preflight["result_json"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    result = {}
+                if (
+                    current_fingerprint
+                    and result.get("config_fingerprint") == current_fingerprint
+                ):
+                    return True, result.get("model")
+
+            # Some API routes enqueue submit_import directly. Defer that early
+            # delivery without claiming/consuming an attempt. If the saved
+            # checkpoint is absent/stale, create a fresh durable preflight job;
+            # the dispatcher will not release submit until that job succeeds.
+            if row["root_status"] != "needs_action":
+                from app.services.credential_preflight import create_credential_preflight_job
+
+                create_credential_preflight_job(
+                    conn,
+                    root_import_id=row["root_import_id"],
+                    requester_id=int(row["requester_id"]),
+                    credential_scope=credential_scope,
+                    user_id=user_id,
+                    attempt_id=row["upload_attempt_id"],
+                )
+            defer_job_for_upload_preflight(conn, job_id)
+            conn.commit()
+            return False, None
+
+    preflight_ready, preflight_model = await asyncio.to_thread(_preflight_ready)
+    if not preflight_ready:
+        logger.info("上传任务等待同批次模型预检: job_id=%s", job_id)
+        return {"status": "waiting_preflight", "job_id": job_id}
 
     def _claim():
         with get_db_connection() as conn:
@@ -626,8 +708,10 @@ async def submit_import_task(ctx, job_id: int):
         def _load_root_context():
             with get_db_connection() as conn:
                 job = conn.execute(
-                    "SELECT root_import_id, upload_attempt_id, work_key, "
-                    "idempotency_key FROM jobs WHERE id = ?",
+                    "SELECT j.root_import_id, j.upload_attempt_id, j.work_key, "
+                    "j.idempotency_key, a.attempt_no FROM jobs j "
+                    "LEFT JOIN upload_attempts a ON a.id = j.upload_attempt_id "
+                    "WHERE j.id = ?",
                     (job_id,),
                 ).fetchone()
                 root = None
@@ -647,6 +731,7 @@ async def submit_import_task(ctx, job_id: int):
         job_row, root_row, policy = await asyncio.to_thread(_load_root_context)
         root_import_id = job_row["root_import_id"] if job_row else None
         attempt_id = job_row["upload_attempt_id"] if job_row else None
+        attempt_no = job_row["attempt_no"] if job_row else None
         root_status = root_row["status"] if root_row else None
 
         # R01：预检失败（needs_action）不派发提取——即使 job 已被调度也拒绝执行。
@@ -729,7 +814,6 @@ async def submit_import_task(ctx, job_id: int):
 
         from app.agents.submit.graph import stream_submit_graph
         from app.services.upload_lifecycle import (
-            FIRST_WORK_KEY,
             build_thread_id,
             finalize_attempt_and_aggregate_root,
         )
@@ -746,7 +830,7 @@ async def submit_import_task(ctx, job_id: int):
                 image_data.append(img)  # 兼容直接传 bytes 的场景
 
         thread_id = build_thread_id(
-            root_import_id or f"legacy-{job_id}", attempt_id or 0, job_id
+            root_import_id or f"legacy-{job_id}", attempt_no or 0, job_id
         )
         input_state = {
             "raw_text": payload.get("raw_text", ""),
@@ -758,11 +842,13 @@ async def submit_import_task(ctx, job_id: int):
             "target_intent": target_intent,
             "request_public_review": request_public_review,
             "credential_scope": credential_scope,
+            "_eval_model": preflight_model,
             "user_id": payload.get("user_id"),
             "is_admin": is_admin,
             "job_position": payload.get("job_position", ""),
             "import_id": root_import_id,
             "attempt_id": attempt_id,
+            "thread_id": thread_id,
             "work_key": work_key,
             "job_id": job_id,
             # F08：检查点复用（恢复执行不重跑已成功阶段）

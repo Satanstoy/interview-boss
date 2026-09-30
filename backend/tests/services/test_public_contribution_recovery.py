@@ -45,8 +45,8 @@ def _db():
         )
     conn.execute(
         "INSERT INTO public_contribution_requests "
-        "(id, source_type, source_id, requester_id, status, snapshot_json, revision) "
-        "VALUES (1, 'interview', 1, 101, 'approved_for_processing', '{}', 1)"
+        "(id, source_type, source_id, requester_id, public_interview_id, status, snapshot_json, revision) "
+        "VALUES (1, 'interview', 1, 101, 500, 'approved_for_processing', '{}', 1)"
     )
     for detail_id, question in ((511, "TCP 三次握手"), (512, "TCP 四次挥手")):
         conn.execute(
@@ -149,6 +149,103 @@ def test_retry_restores_only_failed_item_without_new_inserts():
     assert report["reprocessed_item_ids"] == [12], "只恢复失败子项"
     assert request_publish_status(conn, request_id=1) == "published"
     assert conn.execute("SELECT COUNT(*) FROM questions_detail").fetchone()[0] == details_before
+    conn.close()
+
+
+def test_retry_requeues_only_failed_items_when_original_queue_row_is_done():
+    """A done queue row with an invalid resolution must become executable again."""
+
+    from app.services.public_contributions import retry_failed_public_items
+
+    conn = _db()
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published' WHERE id = 11"
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'failed' WHERE id = 12"
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, status, owner_id, contribution_request_id) "
+        "VALUES (500, 511, 'done', NULL, 1), (500, 512, 'done', NULL, 1)"
+    )
+    conn.commit()
+
+    result = retry_failed_public_items(conn, request_id=1, admin_id=101)
+
+    queue_statuses = {
+        int(row["question_detail_id"]): row["status"]
+        for row in conn.execute(
+            "SELECT question_detail_id, status FROM analysis_queue ORDER BY question_detail_id"
+        ).fetchall()
+    }
+    assert result["reprocessed_item_ids"] == [12]
+    assert queue_statuses == {511: "done", 512: "pending"}, queue_statuses
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 11"
+    ).fetchone()["status"] == "published"
+    conn.close()
+
+
+def test_root_bound_public_retry_preflights_global_before_cluster_dispatch():
+    """An approved public retry must re-probe system credentials on the same root."""
+
+    from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE, claim_dispatch_batch
+    from app.services.public_contributions import retry_failed_public_items
+    from app.services.credential_preflight import run_credential_preflight
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, "
+        "status, contribution_request_id) "
+        "VALUES ('public-root', 101, 'share-retry', 'hash', 'share', 'interview', 'v1', "
+        "'{\"credential_scope\":\"user\",\"post_approval_credential_scope\":\"global\"}', '{}', "
+        "'needs_action', 1)"
+    )
+    attempt_id = conn.execute(
+        "INSERT INTO upload_attempts (import_id, attempt_no, status, requested_by) "
+        "VALUES ('public-root', 1, 'active', 101)"
+    ).lastrowid
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'failed' WHERE id = 12"
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, status, owner_id, contribution_request_id, root_import_id) "
+        "VALUES (500, 511, 'done', NULL, 1, 'public-root'), "
+        "(500, 512, 'done', NULL, 1, 'public-root')"
+    )
+    conn.commit()
+
+    retried = retry_failed_public_items(conn, request_id=1, admin_id=101)
+    assert retried["reprocessed_item_ids"] == [12]
+    preflight = conn.execute(
+        "SELECT j.id, j.upload_attempt_id, p.payload FROM jobs j "
+        "JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = 'public-root' AND j.job_type = 'credential_preflight'"
+    ).fetchone()
+    assert preflight is not None
+    assert preflight["upload_attempt_id"] == attempt_id
+    assert '"credential_scope": "global"' in preflight["payload"]
+
+    # The cluster work stays in the outbox until the global probe succeeds.
+    assert claim_dispatch_batch(conn, job_type=CLUSTER_BATCH_JOB_TYPE) == []
+    outcome = run_credential_preflight(
+        conn,
+        job_id=preflight["id"],
+        probe=lambda _credential: {"status": "ok", "latency_ms": 2},
+        global_config_loader=lambda: {
+            "api_key": "system-key",
+            "base_url": "https://system.example/v1",
+            "model": "system-model",
+        },
+    )
+    conn.commit()
+    assert outcome.status == "ok"
+    dispatchable = claim_dispatch_batch(conn, job_type=CLUSTER_BATCH_JOB_TYPE)
+    assert len(dispatchable) == 1
+    assert dispatchable[0]["job_type"] == CLUSTER_BATCH_JOB_TYPE
     conn.close()
 
 

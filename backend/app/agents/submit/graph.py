@@ -161,7 +161,8 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
     token = _event_queue_var.set(queue)
     config = {
         "configurable": {
-            "thread_id": f"submit-{input_state.get('user_id', 0)}-{__import__('time').time():.0f}"
+            "thread_id": input_state.get("thread_id")
+            or f"submit-{input_state.get('user_id', 0)}-{__import__('time').time():.0f}"
         }
     }
 

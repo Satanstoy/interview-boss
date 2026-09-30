@@ -426,7 +426,23 @@ def build_review_projection(
                 value = value.strip() or None
             fields[field] = value
         final_items.append(
-            {"item_id": item_id, "ordinal": item.get("ordinal"), **fields}
+            {
+                "item_id": item_id,
+                "ordinal": item.get("ordinal"),
+                # Preserve the input ordinal through the immutable review
+                # projection. Contribution-item ordinals are their own
+                # zero-based sequence and cannot replace this source identity.
+                "source_ordinal": (
+                    int(item["source_ordinal"])
+                    if item.get("source_ordinal") is not None
+                    else (
+                        int(item["ordinal"]) + 1
+                        if item.get("ordinal") is not None
+                        else None
+                    )
+                ),
+                **fields,
+            }
         )
 
     projection = {
@@ -530,6 +546,7 @@ def materialize_public_interview_from_projection(
                             "cat2": item.get("cat2") or "",
                             "tags": item.get("tags") or "",
                             "diff_tag": item.get("difficulty") or "",
+                            "source_ordinal": item.get("source_ordinal"),
                             "job_position": job_position,
                         },
                     )
@@ -553,6 +570,7 @@ def materialize_public_interview_from_projection(
                     "cat2": item.get("cat2") or "",
                     "tags": item.get("tags") or "",
                     "diff_tag": item.get("difficulty") or "",
+                    "source_ordinal": item.get("source_ordinal"),
                     "job_position": job_position,
                 },
             )
@@ -745,6 +763,38 @@ def approve_public_contribution_v2(
                 (detail_id, item_id),
             )
 
+        # A user-share upload used the user's model for private preparation.
+        # Public clustering must pass a fresh system-model probe before its
+        # durable queue can be consumed; the upload worker may have completed
+        # long before this approval happens.
+        linked_root = conn.execute(
+            "SELECT id, requester_id, policy_json FROM upload_imports "
+            "WHERE contribution_request_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (request_id,),
+        ).fetchone()
+        if linked_root:
+            policy = _loads(linked_root["policy_json"], {}) or {}
+            credential_scope = policy.get("post_approval_credential_scope") or "global"
+            attempt = conn.execute(
+                "SELECT id FROM upload_attempts WHERE import_id = ? "
+                "ORDER BY attempt_no DESC LIMIT 1",
+                (linked_root["id"],),
+            ).fetchone()
+            from app.services.credential_preflight import create_credential_preflight_job
+
+            create_credential_preflight_job(
+                conn,
+                root_import_id=str(linked_root["id"]),
+                requester_id=int(linked_root["requester_id"]),
+                credential_scope=credential_scope,
+                user_id=(
+                    int(linked_root["requester_id"])
+                    if credential_scope == "user"
+                    else None
+                ),
+                attempt_id=int(attempt["id"]) if attempt else None,
+            )
+
         from app.services.pipeline.queue import enqueue_questions
 
         enqueue_questions(
@@ -903,6 +953,7 @@ def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
                     question_detail_ids=[detail_id],
                     contribution_request_id=request_id,
                     conn=conn,
+                    retry_existing=True,
                 )
             conn.execute(
                 "UPDATE public_contribution_items SET status = 'queued', "
@@ -916,22 +967,75 @@ def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
                 "error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (request_id,),
             )
-            # R10：派发一个可执行的 cluster_batch job，保证公共失败子项被
-            # 实际处理（公共队列行无 root，对账扫描不到，必须显式派发）。
-            from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
-            from uuid import uuid4 as _uuid4
+            # Root-bound upload rows get an independently fenced cluster job;
+            # rootless legacy requests keep a compatible durable generic job.
+            root_rows = conn.execute(
+                "SELECT DISTINCT root_import_id FROM analysis_queue "
+                "WHERE contribution_request_id = ? AND status = 'pending' "
+                "AND root_import_id IS NOT NULL",
+                (request_id,),
+            ).fetchall()
+            if root_rows:
+                from app.services.upload_queue import collect_pending_buckets, ensure_bucket_job
+                from app.services.credential_preflight import create_credential_preflight_job
 
-            conn.execute(
-                "INSERT INTO jobs (job_type, status, progress_total, created_by, "
-                "available_at, idempotency_key) "
-                "VALUES (?, 'pending', ?, ?, CURRENT_TIMESTAMP, ?)",
-                (
-                    CLUSTER_BATCH_JOB_TYPE,
-                    max(1, len(reprocessed)),
-                    admin_id,
-                    f"retry:{request_id}:{_uuid4().hex}",
-                ),
-            )
+                roots = {str(root["root_import_id"]) for root in root_rows}
+                for root_id in roots:
+                    root = conn.execute(
+                        "SELECT id, requester_id, policy_json FROM upload_imports WHERE id = ?",
+                        (root_id,),
+                    ).fetchone()
+                    if root is None:
+                        continue
+                    try:
+                        policy = _loads(root["policy_json"], {}) or {}
+                    except (TypeError, ValueError):
+                        policy = {}
+                    credential_scope = policy.get("post_approval_credential_scope") or "global"
+                    attempt = conn.execute(
+                        "SELECT id FROM upload_attempts WHERE import_id = ? "
+                        "ORDER BY attempt_no DESC LIMIT 1",
+                        (root_id,),
+                    ).fetchone()
+                    # Retry is a new public execution boundary: probe the
+                    # current public model config before the dispatcher can
+                    # release its cluster job. This also lets a root blocked
+                    # on system credentials resume without replaying private
+                    # extraction or changing the review projection.
+                    create_credential_preflight_job(
+                        conn,
+                        root_import_id=root_id,
+                        requester_id=int(root["requester_id"]),
+                        credential_scope=credential_scope,
+                        user_id=(
+                            int(root["requester_id"])
+                            if credential_scope == "user"
+                            else None
+                        ),
+                        attempt_id=int(attempt["id"]) if attempt else None,
+                    )
+                for bucket in collect_pending_buckets(conn):
+                    if str(bucket["root_import_id"]) in roots:
+                        ensure_bucket_job(conn, bucket=bucket, created_by=admin_id)
+            else:
+                from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
+                from uuid import uuid4 as _uuid4
+
+                cursor = conn.execute(
+                    "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+                    "available_at, idempotency_key) "
+                    "VALUES (?, 'pending', ?, ?, CURRENT_TIMESTAMP, ?)",
+                    (
+                        CLUSTER_BATCH_JOB_TYPE,
+                        max(1, len(reprocessed)),
+                        admin_id,
+                        f"retry:{request_id}:{_uuid4().hex}",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                    (int(cursor.lastrowid), _json({"user_id": admin_id})),
+                )
         _event(
             conn,
             request_id,
@@ -981,9 +1085,13 @@ def publish_items_with_resolutions(conn, *, request_id: int) -> dict:
         valid = None
         if item["public_detail_id"]:
             valid = conn.execute(
-                "SELECT id FROM question_resolutions "
-                "WHERE detail_id = ? AND invalidated_at IS NULL "
-                "AND status IN ('matched','created') LIMIT 1",
+                "SELECT r.id FROM question_resolutions r "
+                "JOIN question_bank qb ON qb.id = r.canonical_id "
+                "WHERE r.detail_id = ? AND r.invalidated_at IS NULL "
+                "AND r.occurrence_scope = 'public' AND r.occurrence_owner_id IS NULL "
+                "AND r.canonical_scope = 'public' AND r.status IN ('matched','created') "
+                "AND qb.owner_id IS NULL AND qb.status = 'approved' "
+                "AND qb.deleted_at IS NULL LIMIT 1",
                 (int(item["public_detail_id"]),),
             ).fetchone()
         if valid is not None and item["detail_id"] is not None:
@@ -1012,6 +1120,8 @@ def refresh_public_interview_projection(conn, *, public_interview_id: int) -> di
         "JOIN public_contribution_items i ON i.public_detail_id = d.id "
         "JOIN question_resolutions r ON r.detail_id = d.id "
         "AND r.invalidated_at IS NULL AND r.status IN ('matched','created') "
+        "JOIN question_bank qb ON qb.id = r.canonical_id "
+        "AND qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL "
         "WHERE d.interview_id = ? AND d.deleted_at IS NULL AND i.status = 'published' "
         "ORDER BY d.id",
         (public_interview_id,),
@@ -1236,7 +1346,20 @@ async def finalize_public_contribution_approval(
 
     result = await run_db(_approve)
     if result.get("public_interview_id"):
-        result["cluster_scheduled"] = await _run_cluster_batch_in_background(user_id=admin_id)
+        def _find_root_import_id():
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT id FROM upload_imports WHERE contribution_request_id = ? "
+                    "ORDER BY created_at DESC, id DESC LIMIT 1",
+                    (request_id,),
+                ).fetchone()
+                return str(row["id"]) if row else None
+
+        root_import_id = await run_db(_find_root_import_id)
+        result["cluster_scheduled"] = await _run_cluster_batch_in_background(
+            user_id=admin_id,
+            root_import_id=root_import_id,
+        )
     return result
 
 
@@ -1284,44 +1407,113 @@ def withdraw_public_contribution(conn, request_id: int, requester_id: int) -> di
 
 
 def mark_public_contribution_queue_done(conn, queue_ids: list[int]) -> int:
-    """Close contribution child items after their public queue rows finish."""
+    """Close contribution items only when clustering wrote a valid resolution."""
     if not queue_ids:
         return 0
+    queue_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+    }
+    if "contribution_request_id" not in queue_columns:
+        return 0
+    root_projection = (
+        "root_import_id" if "root_import_id" in queue_columns else "NULL AS root_import_id"
+    )
     placeholders = ",".join("?" * len(queue_ids))
     rows = conn.execute(
-        "SELECT DISTINCT contribution_request_id, question_detail_id "
+        "SELECT DISTINCT contribution_request_id, question_detail_id, interview_id, "
+        f"{root_projection} "
         f"FROM analysis_queue WHERE id IN ({placeholders}) "
         "AND contribution_request_id IS NOT NULL",
         queue_ids,
     ).fetchall()
-    request_ids = set()
+    request_interviews: dict[int, set[int]] = {}
+    root_import_ids: set[str] = set()
     updated = 0
     for row in rows:
+        if row["root_import_id"]:
+            root_import_ids.add(str(row["root_import_id"]))
         request_id = int(row["contribution_request_id"])
-        request_ids.add(request_id)
-        cursor = conn.execute(
-            "UPDATE public_contribution_items SET status = 'published', "
-            "updated_at = CURRENT_TIMESTAMP WHERE request_id = ? "
-            "AND public_detail_id = ? AND status IN ('queued', 'processing', 'failed')",
+        if not row["root_import_id"]:
+            linked_root = conn.execute(
+                "SELECT id FROM upload_imports WHERE contribution_request_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (request_id,),
+            ).fetchone()
+            if linked_root:
+                root_import_ids.add(str(linked_root["id"]))
+        request_interviews.setdefault(request_id, set()).add(int(row["interview_id"]))
+        before = conn.execute(
+            "SELECT status FROM public_contribution_items WHERE request_id = ? "
+            "AND public_detail_id = ?",
             (request_id, row["question_detail_id"]),
-        )
-        updated += max(cursor.rowcount, 0)
+        ).fetchone()
+        publish_items_with_resolutions(conn, request_id=request_id)
+        after = conn.execute(
+            "SELECT status FROM public_contribution_items WHERE request_id = ? "
+            "AND public_detail_id = ?",
+            (request_id, row["question_detail_id"]),
+        ).fetchone()
+        if after and after["status"] != "published" and after["status"] != "rejected":
+            conn.execute(
+                "UPDATE public_contribution_items SET status = 'failed', "
+                "error_message = '题目处理结束，但没有有效的公共题库 resolution', "
+                "updated_at = CURRENT_TIMESTAMP WHERE request_id = ? "
+                "AND public_detail_id = ? AND status != 'rejected'",
+                (request_id, row["question_detail_id"]),
+            )
+            after = {"status": "failed"}
+        if before and before["status"] != after["status"]:
+            updated += 1
 
-    for request_id in request_ids:
+    for request_id, interview_ids in request_interviews.items():
         states = conn.execute(
             "SELECT status FROM public_contribution_items WHERE request_id = ?",
             (request_id,),
         ).fetchall()
         statuses = {state["status"] for state in states}
-        if statuses & {"queued", "processing", "approved_for_processing", "failed"}:
+        for interview_id in interview_ids:
+            refresh_public_interview_projection(conn, public_interview_id=interview_id)
+        if statuses & {"queued", "processing", "approved_for_processing"}:
+            continue
+        if "failed" in statuses:
+            # Failed children are retryable; keep a mixed request partially
+            # published, or failed when no item has a valid public resolution.
+            published_count = conn.execute(
+                "SELECT COUNT(*) FROM public_contribution_items "
+                "WHERE request_id = ? AND status = 'published'",
+                (request_id,),
+            ).fetchone()[0]
+            final_status = "partially_published" if published_count else "failed"
+            current = _request_row(conn, request_id)
+            if current and current["status"] != final_status:
+                conn.execute(
+                    "UPDATE public_contribution_requests SET status = ?, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (final_status, request_id),
+                )
+                _event(
+                    conn,
+                    request_id,
+                    None,
+                    "public_queue_completed_with_failures",
+                    current["status"],
+                    final_status,
+                    {},
+                )
             continue
         final_status = "partially_published" if "rejected" in statuses else "published"
+        current = _request_row(conn, request_id)
         conn.execute(
             "UPDATE public_contribution_requests SET status = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE id = ? AND status IN ('queued', 'processing', 'approved_for_processing', 'failed')",
             (final_status, request_id),
         )
-        _event(conn, request_id, None, "public_queue_completed", "queued", final_status, {})
+        if current and current["status"] != final_status:
+            _event(conn, request_id, None, "public_queue_completed", current["status"], final_status, {})
+    if root_import_ids:
+        from app.services.upload_lifecycle import refresh_completed_upload_roots
+
+        refresh_completed_upload_roots(conn, root_import_ids)
     conn.commit()
     return updated
 

@@ -10,7 +10,6 @@ async def persist_public_node(state: SubmitState) -> dict:
     """公共题库: 写入 interview + questions_detail + 入队"""
     from app.db.operations import submit_interview_txn_tag_only
     from app.db.connection import run_db, get_current_job_position
-    from app.services.pipeline import enqueue_questions
 
     with NodeTimer() as timer:
         data = state.get("extracted_data", {})
@@ -19,6 +18,7 @@ async def persist_public_node(state: SubmitState) -> dict:
         saved_url = state.get("saved_url", "")
         season = state.get("season", "")
         is_admin = state.get("is_admin", False)
+        import_id = state.get("import_id")
         if not is_admin:
             raise PermissionError("普通用户的公共化必须先创建审核申请")
         record_owner_id = None
@@ -27,7 +27,8 @@ async def persist_public_node(state: SubmitState) -> dict:
         questions = "\n".join(
             f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
         )
-        interview_id = await run_db(
+        source_ordinals = data.get("题目 ordinal") or None
+        interview_id, _detail_ids = await run_db(
             lambda: submit_interview_txn_tag_only(
                 saved_url,
                 data,
@@ -37,9 +38,12 @@ async def persist_public_node(state: SubmitState) -> dict:
                 record_status,
                 current_pos,
                 tagged_rows,
+                import_id=import_id,
+                source_ordinals=source_ordinals,
+                enqueue=True,
+                return_detail_ids=True,
             )
         )
-        enqueue_questions(interview_id)
 
     emit_progress(state, "match", "已保存面经并加入聚类队列")
     return {
@@ -63,7 +67,10 @@ async def cluster_public_node(state: SubmitState) -> dict:
     from app.services.pipeline.queue import _run_cluster_batch_in_background
 
     with NodeTimer() as timer:
-        scheduled = await _run_cluster_batch_in_background(user_id=state.get("user_id"))
+        schedule_kwargs = {"user_id": state.get("user_id")}
+        if state.get("import_id"):
+            schedule_kwargs["root_import_id"] = str(state["import_id"])
+        scheduled = await _run_cluster_batch_in_background(**schedule_kwargs)
 
     emit_progress(
         state,
