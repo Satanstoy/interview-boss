@@ -162,3 +162,55 @@ async def test_worker_failure_aggregates_root_to_failed(
         "WHERE import_id = 'imp-1' AND status = 'failed'"
     ).fetchone()["c"]
     assert failed_stages >= 1
+
+async def test_worker_share_binds_contribution_to_root(
+    client, monkeypatch, test_db
+):
+    """F-PUBLIC：share 完成后 worker 建公共化申请并回写
+    upload_imports.contribution_request_id（端到端审计/快照链路）。"""
+
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="share", actor_id=101)
+    # 假 graph 返回已落库 interview_id（真实节点产物）+ 一条明细
+    interview_id = test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (777, 'internal://share-e2e', 101, 'approved', '后端开发') RETURNING id"
+    ).fetchone()["id"]
+    test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, url, question, company, "
+        "cat1, cat2, status, owner_id) VALUES "
+        "(8001, ?, 'internal://share-e2e', 'TCP 三次握手', '字节', '网络', 'TCP', 'approved', 101)",
+        (interview_id,),
+    )
+    test_db.commit()
+
+    async def _stream(input_state, result_collector=None):
+        yield format_sse(
+            make_done_event("interview", "personal", {})
+        )
+        if result_collector is not None:
+            result_collector["final_state"] = {
+                "doc_type": "interview",
+                "target": "personal",
+                "extracted_data": {},
+                "saved_interview_id": int(interview_id),
+            }
+            result_collector["answer_tasks"] = []
+
+    monkeypatch.setattr("app.agents.submit.graph.stream_submit_graph", _stream)
+
+    await submit_import_task({}, job_id)
+
+    root = test_db.execute(
+        "SELECT contribution_request_id, status, revision FROM upload_imports "
+        "WHERE id = 'imp-1'"
+    ).fetchone()
+    assert root["contribution_request_id"] is not None, (
+        "share 完成后 root 必须绑定公共化申请（此前零写入）"
+    )
+    request_status = test_db.execute(
+        "SELECT status FROM public_contribution_requests WHERE id = ?",
+        (root["contribution_request_id"],),
+    ).fetchone()
+    assert request_status is not None
