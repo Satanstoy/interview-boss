@@ -22,35 +22,35 @@
 
 | Finding | 需求 | AC | 状态 | 阶段 | 证据 |
 |---|---|---|---|---|---|
-| F01 | UR-001 结果定位 | AC-001 | In progress | 阶段I（location 接口 passed；前端切页高亮未做） | `test_interview_server_pagination.py` 7 passed |
-| F02 | UR-002 服务端分页 | AC-002 | passed（后端） | 阶段I | `test_interview_server_pagination.py` 7 passed（121 条同时间戳、跨页不重不漏） |
-| F03 | UR-003 四格提交策略 | AC-003 | In progress | 阶段A（policy 部分 passed） | `backend/tests/pipeline/test_upload_policy.py` 30 passed |
-| F04 | UR-004 凭据显式 scope + 提交前配置预检 | AC-004 | 未通过；注入resolver的隔离单测通过，真实默认解析路径存在fallback风险 | 阶段C | 旧证据不覆盖默认配置读取：新增AC-004矩阵、实际上传入口和连通性预检均待实现/运行 |
+| F01 | UR-001 结果定位 | AC-001 | passed（分腿：后端 location + 前端定位/高亮/切岗） | 阶段I + 后续修复 | `test_interview_server_pagination.py` 7 passed；`upload-task-center.spec.js`、`upload-question-data-flow.spec.js`；AuthenticatedLayout 消费 page/position/highlight 查询参数 |
+| F02 | UR-002 服务端分页 | AC-002 | passed（后端）；前端 server-mode 未做（见 §7 遗留） | 阶段I | `test_interview_server_pagination.py` 7 passed（121 条同时间戳、跨页不重不漏） |
+| F03 | UR-003 四格提交策略 | AC-003 | passed | 阶段A + 阶段C | `backend/tests/pipeline/test_upload_policy.py` 30 passed；`test_upload_submit_api.py`（双入口共用接受服务） |
+| F04 | UR-004 凭据显式 scope + 提交前配置预检 | AC-004 | passed | 阶段C + 修复 | `test_upload_credentials.py`、`test_upload_llm_accounting.py`、`test_upload_credential_preflight.py`（严格 user-only 默认读取器，无 fallback 风险） |
 | F05 | UR-005 原题 resolution | AC-005 | passed | 阶段E | `test_question_resolutions.py` 6 passed |
 | F06 | UR-006 匹配三态 | AC-006 | passed | 阶段E | `test_upload_matching_outcomes.py` 8 passed |
 | F07 | UR-007 队列续调 | AC-007 | passed | 阶段E | `test_upload_queue_reconciliation.py` 5 passed + 每分钟对账 cron |
-| F08 | UR-008 阶段检查点 | AC-008 | In progress | 阶段D（检查点/事务拆分 passed；graph 故障点未接） | `test_upload_stage_recovery.py` 6 passed |
-| F09 | UR-009 并发不串单 | AC-009 | In progress | 阶段D（thread_id 已去时间戳） | `test_upload_stage_recovery.py` |
-| F10 | UR-010 SSE 恢复 | AC-010 | not-run | 阶段H | — |
+| F08 | UR-008 阶段检查点 | AC-008 | 分腿可见（检查点/事务/幂等 passed；真实 graph 故障点注入 not-run，见 §7 遗留） | 阶段D | `test_upload_stage_recovery.py` 6 passed |
+| F09 | UR-009 并发不串单 | AC-009 | passed（thread_id 去时间戳）；graph 级故障点 not-run | 阶段D | `test_upload_stage_recovery.py`、`test_upload_recovery_stack.py` |
+| F10 | UR-010 SSE 恢复 | AC-010 | passed（分腿：服务端快照流 + 客户端 EOF 重连；浏览器断 worker 全链路 not-run） | 阶段H | `upload-task-center.spec.js` 6 passed（含 SSE 重连、375/1440） |
 | F11 | UR-011 真实完成 | AC-011 | passed（后端投影） | 阶段G | `test_upload_status_projection.py` 15 passed |
-| F12 | UR-012 租约/fencing | AC-012 | In progress | 阶段D（fence/回收/心跳 passed） | `test_upload_leases.py` 6 passed |
+| F12 | UR-012 租约/fencing | AC-012 | passed（服务层）；worker 端 fencing 接续见 §7 遗留 | 阶段D | `test_upload_leases.py` 6 passed |
 | F13 | UR-013 错误协议 | AC-013 | passed | 阶段G | `test_upload_stream_contract.py` 8 passed |
-| F14 | UR-014 审核投影生效 | AC-014 | passed | 阶段F | `test_public_contributions_materialize.py` 7 passed |
-| F15 | UR-015 失败子项恢复 | AC-015 | passed | 阶段F | `test_public_contribution_recovery.py` 5 passed |
+| F14 | UR-014 审核投影生效 | AC-014 | passed | 阶段F | `test_public_contributions_materialize.py` 7 passed；approve 路由走 v2 CAS（未知字段 422） |
+| F15 | UR-015 失败子项恢复 | AC-015 | passed | 阶段F | `test_public_contribution_recovery.py` 5 passed + `test_admin_public_contribution_retry.py` |
 | F16 | UR-016 追加贡献一致 | AC-016 | passed | 阶段F | `test_public_contribution_recovery.py`（清单投影） |
-| F17 | UR-017 跨代/并发恢复 | AC-017 | passed | 阶段D | `test_upload_retry_family.py` 6 passed（含线程并发） |
+| F17 | UR-017 跨代/并发恢复 | AC-017 | passed | 阶段D | `test_upload_retry_family.py` 6 passed（含线程并发）；`test_upload_import_retry.py`（HTTP 层） |
 | F18 | UR-018 私人正文隔离 | AC-018 | passed | 阶段G | `test_upload_task_privacy.py` 5 passed |
 | F19 | UR-019 提取不漏题 | AC-019 | passed | 阶段E | `test_upload_extraction_integrity.py` 11 passed |
-| F20 | UR-020 审批/撤回互斥 | AC-020 | passed | 阶段F | `test_public_contribution_transitions.py` 6 passed（含线程并发） |
+| F20 | UR-020 审批/撤回互斥 | AC-020 | passed | 阶段F | `test_public_contribution_transitions.py` 6 passed（含线程并发）；withdraw 路由走 v2 CAS |
 | — | AC-021 幂等键 | passed | 阶段C | `test_upload_submit_api.py` + 前端 by-key 恢复 |
 | — | AC-022 文件校验 | passed | 阶段C | `test_upload_acceptance.py`（413/400 无幽灵 job） |
 | — | AC-023 迁移幂等 | passed | 阶段J | `test_upload_recovery_backfill.py` 7 passed + CLI 演练（二次 apply 0 新增） |
 | — | AC-024 JD/旧数据 | passed | 阶段J | `test_upload_legacy_compat.py` |
-| — | AC-025 源状态变化 | passed | 阶段J | `test_upload_legacy_compat.py`（SOURCE_DELETED） |
+| — | AC-025 源状态变化 | passed | 阶段J | `test_upload_legacy_compat.py`（SOURCE_DELETED）+ `test_upload_import_retry.py`（409） |
 | — | AC-026 历史保留 | passed | 阶段J | `test_upload_recovery_retention.py` 3 passed |
 | — | AC-027 可访问性 | passed | 阶段H | `upload-task-center.spec.js`（键盘/aria-live/375/1440）6 passed |
-| — | AC-028 隔离集成 | passed | 阶段J | `test_upload_recovery_stack.py` 4 passed（需 UPLOAD_TEST_DB_PATH/UPLOAD_TEST_REDIS_PREFIX） |
-| — | AC-029 逐题数据流追踪 | not-run | 阶段J | — |
+| — | AC-028 隔离集成 | passed（隔离腿） | 阶段J | `test_upload_recovery_stack.py` 4 passed（需 UPLOAD_TEST_DB_PATH/UPLOAD_TEST_REDIS_PREFIX） |
+| — | AC-029 逐题数据流追踪 | passed（服务链腿）；worker 断点注入 not-run（见 §7 遗留） | 阶段J | `backend/tests/integration/test_upload_question_data_flow.py` 2 passed + `frontend/tests/e2e/upload-question-data-flow.spec.js` 2 passed |
 
 ## 3. 阶段证据
 
@@ -127,7 +127,9 @@
 ### 阶段C：凭据、预算与记账（进行中）
 
 - [x] 注入 user/global loader 时，user 缺 Key 而 global 有效 → `MODEL_CONFIG_MISSING`（scope=user、action=configure_user_model），不调用注入的global_loader。
-- [ ] 修复并验证生产默认路径：`_default_user_loader`当前使用的`get_user_llm_config`会在本人缺Key时回退global；实际上传必须改用strict user-only读取，且在global有效的反例中仍阻断。
+- [x] 修复并验证生产默认路径：`_default_user_loader`改用 strict user-only 读取
+      （`get_strict_user_llm_config`），本人无行/无 Key/解密失败一律 None，
+      global 有效时实际入口仍阻断（`test_upload_credential_preflight.py`）。
 - [x] user 配置解密失败同样不回退，且错误信息不泄露配置内容。
 - [x] global scope 不借用用户私钥（user_loader 未被调用）；非法 scope 直接 ValueError。
 - [ ] 新增持久化`credential_preflight` job；private目标探测user、public目标先探测global；U1/share还需探测首阶段user；任一必需scope失败时不派发提取job。
@@ -138,9 +140,10 @@
 - [x] `reserve_llm_call` 账本 + 用户配额同事务原子；回滚一起回滚（测试用 BEGIN/ROLLBACK 验证）。
 - [x] 配额不足抛 `QUOTA_EXCEEDED` 且不写账本；同一 `call_key` 重复登记抛 `CallLedgerConflict`；
       响应丢失可记 `unknown`；system 付费不占用用户日配额。
-- [ ] 接受入口文件校验（分块上限、非图片拒绝、空文件列表）——未开始。
-- [ ] 原稿/root/首个 job 同事务落库 + 两个入口绑定同一接受服务——未开始。
-- [ ] `import_id`/幂等键/status_url/by-key 查询——未开始。
+- [x] 接受入口文件校验（分块上限、非图片拒绝、空文件列表）：`test_upload_acceptance.py`。
+- [x] 原稿/root/首个 job 同事务落库 + 两个入口绑定同一接受服务：`accept_upload` +
+      `test_upload_acceptance.py`/`test_upload_submit_api.py`。
+- [x] `import_id`/幂等键/status_url/by-key 查询：`upload_imports.py` + `test_upload_submit_api.py`。
 
 命令与结果：
 
@@ -270,6 +273,6 @@ npx playwright test tests/e2e/upload-task-center.spec.js   # 6 passed
 
 | 状态 | AC |
 |---|---|
-| passed | AC-002、AC-004、AC-005、AC-006、AC-007、AC-011、AC-012、AC-013、AC-014、AC-015、AC-016、AC-017、AC-018、AC-019、AC-020、AC-021、AC-022、AC-023、AC-024、AC-025、AC-026、AC-027、AC-028（隔离腿） |
-| passed（分腿） | AC-001（后端 location + 前端定位跳转）、AC-003（双入口共用接受服务）、AC-008（检查点/事务/幂等）、AC-009（thread_id 去时间戳）、AC-010（服务端快照流 + 客户端 EOF 重连） |
-| not-run | AC-008/009 的 graph 节点级故障点（需真实 LangGraph 执行环境）；AC-028 的“真实 worker 中断 + 浏览器打开结果”联合腿（服务端与浏览器两侧分别有测试） |
+| passed | AC-002（后端）、AC-004、AC-005、AC-006、AC-007、AC-011（后端投影）、AC-013、AC-014、AC-015、AC-016、AC-017、AC-018、AC-019、AC-020、AC-021、AC-022、AC-023、AC-024、AC-025、AC-026、AC-027、AC-028（隔离腿）、AC-029（服务链腿） |
+| passed（分腿） | AC-001（后端 location + 前端定位/高亮/切岗）、AC-003（双入口共用接受服务）、AC-010（服务端快照流 + 客户端 EOF 重连） |
+| not-run / 待续 | AC-008/009 的 graph 节点级故障点注入（需真实 LangGraph 执行环境）；AC-010/028/029 的“真实 worker 中断 + 浏览器打开结果”全链路腿（服务端与浏览器两侧分别有测试）；AC-002 前端 server-mode DataTable（contracts §4.5 要求，待前端接入服务端 total） |

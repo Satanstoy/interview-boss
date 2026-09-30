@@ -23,13 +23,14 @@
 | `admin_assistant.py` | `/api/admin/assistant/*` | 管理员 AI 助手（聚合质量审查）：`POST /chat`（LLM tool-calling，读工具即时执行，写工具只暂存为待确认）、`POST /confirm`（确认并执行写操作，重新校验 + reviewed_by 留痕）、`GET /history`（会话日志）。全部 `Depends(get_admin_user)`；工具 schema 只在后端，前端从不持有 |
 | `admin_source_health.py` | `/api/admin/source-health/*` | 来源健康（同签名重复公共面经）：`GET /duplicate-groups`（列表，`table=interview|jd`）、`POST /duplicate-groups/merge`（body `{signature, table, dry_run}`，默认 dry_run 预览；真实执行保留 MIN id 软删其余）。业务逻辑在 `services/interview_merge_service`，只处理公共面经（`owner_id IS NULL`） |
 | `admin_review.py` | `/api/master-bank/*` | 管理员审核、合并历史、聚类维护 |
+| `upload_imports.py` | `/api/upload-imports*`、`/api/admin/upload-operations` | 上传恢复任务查询/恢复（contracts §4.1）：本人分页列表、`by-key` 幂等键查询（**静态路径先于 `{id}` 注册**）、本人快照（非本人含管理员一律 404）、SSE 快照流（先授权、2 秒轮询、15 秒心跳、终态结束）、`POST /{id}/retry`（恢复剩余工作，返回 created_attempt）、admin 运维白名单（只暴露状态/配置指纹，不返回正文/公司/Key）。业务在 `services/upload_lifecycle`/`upload_status`/`upload_retry_budget` |
+| `public_contributions.py` | `/api/public-contributions/*`、`/api/admin/public-contributions/*` | 私有 JD/面经公共化申请：用户侧 create/mine/详情/withdraw（v2 CAS，`withdraw_public_contribution_v2`）、管理员侧 list/详情/approve（**v2 CAS + 严格投影 DTO**，`expected_revision` 缺省取当前 revision；`StateConflict→409`、`ReviewFieldError→422`）/reject/`retry`（重试失败公共子项，StateConflict→409）。approve 必须走 `services.public_contributions.finalize_public_contribution_approval` 统一入口（落库 + 聚类攒批调度），**禁止在路由层导入 pipeline 调度函数** |
 | `coding.py` | `/api/coding/*` | 手撕代码练习（题目/题单/导入/提交/语言与 LeetCode/ACM 模式/错误统计） |
 | `audio.py` | `/api/audio/*` | 语音转文字（Deepgram） |
 | `error_report.py` | `/api/error-report` | 前端错误上报（匿名）。限长防刷：最多 50 条、单字段截断 2000、超限返回 ok:false |
 | `interview_distribution.py` | `/api/interview/distribution/*` | 模拟面试题型的系统默认分布与用户岗位偏好 |
 | `admin_evaluation.py` | `/api/admin/evals/*` | 评测控制面（admin-only）：capabilities / releases / benchmarks / runs（创建、列表、详情、cancel）、`runs/{id}/items/{item_id}`（兼容旧取证接口）、`runs/{id}/items/{item_id}/evidence`（版本化 Case Evidence View：冻结输入、Harness/Target 结果、指标、尝试与文件证据）、`retry-failed`（支持 created 孤儿重投，**每次入队必须传唯一 job id**，enqueue 返回 None 时不标记 queued）、`runs/{id}/events` SSE、experiments（创建/列表/详情/cancel/events SSE；`_refresh_experiment` 只在状态或进度实际变化时写库，避免 GET/SSE 读路径每次轮询写库） |
 | `health.py` | `/api/health` | 健康检查 |
-| `public_contributions.py` | `/api/public-contributions/*`, `/api/admin/public-contributions/*` | 私有 JD/面经公共化申请：用户侧 create/mine/详情/withdraw（属主校验），管理员侧 list/详情/approve/reject。approve 必须走 `services.public_contributions.finalize_public_contribution_approval` 统一入口（落库 + 聚类攒批调度），**禁止在路由层导入 pipeline 调度函数** |
 
 ## 子路由包
 

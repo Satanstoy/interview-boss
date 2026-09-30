@@ -6,7 +6,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `config.py` | 数据库热加载配置（`_reload_from_db()`）、环境变量、`.env` 同步 |
+| `config.py` | 数据库热加载配置（`_reload_from_db()`）、环境变量、`.env` 同步；LLM 配置读取器：`get_user_llm_config`（通用，缺 Key 回退 global）与 `get_strict_user_llm_config`（**只读本人、绝不回退 global**，上传恢复链路私人阶段专用） |
 | `auth.py` | JWT Access Token (15min) + Refresh Token (HttpOnly Cookie, JTI 跟踪, 轮转) |
 | `prompts.py` | LLM 提示词模板（SYSTEM_PROMPT、TAGGING_PROMPT、ANSWER_PROMPT、CODING_REVIEW_PROMPT、CODING_HINT_PROMPT） |
 | `logging_config.py` | 日志配置（structlog 双模式：生产 JSON / 开发彩色） |

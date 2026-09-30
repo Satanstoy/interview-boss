@@ -57,7 +57,17 @@
 | `job_position_service.py` | 岗位标准化与别名解析：复用 `interview_distribution_config.JOB_FAMILY_BY_POSITION` 的岗位族映射，提供精确的岗位发现、canonical name 解析和别名归一（连续空格/首尾空格/英文大小写/斜杠空格归一化）；未知岗位返回 `UNKNOWN_JOB_POSITION` | `core/interview_distribution_config` |
 | `llm_judge.py` | LLM 结构化判断统一工具（聚类验证层与检索 rerank 共用）：`parse_json_object()` / `parse_json_array()` 容错提取 JSON（容忍 markdown 代码块/前后文字/对象包裹），整体解析失败时逐个提取对象/数组元素 | — |
 | `mcp_token_service.py` | 账户级 MCP Token 生命周期：`generate_mcp_token()` 生成 opaque token（HMAC-SHA256 派生）、`validate_mcp_token()` 验证、`revoke_mcp_token()` 吊销；Token 与账户一一对应，轮换后旧 Token 立即失效 | `core/auth`, `db/connection` |
-| `public_contributions.py` | 私有 JD/面经公共化申请工作流：`create_public_contribution_request`（快照按 `owner_id = requester` 限定，不可变快照为审核对象）、`finalize_public_contribution_approval`（**审批统一入口**：落库 + 进入聚类队列时调度后台攒批，路由层不接触 pipeline）、`approve/reject/withdraw`、`_event` 审计事件只追加。**公开物化走字段白名单**（interview 与 jd 同口径，私有快照的非白名单列含未来新增列一律不外泄，audit D5）；公共投影按 URL 去重，`owner_id=NULL + status='approved'` | `db/connection`, `pipeline/queue`, `db/utils` |
+| `public_contributions.py` | 私有 JD/面经公共化申请工作流：`create_public_contribution_request`（快照按 `owner_id = requester` 限定，不可变快照为审核对象）、`finalize_public_contribution_approval`（**审批统一入口**：v2 CAS 原子批准 + 投影物化 + 进入聚类队列时调度后台攒批，路由层不接触 pipeline）、`approve/reject/withdraw`、`retry_failed_public_items`（管理员重试失败公共子项，复用同一投影不改审核状态）、`publish_items_with_resolutions`（**持有当前有效 public resolution 才 published**，rejected 排除项跳过）、`refresh_public_interview_projection`、`_event` 审计事件只追加。**公开物化走审核投影字段白名单**（interview 与 jd 同口径，敏感来源字段 company/round/source_url 默认不公开，只有显式确认才公开，不可回落原快照；非白名单列含未来新增列一律不外泄，audit D5）；公共投影按 URL 去重，`owner_id=NULL + status='approved'` | `db/connection`, `pipeline/queue`, `db/utils` |
+| `upload_policy.py` | 上传提交策略四格解析（纯函数）：普通/管理员 × 私人/公共；拒绝客户端伪造 `is_admin/owner_id/credential_scope` 等策略字段；非法 target 400 | — |
+| `upload_credentials.py` | 本链路严格凭据解析：`credential_scope` 仅 user/global，user scope 走 `get_strict_user_llm_config`（**绝不回退 global**，AC-004）；`reserve_llm_call`/`complete_llm_call` 调用账本与配额同事务（不自行 commit）；解析结果只暴露 `config_fingerprint` | `core/config`, `llm_quota` |
+| `upload_lifecycle.py` | 上传接受与恢复：`accept_upload`（原稿+根任务+attempt+首个 job 同事务、文件预校验、凭据预检失败置 needs_action）、`restore_upload`（同一业务任务至多一个 active attempt）、`compute_request_hash`、`build_thread_id`（import+attempt+job，禁止秒级时间戳） | `upload_policy`, `upload_credentials`, `upload_repository` |
+| `upload_repository.py` | upload recovery 事务内读写：`create_or_get_import`（同幂等键同 hash 复用/不同 hash `IdempotencyConflict`）、`create_attempt`（partial unique 兜底单 active）、`save_stage_result`/`get_stage_result`（UNIQUE(import,stage,unit,input_version)）；**一律不 commit** | — |
+| `upload_status.py` | 根任务状态聚合与操作白名单（AC-011）：running→queued→needs_action→partial_failed/failed→waiting_review→completed；`allowed_actions` 只返回服务端授权动作，无暂停能力绝不出现暂停 | — |
+| `upload_queue.py` | v2 聚类队列调度：桶=(root,scope,岗位) 选桶续调、60 秒对账补幂等 job、孤儿转 blocked 保留证据 | `db/connection` |
+| `upload_retry_budget.py` | 统一错误分类与重试预算（AC-013）：错误码 → 是否自动重试/根状态/动作；物理尝试 3 次、30/60 秒退避；快照 SSE 事件构造 | `models/upload_contracts` |
+| `extraction_integrity.py` | 提取结果完整性（AC-019）：结构错误（null/数字/重复 ordinal）抛 `MODEL_OUTPUT_INVALID`；HR 表述只标记不删除；counts 守恒 | — |
+| `question_resolution.py` | 原题↔规范题关联（AC-005）：`record_resolution`（每 detail 一个当前 resolution，scope 自洽校验）、`invalidate_resolutions_for_canonical`、`list_mine_canonical_ids`（mine 视图 EXISTS 去重） | `db/connection` |
+| `upload_backfill.py` | 历史 upload recovery 回填规划（AC-023）：parent 链建 root、环/断链列入报告不猜测、`--apply` 需 manifest hash | — |
 
 ## 核心规则
 
