@@ -315,9 +315,14 @@ npx playwright test tests/e2e/upload-task-center.spec.js \
 
 # 新增全栈链路（隔离协议，UPLOAD_TEST_* 门禁）
 UPLOAD_TEST_DB_PATH=/tmp/r12.db UPLOAD_TEST_REDIS_PREFIX=r12 \
-  .venv/bin/python -m pytest -q backend/tests/integration/test_upload_recovery_fullstack.py
-# 1 passed：accept → 预检 → 真实 worker graph 提取/分类/落库（import_id/
-# source_ordinal + resolution）→ 公共化审核物化 → 失败恢复，实体全由代码产生
+  .venv/bin/python -m pytest -q backend/tests/integration/test_upload_recovery_fullstack.py backend/tests/integration/test_upload_recovery_stack.py
+# 6 passed：包含
+#   - R12 真实 worker graph：accept → 预检 → 提取/分类/落库（import_id/
+#     source_ordinal + resolution）→ 公共化审核物化 → 失败恢复；
+#   - F08 检查点复用：恢复后的新 attempt 读取已成功 extract/tag 检查点
+#     短路复用（LLM 调用计数不变、明细不重复）；
+#   - F09/F12 租约 fencing：stale generation 根聚合被拒、不留痕
+#     （3 个集成文件同进程连跑 8 passed，AC-029 已自包含隔离）。
 
 cd frontend
 npm run build                          # exit 0（R08/R09 接入幂等提交 + 服务端分页）
