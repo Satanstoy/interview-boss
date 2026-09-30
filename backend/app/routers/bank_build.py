@@ -18,8 +18,13 @@ router = APIRouter()  # NO prefix - paths include both /api/jobs/... and /api/ma
 
 @router.get("/api/jobs/{job_id}/stream")
 async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user)):
-    """Stream job progress via SSE."""
-    is_admin = user.get("is_admin", 0)
+    """Stream job progress via SSE（本人任务专属，AC-018/R07）。
+
+    旧实现 ``is_admin=1 OR created_by=user`` 允许管理员读取任意用户任务的
+    私人正文（submit worker 会把提取结果写进 jobs.result）。admin 的运维
+    可见范围收敛到 `/api/admin/upload-operations` 白名单；旧接口一律 owner
+    校验，非本人（含管理员）返回 404，不泄露任务存在性与正文。
+    """
     user_id = user["id"]
 
     async def event_generator():
@@ -30,8 +35,8 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 with get_db_connection() as conn:
                     return conn.execute(
                         "SELECT status, progress_current, progress_total, progress_message, progress_phase, result, last_error "
-                        "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
-                        (job_id, is_admin, user_id),
+                        "FROM jobs WHERE id = ? AND created_by = ?",
+                        (job_id, user_id),
                     ).fetchone()
 
             job = await run_db(_check)
@@ -77,16 +82,15 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
 
 @router.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: int, user: dict = Depends(get_current_user)):
-    """Get job status (non-streaming)."""
-    is_admin = user.get("is_admin", 0)
+    """Get job status (non-streaming)（本人任务专属，AC-018/R07）。"""
     user_id = user["id"]
 
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, job_type, status, progress_current, progress_total, progress_message, last_error AS error, created_at, completed_at "
-                "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
-                (job_id, is_admin, user_id),
+                "FROM jobs WHERE id = ? AND created_by = ?",
+                (job_id, user_id),
             ).fetchone()
 
     job = await run_db(_query)
