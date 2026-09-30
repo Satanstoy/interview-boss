@@ -9,7 +9,7 @@ F-MATCHING	FIXED cac93f4d	AC-006	match_outcomes 三态生产零调用；match_ne
 F-PUBLIC	FIXED cac93f4d (root-bind; 公共节点 resolution 仍部分)	AC-015/README admin	公共节点无 resolution、无 link_details_to_import；audit_public_import 无审计落库；root.contribution_request_id 不写	backend/app/agents/submit/persist_public.py:21-42;upload_policy.py:202	公共明细补 resolution；写审计记录；root 关联 contribution_request_id
 F-QUEUE-RECOVER	FIXED a3e4dac4	contracts §2.5	analysis_queue 超时回收按 created_at 而非 locked_until	backend/app/services/pipeline/queue.py:141-145;migrations/upload_resolution.py:95	改用 locked_until
 F-ENQUEUE-ROOT	FIXED (persist_personal 传 root; 其余调用点仍靠兜底)	AC-007	8 个 enqueue_questions 调用点无一显式传 root_import_id；首轮依赖 questions_detail.import_id 兜底（私人 enqueue 先于 link、公共从不 link）	backend/app/services/pipeline/queue.py:67-79;persist_personal.py:218,288;persist_public.py:42	调用方显式传 root_import_id
-F-DATATABLE	FRONT	contracts §4.5	DataTable 仍 client 分页（rows.length 当 total + slice）；interviewTotal 零消费方	frontend/src/components/common/DataTable.vue:5,130;useMasterBankData.js:83	DataTable 加 server 模式，传服务端 total
+F-DATATABLE	FIXED 657eb593	contracts §4.5	DataTable 仍 client 分页（rows.length 当 total + slice）；interviewTotal 零消费方	frontend/src/components/common/DataTable.vue:5,130;useMasterBankData.js:83	DataTable 加 server 模式，传服务端 total
 F-RESOLVED-TYPE	FIXED ea8a4edc	contracts §1.1	auto 识别不落 resolved_type（硬编 interview、repository 参数从不传）	backend/app/services/upload_lifecycle.py(accept_upload);upload_repository.py:40	根据 content_type_hint/识别结果回填 resolved_type
-F-E2E-PUBLIC	FRONT	acceptance §194	public-contribution-review.spec.js 不存在；验收命令无法完整执行	ls frontend/tests/e2e/public-contribution-review.spec.js (missing)	补该 e2e（mock API）
+F-E2E-PUBLIC	FIXED e91bc22f	acceptance §194	public-contribution-review.spec.js 不存在；验收命令无法完整执行	ls frontend/tests/e2e/public-contribution-review.spec.js (missing)	补该 e2e（mock API）
 F-REVIEW-TOAST	FRONT	AC-001	切岗无显式提示（仅列表重拉+高亮，无 toast"已切换到 XX 岗位"）	AuthenticatedLayout.vue:674-676	补显式岗位切换提示
