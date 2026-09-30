@@ -159,6 +159,8 @@ const {
   availableSubTags, interviewSeasons, practicedQuestions,
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadActiveSeason, loadAllData, formatDate,
+  interviewTotal,
+  loadInterviewPage,
 } = useMasterBankData({ onAfterFetch: () => afterFetchCleanup() })
 
 // ── Build（题库重建） ──
@@ -584,6 +586,8 @@ provide('appData', {
   // Fetch
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadAllData, formatDate,
+  interviewTotal,
+  loadInterviewPage,
   // Auth
   displayUser, isAuthenticatedForUi, currentUser,
   pendingReviewCount, showLoginModal,
@@ -678,6 +682,8 @@ watch(
     const pageNumber = Math.max(1, parseInt(String(page), 10) || 1)
     interviewCurrentPage.value = pageNumber
     highlightInterviewId.value = String(highlight)
+    // contracts §4.5：定位目标页时向服务端拉取该页数据
+    loadInterviewPage(pageNumber, interviewPageSize.value)
     locationQueryConsumed.value = true
     // 消费后清理 query，避免刷新再次触发/污染 URL
     if (String(route.query.page || '') !== String(pageNumber) || String(route.query.highlight || '') !== String(highlight)) {

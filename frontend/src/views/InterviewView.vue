@@ -53,6 +53,7 @@
     <InterviewDataTable
       :columns="interviewColumns"
       :rows="filteredInterviewData"
+      :server-total="interviewTotal"
       :selected-count="interviewSelection.selectedCount.value"
       :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
       :batch-actions="interviewBatchActions"
@@ -62,8 +63,8 @@
       @toggle-select-all="interviewSelection.toggleSelectAll()"
       @invert-selection="interviewSelection.invertSelection()"
       @toggle-item="interviewSelection.toggleItem($event)"
-      @update:current-page="interviewCurrentPage = $event"
-      @update:page-size="interviewPageSize = $event"
+      @update:current-page="onInterviewPageChange($event)"
+      @update:page-size="onInterviewPageSizeChange($event)"
     >
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-1">
@@ -163,10 +164,23 @@ const {
   reprocessingIds, reprocessProgress,
   returnTab, handleReturn, floatingReturnBtn, floatingBtnStyle,
   returnToPracticeMode, formatDate,
+  interviewTotal,
+  loadInterviewPage,
 } = inject('appData')
 
 const toast = useToast()
 const contributionIds = ref(new Set())
+
+// R13/contracts §4.5：page/pageSize 变化时向服务端拉取对应页（server 模式）
+const onInterviewPageChange = (page) => {
+  interviewCurrentPage.value = page
+  loadInterviewPage(page, interviewPageSize.value)
+}
+const onInterviewPageSizeChange = (pageSize) => {
+  interviewPageSize.value = pageSize
+  interviewCurrentPage.value = 1
+  loadInterviewPage(1, pageSize)
+}
 
 const isOwnPrivateInterview = (row) => (
   row.owner_id != null && Number(row.owner_id) === Number(displayUser?.id)

@@ -75,11 +75,16 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     filteredTagCountsFromServer.value = []
     try {
       const [jdResp, intResp, masterResp] = await Promise.all([
-        api.fetchJdData(), fetchAllInterviewPages(), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
+        api.fetchJdData(), loadInterviewPage(1, 100), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
       ])
       if (currentRequestVersion !== requestVersion.value) return
+      // 招聘季全集独立拉取（server 模式下面经数据仅当前页，season 选项需全集）
+      fetchInterviewSeasonSource()
+          .then(source => { interviewSeasonSource.value = source })
+          .catch(() => {})
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
-      interviewData.value = (intResp.items || intResp).map(item => ({ ...item }))
+      // 面经：服务端分页数据（seasons 从独立全集源推断）
+      interviewData.value = interviewPageData.value
       interviewTotal.value = intResp.total ?? interviewData.value.length
       const items = (masterResp.items || masterResp).map(decorateQuestion)
       masterBank.value = items
@@ -97,37 +102,45 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   }
 
   /**
-   * 拉取全部面经历页（R09/AC-002）：以服务端 total 为准循环取页，
-   * 不再只取第一页 100 条本地切片；筛选/排序与 location 接口同协议。
+   * 拉取面经单页（AC-002/contracts §4.5）：分页由服务端驱动，
+   * total 以服务端为准；返回 {items, total}。
    */
-  const fetchAllInterviewPages = async () => {
-    const pageSize = 100
-    const first = await api.fetchInterviewData({
-      page: 1,
+  const fetchInterviewPage = async (page = 1, pageSize = 20) => {
+    const resp = await api.fetchInterviewData({
+      page,
       page_size: pageSize,
       season: filterSeason.value || undefined,
       position_id: interviewPositionId.value || undefined,
       sort: interviewSortOrder.value === 'asc' ? 'created_asc' : 'created_desc',
       scope: 'all',
     })
-    const items = [...(first.items || first)]
-    const total = first.total ?? items.length
-    const pages = Math.ceil(total / pageSize)
-    const rest = []
-    for (let page = 2; page <= pages; page += 1) {
-      try {
-        const resp = await api.fetchInterviewData({
-          page,
-          page_size: pageSize,
-          season: filterSeason.value || undefined,
-          position_id: interviewPositionId.value || undefined,
-          sort: interviewSortOrder.value === 'asc' ? 'created_asc' : 'created_desc',
-          scope: 'all',
-        })
-        rest.push(...(resp.items || resp))
-      } catch { break }
-    }
-    return { items: [...items, ...rest], total }
+    return { items: resp.items || resp, total: resp.total ?? (resp.items || resp).length }
+  }
+
+  /** 面经当前页数据（server 模式：页码变化时由调用方 fetchInterviewPage 更新） */
+  const interviewPageData = ref([])
+  /** 招聘季全集（独立于分页数据，避免换页丢失 season 选项） */
+  const interviewSeasonSource = ref([])
+
+  /** 招聘季全集来源：一次全量拉取（不用于展示，仅推断 season 选项） */
+  const fetchInterviewSeasonSource = async () => {
+    const resp = await api.fetchInterviewData({
+      page: 1,
+      page_size: 500,
+      season: filterSeason.value || undefined,
+      position_id: interviewPositionId.value || undefined,
+      sort: 'created_desc',
+      scope: 'all',
+    })
+    return resp.items || resp
+  }
+
+  /** 面经列表换页：向服务端拉取目标页并刷新当前页数据（合约 §4.5 server 模式） */
+  const loadInterviewPage = async (page = 1, pageSize = 20) => {
+    const { items, total } = await fetchInterviewPage(page, pageSize)
+    interviewPageData.value = items.map(item => ({ ...item }))
+    interviewTotal.value = total
+    return { items, total }
   }
 
   /** 加载下一页题库数据（无限滚动） */
@@ -176,6 +189,11 @@ export function useMasterBankData({ onAfterFetch } = {}) {
 
   // ── Re-fetch when tag filter changes (server-side filtering) ──
   watch(selectedTag, () => {
+    fetchTableData()
+  })
+
+  // contracts §4.5 server 模式：招聘季/排序变化时回第 1 页重新按页拉取
+  watch([filterSeason, interviewSortOrder], () => {
     fetchTableData()
   })
 
@@ -256,19 +274,13 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     return result
   })
   const interviewSeasons = computed(() => {
-    const seasons = [...new Set(interviewData.value.map(d => d.season).filter(Boolean))]
+    const seasons = [...new Set(interviewSeasonSource.value.map(d => d.season).filter(Boolean))]
     return seasons.sort()
   })
   const filteredInterviewData = computed(() => {
-    let data = filterSeason.value
-      ? interviewData.value.filter(d => d.season === filterSeason.value)
-      : [...interviewData.value]
-    data.sort((a, b) => {
-      const da = a.created_at || ''
-      const db = b.created_at || ''
-      return interviewSortOrder.value === 'desc' ? db.localeCompare(da) : da.localeCompare(db)
-    })
-    return data
+    // server 模式（contracts §4.5）：面经数据由服务端按 page/season/sort/
+    // position 过滤，前端直接展示当前页，不再本地二次过滤或 slice。
+    return interviewData.value
   })
   const practicedQuestions = computed(() => {
     const stats = practiceStats.value
@@ -301,6 +313,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     // functions
     fetchTableData, fetchAnalytics, fetchPracticeStats,
     loadActiveSeason, loadAllData,
+    loadInterviewPage, fetchInterviewPage,
     // utils
     formatDate,
   }
