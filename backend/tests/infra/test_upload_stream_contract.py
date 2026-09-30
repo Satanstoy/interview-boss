@@ -216,3 +216,53 @@ def test_stage_counts_reflect_extract_counts_and_resolutions(tmp_path):
     assert counts["needs_review"] == 2, "needs_review 必须来自提取计数（不再硬编码 0）"
     assert counts["resolved"] == 1, "resolved 必须是逐题成功的 resolution 数（501）"
     conn.close()
+
+
+def test_snapshot_review_status_from_bound_contribution(tmp_path):
+    """AC-010/AC-013：root 绑定公共化申请后，快照 review_status 不再恒空
+    （此前 _snapshot 只透出 contribution_request_id 不计算 review_status）。"""
+
+    import json as _json
+    import sqlite3
+
+    from app.db.migrations import run_migrations
+    from app.routers.upload_imports import _snapshot
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    run_migrations(conn)
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (101, 'u101', 'x', 0)"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, company, owner_id, status) VALUES "
+        "(9001, 'https://c.example.com', '字节', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_requests (source_type, source_id, requester_id, "
+        "status, revision) VALUES ('interview', 9001, 101, 'pending_review', 1)"
+    )
+    request_id = conn.execute(
+        "SELECT id FROM public_contribution_requests WHERE source_id = 9001"
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, "
+        "status, revision, contribution_request_id) "
+        "VALUES ('imp-r1', 101, 'k-r1', 'h-r1', 'share', 'interview', "
+        "'upload-pipeline-v1', '{}', '{}', 'completed', 2, ?)",
+        (request_id,),
+    )
+    conn.commit()
+
+    row = conn.execute("SELECT * FROM upload_imports WHERE id = 'imp-r1'").fetchone()
+    snap = _snapshot(row, conn=conn)
+    assert snap["review_status"] == "pending_review", (
+        "绑定公共化申请后快照 review_status 必须来自申请状态"
+    )
+    assert snap["contribution_request_id"] is not None
+    assert snap["status"] == "completed", (
+        "根状态由 worker 聚合推进（waiting_review 转换在 aggregate 层），快照透传 review_status"
+    )
+    conn.close()

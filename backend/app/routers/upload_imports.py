@@ -108,15 +108,25 @@ def _stage_counts(conn, import_id: str) -> dict:
     }
 
 
-def _snapshot(row, counts=None) -> dict:
+def _snapshot(row, counts=None, conn=None) -> dict:
     """完整根快照（R04/AC-011）：列表/详情/by-key/retry 共用同一构造。
 
     GET 与 SSE 统一用 ``snapshot_from_parts``，allowed_actions 由服务端算，
     前端只按服务端授权渲染按钮（无暂停能力绝不出现暂停）。
+    ``conn`` 存在时从绑定的公共化申请计算 review_status（AC-010）。
     """
 
     from app.services.upload_retry_budget import snapshot_from_parts
     from app.services.upload_status import allowed_actions
+
+    review_status = None
+    if conn is not None and row["contribution_request_id"]:
+        review_row = conn.execute(
+            "SELECT status FROM public_contribution_requests WHERE id = ?",
+            (row["contribution_request_id"],),
+        ).fetchone()
+        if review_row:
+            review_status = review_row["status"]
 
     count_values = counts or {
         "total": 0,
@@ -134,6 +144,7 @@ def _snapshot(row, counts=None) -> dict:
         import_id=row["id"],
         revision=int(row["revision"]),
         status=row["status"],
+        review_status=review_status,
         target_intent=row["target_intent"],
         attempt_no=int(row["current_attempt_no"]),
         stage=row["status"] if row["status"] != "queued" else "queued",
@@ -240,7 +251,7 @@ async def list_upload_imports(
                 (*params, page_size, offset),
             ).fetchall()
             return {
-                "items": [_snapshot(row) for row in rows],
+                "items": [_snapshot(row, conn=conn) for row in rows],
                 "total": total,
                 "page": page,
                 "page_size": page_size,
@@ -258,7 +269,7 @@ async def get_upload_import_by_key(idempotency_key: str, user: dict = Depends(ge
                 "SELECT * FROM upload_imports WHERE requester_id = ? AND idempotency_key = ?",
                 (user["id"], idempotency_key),
             ).fetchone()
-            return _snapshot(row) if row is not None else None
+            return _snapshot(row, conn=conn) if row is not None else None
 
     snapshot = await run_db(_query)
     if snapshot is None:
@@ -270,7 +281,7 @@ async def get_upload_import_by_key(idempotency_key: str, user: dict = Depends(ge
 async def get_upload_import(import_id: str, user: dict = Depends(get_current_user)):
     def _query():
         with get_db_connection() as conn:
-            return _snapshot(_load_owned(conn, import_id, user["id"]))
+            return _snapshot(_load_owned(conn, import_id, user["id"]), conn=conn)
 
     return await run_db(_query)
 
@@ -369,7 +380,7 @@ async def stream_upload_import(import_id: str, user: dict = Depends(get_current_
     def _snapshot_stream():
         with get_db_connection() as conn:
             row = _load_owned(conn, import_id, user["id"])
-            return _snapshot(row, counts=_stage_counts(conn, import_id))
+            return _snapshot(row, counts=_stage_counts(conn, import_id), conn=conn)
 
     async def event_stream():
         last_revision = -1
@@ -434,7 +445,7 @@ async def retry_upload_import(import_id: str, user: dict = Depends(get_current_u
                 conn.rollback()
                 raise
 
-            snapshot = _snapshot(row)
+            snapshot = _snapshot(row, conn=conn)
             snapshot.update(
                 {
                     "created_attempt": restored["created_attempt"],
