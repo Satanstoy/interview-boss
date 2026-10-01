@@ -512,3 +512,17 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
     finally:
         clear_user()
     assert not any(item["owner_id"] == 101 for item in other_user_bank["items"])
+
+    # AC-007 血缘：v2 上传产生的每一条队列行都必须带 root_import_id。
+    # 私人路径显式传 root，公共路径靠 contribution_request_id → upload_imports 回填；
+    # 缺失会让对账无法按 root 续调（AC-012 桶调度按 root 聚合）。
+    orphan_queue_rows = test_db.execute(
+        "SELECT COUNT(*) FROM analysis_queue WHERE root_import_id IS NULL"
+    ).fetchone()[0]
+    assert orphan_queue_rows == 0, (
+        "v2 上传的队列行缺少 root_import_id（血缘断裂，对账无法按 root 续调）"
+    )
+    linked_queue_rows = test_db.execute(
+        "SELECT DISTINCT root_import_id FROM analysis_queue"
+    ).fetchall()
+    assert [str(row["root_import_id"]) for row in linked_queue_rows] == [str(import_id)]

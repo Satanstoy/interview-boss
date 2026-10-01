@@ -257,3 +257,24 @@ docker compose --profile test run --rm test uv run pytest \
   backend/tests/services/test_admin_public_contribution_retry.py -q
 → 36 passed
 ```
+
+---
+
+## 10. Phase 3-2：C7「enqueue root 只在 2/9 调用点传入」核实结论
+
+审计条目（`enqueue_questions` 9 个调用点里只有 2 个显式传 `root_import_id`）**属实但不是缺口**：`services/pipeline/queue.enqueue_questions` 内部有 R06 双回填——
+
+1. 明细带 `questions_detail.import_id` 时按明细回填 root（私人上传路径）；
+2. 有 `contribution_request_id` 时按 `upload_imports.contribution_request_id` 回填 root（公共化路径，三个公共调用点都走这条）。
+
+结论以**真实链路断言**固定，而不是改 9 个调用点：
+
+`backend/tests/integration/test_upload_question_data_flow_worker.py` 末尾新增（同一用例已真实跑完私人 + 公共 + 失败注入 + 恢复）：
+
+```python
+orphan_queue_rows = ... COUNT(*) FROM analysis_queue WHERE root_import_id IS NULL
+assert orphan_queue_rows == 0            # v2 上传的队列行不得血缘断裂
+assert DISTINCT root_import_id == [import_id]
+```
+
+变异验证：同时禁用两条回填分支 → 该用例变红（`assert None is not None`，链路更早断）✅。恢复后 1 passed。
