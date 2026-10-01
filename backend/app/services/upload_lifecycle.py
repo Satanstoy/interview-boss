@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
 from app.services.upload_credentials import UploadCredentialError
 from app.services.upload_policy import (
+    initial_preflight_scopes,
     resolve_upload_policy,
     sanitize_client_policy_fields,
 )
@@ -213,31 +214,28 @@ def _plan_work_after_restore(
 
     import_id = root["id"]
     in_flight = conn.execute(
-        "SELECT id FROM jobs WHERE root_import_id = ? "
+        "SELECT id, job_type FROM jobs WHERE root_import_id = ? "
+        "AND upload_attempt_id IS ? "
         "AND status IN ('pending', 'queued', 'running') ORDER BY id LIMIT 1",
-        (import_id,),
+        (import_id, attempt["id"]),
     ).fetchone()
     if in_flight:
-        return {"job_id": int(in_flight["id"]), "created": False, "work_key": FIRST_WORK_KEY}
+        return {
+            "job_id": int(in_flight["id"]),
+            "created": False,
+            "work_key": "credential_preflight" if in_flight["job_type"] == "credential_preflight" else FIRST_WORK_KEY,
+        }
 
-    # R01：为本次恢复建立（或复用）凭据预检 job；预检通过前 worker 不跑提取。
+    # R01：每个恢复批次重新检查所有处理所需 scope；业务 job 由预检事务
+    # 在全部 scope 成功后创建。
     from app.services.credential_preflight import create_credential_preflight_job
 
     policy = _loads(root["policy_json"], {}) or {}
-    preflight_scope = policy.get("credential_scope") or "user"
-    create_credential_preflight_job(
-        conn,
-        root_import_id=import_id,
-        requester_id=int(root["requester_id"]),
-        credential_scope=preflight_scope,
-        user_id=int(root["requester_id"]) if preflight_scope == "user" else None,
-        attempt_id=attempt["id"],
-    )
-
     contribution = conn.execute(
         "SELECT status FROM public_contribution_requests WHERE id = ?",
         (root["contribution_request_id"],),
     ).fetchone() if root["contribution_request_id"] else None
+    preflight_scopes = set(initial_preflight_scopes(policy))
     if contribution and contribution["status"] in (
         "approved_for_processing",
         "queued",
@@ -245,38 +243,21 @@ def _plan_work_after_restore(
         "partially_published",
         "failed",
     ):
-        public_scope = policy.get("post_approval_credential_scope") or "global"
-        create_credential_preflight_job(
+        preflight_scopes.add(policy.get("post_approval_credential_scope") or "global")
+
+    preflight_job_ids = []
+    for preflight_scope in ("global", "user"):
+        if preflight_scope not in preflight_scopes:
+            continue
+        preflight_job_ids.append(create_credential_preflight_job(
             conn,
             root_import_id=import_id,
             requester_id=int(root["requester_id"]),
-            credential_scope=public_scope,
-            user_id=(
-                int(root["requester_id"]) if public_scope == "user" else None
-            ),
+            credential_scope=preflight_scope,
+            user_id=int(root["requester_id"]) if preflight_scope == "user" else None,
             attempt_id=attempt["id"],
-        )
+        ))
 
-    payload = _loads(root["payload_json"], {}) or {}
-    cursor = conn.execute(
-        "INSERT INTO jobs (job_type, status, created_by, progress_total, "
-        "root_import_id, upload_attempt_id, work_key, idempotency_key) "
-        "VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)",
-        (
-            UPLOAD_JOB_TYPE,
-            actor_id,
-            len(SUBMIT_PHASES),
-            import_id,
-            attempt["id"],
-            FIRST_WORK_KEY,
-            f"restore:{import_id}:{int(attempt['attempt_no'])}:{FIRST_WORK_KEY}",
-        ),
-    )
-    job_id = int(cursor.lastrowid)
-    conn.execute(
-        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-        (job_id, json.dumps(payload, ensure_ascii=False)),
-    )
     # Re-plan all still-pending root-bound clustering after attempt rollover.
     # Old queued deliveries carry the previous attempt and are cancelled by
     # restore_upload before this function is called.
@@ -285,7 +266,12 @@ def _plan_work_after_restore(
     for bucket in collect_pending_buckets(conn):
         if str(bucket["root_import_id"]) == str(import_id):
             ensure_bucket_job(conn, bucket=bucket, created_by=actor_id)
-    return {"job_id": job_id, "created": True, "work_key": FIRST_WORK_KEY}
+    return {
+        "job_id": preflight_job_ids[0] if preflight_job_ids else None,
+        "preflight_job_ids": preflight_job_ids,
+        "created": True,
+        "work_key": "credential_preflight",
+    }
 
 
 _JD_MARKERS = ("岗位", "职位要求", "任职资格", "工作职责", "职位描述", "岗位职责", "负责", "要求", "经验", "薪资", "福利")
@@ -357,32 +343,6 @@ def finalize_attempt_and_aggregate_root(
     ).fetchone()
     if submit_job is not None:
         assert_job_fence(conn, int(submit_job["id"]), int(lease_generation))
-
-    # active attempt 收尾：成功则 completed，否则留在 failed 由恢复处理
-    attempt = conn.execute(
-        "SELECT * FROM upload_attempts WHERE import_id = ? AND status = 'active' "
-        "ORDER BY attempt_no DESC LIMIT 1",
-        (import_id,),
-    ).fetchone()
-    if attempt is not None:
-        new_attempt_status = (
-            "completed"
-            if error_code is None
-            and conn.execute(
-                "SELECT COUNT(*) AS c FROM upload_stage_results "
-                "WHERE import_id = ? AND status = 'succeeded'",
-                (import_id,),
-            ).fetchone()["c"]
-            > 0
-            else "failed"
-        )
-        # 部分成功也算完成尝试（有保留内容可打开）；失败尝试保留 failed 由恢复接管
-        if new_attempt_status == "completed":
-            conn.execute(
-                "UPDATE upload_attempts SET status = 'completed', "
-                "completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (attempt["id"],),
-            )
 
     rows = conn.execute(
         "SELECT stage, unit_key, status, error_code FROM upload_stage_results "
@@ -456,6 +416,28 @@ def finalize_attempt_and_aggregate_root(
     status = aggregated["status"]
     if status == "completed" and review_status in ("pending_review", "approved_for_processing"):
         status = "waiting_review" if review_status == "pending_review" else status
+
+    # Keep a recovery attempt active while any stage (including per-question
+    # answer jobs) is queued or running. A prior successful checkpoint alone
+    # must not mark the attempt complete.
+    attempt = conn.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if attempt is not None:
+        if status in ("completed", "waiting_review"):
+            conn.execute(
+                "UPDATE upload_attempts SET status = 'completed', "
+                "completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
+                (attempt["id"],),
+            )
+        elif status in ("needs_action", "partial_failed", "failed"):
+            conn.execute(
+                "UPDATE upload_attempts SET status = 'failed', "
+                "completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'active'",
+                (attempt["id"],),
+            )
 
     # 错误码：优先使用本次执行错误，其次阶段结果中的错误
     final_error_code = error_code or next(
@@ -818,83 +800,118 @@ def accept_upload(
         payload_json=json.dumps(payload, ensure_ascii=False),
     )
 
-    # 凭据预检（AC-004）：Key 缺失/解密失败 → 根任务 needs_action，不投递模型工作
+    # 在接受事务里校验 policy 要求的全部 scope。缺配置也要保留 attempt 与
+    # durable preflight jobs；任何业务 job 都等真实 provider ping 全部成功后
+    # 才由 create_initial_submit_job_if_ready 创建。
     credential_error = None
-    try:
+    required_scopes = initial_preflight_scopes(policy)
+    if created:
         from app.services.upload_credentials import resolve_upload_credentials
 
-        resolve_upload_credentials(
-            credential_scope=policy.credential_scope,
-            user_id=actor_id if policy.credential_scope == "user" else None,
-            stage="extract",
-            user_config_loader=(credential_loaders or {}).get("user"),
-            global_config_loader=(credential_loaders or {}).get("global"),
-        )
-    except UploadCredentialError as exc:
-        credential_error = exc
-        conn.execute(
-            "UPDATE upload_imports SET status = 'needs_action', error_code = ?, "
-            "error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (exc.code, str(exc), import_id),
-        )
+        for scope in required_scopes:
+            try:
+                resolve_upload_credentials(
+                    credential_scope=scope,
+                    user_id=actor_id if scope == "user" else None,
+                    stage="extract",
+                    user_config_loader=(credential_loaders or {}).get("user"),
+                    global_config_loader=(credential_loaders or {}).get("global"),
+                )
+            except UploadCredentialError as exc:
+                credential_error = credential_error or exc
 
-    job_id = None
-    attempt_no = 0
-    if created and credential_error is None:
+    preflight_job_ids = []
+    if created:
         attempt = create_attempt(conn, import_id=import_id, requested_by=actor_id)
         attempt_no = int(attempt["attempt_no"])
-        cursor = conn.execute(
-            "INSERT INTO jobs (job_type, status, created_by, progress_total, "
-            "root_import_id, upload_attempt_id, work_key) "
-            "VALUES (?, 'pending', ?, ?, ?, ?, ?)",
+        conn.execute(
+            "UPDATE upload_imports SET current_attempt_no = ?, "
+            "status = ?, revision = revision + 1, error_code = ?, error_message = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (
-                UPLOAD_JOB_TYPE,
-                actor_id,
-                len(SUBMIT_PHASES),
+                attempt_no,
+                "needs_action" if credential_error else "queued",
+                credential_error.code if credential_error else None,
+                str(credential_error)[:500] if credential_error else None,
                 import_id,
-                attempt["id"],
-                FIRST_WORK_KEY,
             ),
         )
-        job_id = int(cursor.lastrowid)
-        conn.execute(
-            "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-            (job_id, json.dumps(payload, ensure_ascii=False)),
-        )
-
-        # R01：同事务创建凭据预检 job（真实 provider 探测；scope 取服务端 policy）
         from app.services.credential_preflight import create_credential_preflight_job
 
-        create_credential_preflight_job(
-            conn,
-            root_import_id=import_id,
-            requester_id=actor_id,
-            credential_scope=policy.credential_scope,
-            user_id=actor_id if policy.credential_scope == "user" else None,
-            attempt_id=attempt["id"],
-        )
+        for scope in required_scopes:
+            preflight_job_ids.append(create_credential_preflight_job(
+                conn,
+                root_import_id=import_id,
+                requester_id=actor_id,
+                credential_scope=scope,
+                user_id=actor_id if scope == "user" else None,
+                attempt_id=attempt["id"],
+            ))
     else:
-        # 凭据被阻塞时只建根任务：attempt 由恢复时创建（contracts §2.1）
-        row = conn.execute(
-            "SELECT id FROM jobs WHERE root_import_id = ? ORDER BY id LIMIT 1",
-            (import_id,),
-        ).fetchone()
-        job_id = int(row["id"]) if row else None
         attempt_row = conn.execute(
-            "SELECT attempt_no FROM upload_attempts WHERE import_id = ? "
+            "SELECT id, attempt_no FROM upload_attempts WHERE import_id = ? "
             "ORDER BY attempt_no DESC LIMIT 1",
             (import_id,),
         ).fetchone()
         attempt_no = int(attempt_row["attempt_no"]) if attempt_row else 0
+        if attempt_row:
+            preflight_job_ids = [
+                int(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+                    "AND job_type = 'credential_preflight' "
+                    "AND status IN ('pending','queued','running') ORDER BY id",
+                    (import_id, attempt_row["id"]),
+                ).fetchall()
+            ]
 
     root = conn.execute(
-        "SELECT status, revision FROM upload_imports WHERE id = ?", (import_id,)
+        "SELECT status, revision, error_code, error_message, policy_json "
+        "FROM upload_imports WHERE id = ?",
+        (import_id,),
     ).fetchone()
+    job_row = conn.execute(
+        "SELECT id, job_type FROM jobs WHERE root_import_id = ? "
+        "AND upload_attempt_id IS (SELECT id FROM upload_attempts WHERE import_id = ? "
+        "ORDER BY attempt_no DESC LIMIT 1) "
+        "AND job_type IN ('credential_preflight','submit_import') "
+        "AND status IN ('pending','queued','running') ORDER BY "
+        "CASE job_type WHEN 'credential_preflight' THEN 0 ELSE 1 END, id LIMIT 1",
+        (import_id, import_id),
+    ).fetchone()
+    job_id = int(job_row["id"]) if job_row else None
+    dispatch_jobs = [
+        {"job_id": int(row["id"]), "job_type": row["job_type"]}
+        for row in conn.execute(
+            "SELECT id, job_type FROM jobs WHERE root_import_id = ? "
+            "AND upload_attempt_id IS (SELECT id FROM upload_attempts WHERE import_id = ? "
+            "ORDER BY attempt_no DESC LIMIT 1) AND status = 'pending' "
+            "AND job_type IN ('credential_preflight','submit_import') ORDER BY id",
+            (import_id, import_id),
+        ).fetchall()
+    ]
+    if credential_error is None and root["error_code"]:
+        from app.services.upload_lifecycle import upload_action_credential_scope
+
+        scope = upload_action_credential_scope(
+            conn,
+            import_id=import_id,
+            fallback=policy.credential_scope,
+        )
+        credential_error = UploadCredentialError(
+            root["error_code"],
+            scope=scope,
+            action="configure_system_model" if scope == "global" else "configure_user_model",
+            message=root["error_message"] or root["error_code"],
+        )
 
     return {
         "import_id": import_id,
         "created": created,
         "job_id": job_id,
+        "job_type": job_row["job_type"] if job_row else None,
+        "preflight_job_ids": preflight_job_ids,
+        "dispatch_jobs": dispatch_jobs,
         "error": (
             {
                 "code": credential_error.code,

@@ -1,6 +1,6 @@
 """接受入口 API（AC-003/021/022 的接口面）。
 
-- `POST /api/submit-jobs`（v2 开关开启时）返回稳定 import_id/status_url/幂等键；
+- `POST /api/submit-jobs`（唯一上传写入口）返回稳定 import_id/status_url/幂等键；
   同键同 hash 复用，不同 hash 409。（v2 已收口为唯一路径）
 - 非法 target 400、超限 413，且不产生幽灵 job。
 - `GET /api/upload-imports/by-key/{key}` 只能查到本人的任务。
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,8 +16,11 @@ import pytest
 
 @pytest.fixture
 def _no_dispatch():
-    with patch("app.worker.enqueue_submit_import_job", new=AsyncMock()) as enq:
-        yield enq
+    with patch("app.worker_enqueue.enqueue_submit_import_job", new=AsyncMock()) as submit_enq:
+        with patch(
+            "app.worker_enqueue.enqueue_credential_preflight_job", new=AsyncMock()
+        ) as preflight_enq:
+            yield {"submit": submit_enq, "preflight": preflight_enq}
 
 
 def _login(client, user):
@@ -218,6 +222,13 @@ def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
         )
         assert resp.status_code == 200
         assert "event: snapshot" in resp.text
+        event_data = json.loads(resp.text.split("data: ", 1)[1].splitlines()[0])
+        assert event_data["progress"] == {
+            "unit": "questions",
+            "completed": 0,
+            "total": None,
+        }
+        assert event_data["counts"]["total"] is None
 
     row = test_db.execute("SELECT * FROM upload_imports").fetchone()
     assert row is not None, "旧入口必须落根任务"
@@ -230,8 +241,8 @@ def test_submit_jobs_default_config_uses_unified_accept_service(
     """critical 错配回归：默认配置（不设任何开关/不 monkeypatch）下，
     `/api/submit-jobs` 必须走统一接受服务并落 `upload_imports` 根任务。
 
-    历史缺陷：`UPLOAD_RECOVERY_V2` 默认 off 时该入口创建的是裸 job，
-    不写 upload_imports，前端任务中心读不到任何任务（前后端错配）。
+    历史缺陷：旧 flag 默认 off 时该入口创建裸 job，不写 upload_imports，
+    前端任务中心读不到任何任务（前后端错配）。
     """
 
     for uid in (101,):
@@ -252,8 +263,13 @@ def test_submit_jobs_default_config_uses_unified_accept_service(
         "默认配置下 /api/submit-jobs 必须写 upload_imports（前端任务中心数据源）"
     )
     assert root["id"] == "default-cfg-1" or root["idempotency_key"] == "default-cfg-1"
-    # 根任务必须真的关联提交 job（执行交给 worker，不在 web 进程内跑图）
-    job = test_db.execute(
-        "SELECT * FROM jobs WHERE root_import_id = ?", (root["id"],)
+    # 预检 outbox 与根任务同事务；真实 provider 探测通过后才建 submit job。
+    preflight = test_db.execute(
+        "SELECT * FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+        (root["id"],),
     ).fetchone()
-    assert job is not None, "统一接受服务必须同事务创建绑定 root 的 submit job"
+    assert preflight is not None, "接受事务必须持久化模型预检任务"
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (root["id"],),
+    ).fetchone()[0] == 0

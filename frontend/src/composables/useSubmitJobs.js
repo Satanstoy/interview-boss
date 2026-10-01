@@ -22,11 +22,17 @@ import {
 import { getSSE } from '@/services/http.js'
 
 const STORAGE_KEY = 'interviewboss-submit-jobs'
+let _taskUserId = 'anonymous'
 
 // ── 全局状态（跨组件共享） ──
 const activeJobs = ref([])
 const _sseControllers = new Map()  // jobId → AbortController
+const _sseReconnectTimers = new Map()
 let _onJobDone = null
+
+function _scopedStorageKey(base) {
+  return `${base}:${_taskUserId}`
+}
 
 /**
  * 注册任务完成回调（由 App.vue 设置）
@@ -40,7 +46,7 @@ export function setOnJobDone(fn) {
  */
 function _loadStoredJobIds() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(_scopedStorageKey(STORAGE_KEY))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
@@ -53,9 +59,9 @@ function _persistJobIds() {
     .filter(j => j.status === 'pending' || j.status === 'queued' || j.status === 'running' || j.status === 'failed')
     .map(j => j.id)
   if (ids.length > 0) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
+    localStorage.setItem(_scopedStorageKey(STORAGE_KEY), JSON.stringify(ids))
   } else {
-    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(_scopedStorageKey(STORAGE_KEY))
   }
 }
 
@@ -109,6 +115,11 @@ function _removeJob(jobId) {
   if (ctrl) {
     try { ctrl.abort() } catch {}
     _sseControllers.delete(jobId)
+  }
+  const timer = _sseReconnectTimers.get(jobId)
+  if (timer) {
+    clearTimeout(timer)
+    _sseReconnectTimers.delete(jobId)
   }
   activeJobs.value = activeJobs.value.filter(j => j.id !== jobId)
   _persistJobIds()
@@ -176,7 +187,13 @@ function _subscribeJobSSE(jobId) {
     // 如果任务还在 pending/running，3 秒后尝试重连
     const currentJob = activeJobs.value.find(j => j.id === jobId)
     if (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending' || currentJob.status === 'queued')) {
-      setTimeout(() => _subscribeJobSSE(jobId), 3000)
+      const oldTimer = _sseReconnectTimers.get(jobId)
+      if (oldTimer) clearTimeout(oldTimer)
+      const timer = setTimeout(() => {
+        _sseReconnectTimers.delete(jobId)
+        if (activeJobs.value.some(j => j.id === jobId)) _subscribeJobSSE(jobId)
+      }, 3000)
+      _sseReconnectTimers.set(jobId, timer)
     }
   })
 }
@@ -308,6 +325,9 @@ export function useSubmitJobs() {
 
 const DRAFT_KEY_PREFIX = 'interviewboss-submit-draft:'
 const TASK_STORAGE_KEY = 'interviewboss-upload-tasks'
+function _draftStorageKey(draftId) {
+  return `${DRAFT_KEY_PREFIX}${_taskUserId}:${draftId}`
+}
 export const TERMINAL_STATUSES = new Set([
   'completed',
   'failed',
@@ -329,14 +349,14 @@ export function createIdempotencyKey() {
 export function rememberDraftKey(draftId, key) {
   if (!draftId) return
   try {
-    localStorage.setItem(DRAFT_KEY_PREFIX + draftId, key)
+    localStorage.setItem(_draftStorageKey(draftId), key)
   } catch { /* 隐私模式等场景忽略 */ }
 }
 
 export function getDraftKey(draftId) {
   if (!draftId) return null
   try {
-    return localStorage.getItem(DRAFT_KEY_PREFIX + draftId)
+    return localStorage.getItem(_draftStorageKey(draftId))
   } catch {
     return null
   }
@@ -345,7 +365,7 @@ export function getDraftKey(draftId) {
 export function clearDraftKey(draftId) {
   if (!draftId) return
   try {
-    localStorage.removeItem(DRAFT_KEY_PREFIX + draftId)
+    localStorage.removeItem(_draftStorageKey(draftId))
   } catch { /* 忽略 */ }
 }
 
@@ -406,12 +426,28 @@ export function abortAllTaskConnections() {
     } catch { /* 忽略 */ }
   }
   _sseControllers.clear()
+  for (const timer of _sseReconnectTimers.values()) clearTimeout(timer)
+  _sseReconnectTimers.clear()
   try {
+    localStorage.removeItem(_scopedStorageKey(STORAGE_KEY))
+    localStorage.removeItem(_scopedStorageKey(TASK_STORAGE_KEY))
+    // Remove the old unscoped cache once; it could otherwise cross accounts.
     localStorage.removeItem(STORAGE_KEY)
     localStorage.removeItem(TASK_STORAGE_KEY)
     for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(DRAFT_KEY_PREFIX)) localStorage.removeItem(key)
+      if (key.startsWith(`${DRAFT_KEY_PREFIX}${_taskUserId}:`) ||
+          (key.startsWith(DRAFT_KEY_PREFIX) && !key.slice(DRAFT_KEY_PREFIX.length).includes(':'))) {
+        localStorage.removeItem(key)
+      }
     }
   } catch { /* 忽略 */ }
   activeJobs.value = []
+}
+
+/** Switch account namespace and discard the previous account's in-memory tasks. */
+export function setTaskUserScope(userId) {
+  const nextUserId = userId == null ? 'anonymous' : String(userId)
+  if (nextUserId === _taskUserId) return
+  abortAllTaskConnections()
+  _taskUserId = nextUserId
 }

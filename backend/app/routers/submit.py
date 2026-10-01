@@ -47,6 +47,47 @@ def _mark_job_dispatched(job_id: int, arq_job_id: str, marker) -> None:
         conn.commit()
 
 
+async def _dispatch_accepted_upload_jobs(accepted: dict) -> tuple[int, str | None]:
+    """Deliver only durable outbox rows returned by the accept transaction."""
+
+    from app.services.job_lifecycle import mark_job_dispatched
+
+    dispatched = 0
+    first_error = None
+    for item in accepted.get("dispatch_jobs", []):
+        job_id = int(item["job_id"])
+        job_type = item["job_type"]
+        try:
+            if job_type == "credential_preflight":
+                from app.worker_enqueue import enqueue_credential_preflight_job
+
+                arq_job = await enqueue_credential_preflight_job(job_id)
+            elif job_type == "submit_import":
+                from app.worker_enqueue import enqueue_submit_import_job
+
+                arq_job = await enqueue_submit_import_job(job_id)
+            else:
+                continue
+            arq_job_id = getattr(arq_job, "job_id", None)
+            if not arq_job_id:
+                raise RuntimeError("ARQ 未返回 job_id")
+            await run_db(
+                lambda jid=job_id, aid=str(arq_job_id): _mark_job_dispatched(
+                    jid, aid, mark_job_dispatched
+                )
+            )
+            dispatched += 1
+        except Exception as exc:  # durable outbox dispatcher will retry later
+            first_error = first_error or str(exc)[:300]
+            logger.warning(
+                "上传 outbox 投递失败，保留任务等待 dispatcher: job_id=%s type=%s error=%s",
+                job_id,
+                job_type,
+                exc,
+            )
+    return dispatched, first_error
+
+
 # Backward-compatible re-exports — business logic moved to app.services.submit_service
 from app.services.submit_service import (
     tag_questions_batch,  # noqa: F401 — backward-compatible router re-export
@@ -161,7 +202,8 @@ async def _legacy_sse_via_accept_service(
     import asyncio as _asyncio
 
     from app.services.upload_lifecycle import UploadFileMeta, UploadInputError
-    from app.services.upload_retry_budget import build_snapshot_event, snapshot_from_parts
+    from app.models.upload_contracts import UploadSnapshot
+    from app.services.upload_retry_budget import build_snapshot_event
 
     named_files = [f for f in (files or []) if f and f.filename]
     file_metas = [
@@ -218,39 +260,29 @@ async def _legacy_sse_via_accept_service(
             detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
         ) from None
 
-    if accepted.get("job_id"):
-        try:
-            from app.worker import enqueue_submit_import_job
-            from app.services.job_lifecycle import mark_job_dispatched
-
-            arq_job = await enqueue_submit_import_job(accepted["job_id"])
-            arq_job_id = getattr(arq_job, "job_id", None)
-            if arq_job_id:
-                await run_db(
-                    lambda: _mark_job_dispatched(
-                        accepted["job_id"], str(arq_job_id), mark_job_dispatched
-                    )
-                )
-        except Exception as exc:  # ARQ 不可用 ≠ 上传失败
-            logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", exc)
+    if accepted.get("dispatch_jobs"):
+        await _dispatch_accepted_upload_jobs(accepted)
 
     terminal = {"completed", "failed", "partial_failed", "needs_action", "waiting_review"}
 
     def _load_snapshot():
+        # Keep the legacy transport on the same question-level snapshot contract
+        # as GET /api/upload-imports and its dedicated SSE endpoint.
+        from app.routers.upload_imports import _snapshot as build_upload_snapshot
+        from app.routers.upload_imports import _stage_counts
+
         with get_db_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM upload_imports WHERE id = ?", (accepted["import_id"],)
             ).fetchone()
             if row is None:
                 return None
-            counts = conn.execute(
-                "SELECT COUNT(*) AS total, "
-                "SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS answered, "
-                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed "
-                "FROM upload_stage_results WHERE import_id = ?",
-                (accepted["import_id"],),
-            ).fetchone()
-            return row, counts
+            return build_upload_snapshot(
+                row,
+                counts=_stage_counts(conn, accepted["import_id"]),
+                conn=conn,
+                actor_is_admin=bool(user.get("is_admin")),
+            )
 
     async def event_stream():
         last_revision = -1
@@ -260,32 +292,18 @@ async def _legacy_sse_via_accept_service(
                 if loaded is None:
                     yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'}, ensure_ascii=False)}\n\n"
                     return
-                row, counts = loaded
-                snapshot = snapshot_from_parts(
-                    import_id=row["id"],
-                    revision=int(row["revision"]),
-                    status=row["status"],
-                    target_intent=row["target_intent"],
-                    attempt_no=int(row["current_attempt_no"]),
-                    stage=None,
-                    counts={
-                        "total": int(counts["total"] or 0),
-                        "answered": int(counts["answered"] or 0),
-                        "failed": int(counts["failed"] or 0),
-                    },
-                    error=(
-                        {"code": row["error_code"], "message": row["error_message"] or "", "retryable": False}
-                        if row["error_code"]
-                        else None
-                    ),
-                    allowed_actions=[],
-                    updated_at=row["updated_at"],
+                snapshot = UploadSnapshot(
+                    **{
+                        field: loaded[field]
+                        for field in UploadSnapshot.model_fields
+                        if field in loaded
+                    }
                 )
                 event = build_snapshot_event(snapshot)
-                if int(row["revision"]) > last_revision:
-                    last_revision = int(row["revision"])
+                if int(snapshot.revision) > last_revision:
+                    last_revision = int(snapshot.revision)
                     yield f"event: snapshot\nid: {last_revision}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
-                if row["status"] in terminal:
+                if snapshot.status in terminal:
                     return
                 await _asyncio.sleep(2)
         finally:
@@ -422,25 +440,8 @@ async def create_submit_job(
             detail="该提交键已绑定不同内容，请使用新的提交键或查看已有任务",
         ) from None
 
-    arq_scheduled = False
-    dispatch_error = None
-    try:
-        from app.worker import enqueue_submit_import_job
-        from app.services.job_lifecycle import mark_job_dispatched
-
-        arq_job = await enqueue_submit_import_job(accepted["job_id"])
-        arq_job_id = getattr(arq_job, "job_id", None)
-        if not arq_job_id:
-            raise RuntimeError("ARQ 未返回 job_id")
-        await run_db(
-            lambda: _mark_job_dispatched(
-                accepted["job_id"], str(arq_job_id), mark_job_dispatched
-            )
-        )
-        arq_scheduled = True
-    except Exception as e:  # ARQ 不可用 ≠ 上传失败
-        dispatch_error = str(e)[:300]
-        logger.warning("ARQ 调度失败，任务保留 pending 等待 dispatcher: %s", e)
+    dispatched_count, dispatch_error = await _dispatch_accepted_upload_jobs(accepted)
+    arq_scheduled = dispatched_count == len(accepted.get("dispatch_jobs", []))
 
     return JSONResponse(
         status_code=202,

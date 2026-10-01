@@ -10,6 +10,7 @@ import { ref } from 'vue'
 import { setAuthToken, refreshAuthToken, setUnauthorizedHandler, invalidateCache } from '@/services/http.js'
 import * as api from '@/api/index.js'
 import { authLogout } from '@/api/index.js'
+import { setTaskUserScope } from '@/composables/useSubmitJobs.js'
 
 // ── 模块级状态（单例） ──
 export const currentUser = ref(null)
@@ -33,6 +34,7 @@ const initAuth = async () => {
   const refreshResult = await refreshAuthToken()
   if (refreshResult?.token && refreshResult?.user) {
     setAuthToken(refreshResult.token)
+    setTaskUserScope(refreshResult.user.id)
     currentUser.value = refreshResult.user
     loadPendingCount()
   }
@@ -42,6 +44,7 @@ const initAuth = async () => {
 
 // ── 登录成功 ──
 const handleLoginSuccess = (user) => {
+  setTaskUserScope(user?.id)
   currentUser.value = user
   _onReady?.()
   loadPendingCount()
@@ -53,6 +56,7 @@ const handleLogout = async () => {
     await authLogout()
   } finally {
     showLoginModal.value = false
+    setTaskUserScope(null)
     setAuthToken('')
     currentUser.value = null
     _onDataRefresh?.()

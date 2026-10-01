@@ -59,13 +59,26 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         "VALUES (101, ?, ?, ?)",
         (USER_CONFIG["api_key"], USER_CONFIG["base_url"], USER_CONFIG["model"]),
     )
+    for key, value in (
+        ("llm_api_key", GLOBAL_CONFIG["api_key"]),
+        ("llm_base_url", GLOBAL_CONFIG["base_url"]),
+        ("llm_model", GLOBAL_CONFIG["model"]),
+    ):
+        test_db.execute(
+            "INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)",
+            (key, value),
+        )
     test_db.commit()
 
     # Keep the HTTP accept path real while making durable jobs runnable by this
     # test instead of relying on an external Redis process.
     monkeypatch.setattr(
-        "app.worker.enqueue_submit_import_job",
+        "app.worker_enqueue.enqueue_submit_import_job",
         AsyncMock(side_effect=RuntimeError("test leaves job in durable outbox")),
+    )
+    monkeypatch.setattr(
+        "app.worker_enqueue.enqueue_credential_preflight_job",
+        AsyncMock(side_effect=RuntimeError("test leaves preflight in durable outbox")),
     )
     monkeypatch.setattr(
         "app.worker.enqueue_cluster_batch_job",
@@ -99,27 +112,34 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         clear_user()
     assert response.status_code == 202, response.text
     import_id = response.json()["import_id"]
-    submit_job_id = int(response.json()["job_id"])
 
-    # Execute the real durable preflight job with the user's strict scope.
-    preflight = test_db.execute(
-        "SELECT id FROM jobs WHERE root_import_id = ? "
-        "AND job_type = 'credential_preflight' ORDER BY id DESC LIMIT 1",
+    # Execute both real durable preflight jobs with their own strict scopes.
+    preflights = test_db.execute(
+        "SELECT j.id, p.payload FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' ORDER BY j.id",
+        (import_id,),
+    ).fetchall()
+    assert len(preflights) == 2
+    for preflight in preflights:
+        scope = json.loads(preflight["payload"])["credential_scope"]
+        outcome = run_credential_preflight(
+            test_db,
+            job_id=int(preflight["id"]),
+            probe=lambda credential: {
+                "status": "ok",
+                "provider": credential.provider,
+                "model": credential.model,
+                "latency_ms": 1,
+            },
+        )
+        assert outcome.status == "ok", f"{scope} scope must pass before extraction"
+    test_db.commit()
+    submit_job = test_db.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
         (import_id,),
     ).fetchone()
-    assert preflight is not None
-    user_probe = run_credential_preflight(
-        test_db,
-        job_id=int(preflight["id"]),
-        probe=lambda credential: {
-            "status": "ok",
-            "provider": credential.provider,
-            "model": credential.model,
-            "latency_ms": 1,
-        },
-    )
-    test_db.commit()
-    assert user_probe.status == "ok"
+    assert submit_job is not None
+    submit_job_id = int(submit_job["id"])
 
     extract_response = json.dumps(
         {

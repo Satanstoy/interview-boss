@@ -104,9 +104,9 @@ v1建议配置：UPLOAD_MAX_LLM_CALLS_PER_IMPORT=200；UPLOAD_SYSTEM_DAILY_CALL_
 1. 校验认证、target枚举、岗位、输入类型、文件数量/MIME/字节上限；非法值返回明确400/413，不静默改target。
 2. 对图片分块读取并累计大小；先检查可用的UploadFile.size；不能先读完整大文件再拒绝。不支持格式明确报错，不能跳过所有文件后仍创建空任务。
 3. 服务端计算policy与request_hash，不做任何模型处理。通过policy确定必须预检scope：私人目标为提交者user；公共目标必须包括global/system；普通用户公共申请若私人暂存阶段需要user模型，还要包括提交者user。个人scope必须由严格的本人配置读取器解析；禁止使用缺失时回退global的通用配置函数。
-4. BEGIN IMMEDIATE：查幂等键；新建根任务、attempt、payload和唯一的`credential_preflight` job；COMMIT。此时不得派发提取/分类/聚类工作。重复同键请求返回同一root和预检job，不另发探测。
-5. `credential_preflight`先用短事务按scope预留配额并写`reserved`调用账本，COMMIT后在事务外执行最小连通性ping；不得持SQLite写锁等待网络。每次结果再用短事务更新调用账本状态并保存每scope预检结果/配置指纹：全部通过才原子创建首个业务job；任一失败则root进入needs_action、记录阻塞scope和允许动作，且不创建业务处理job。ping响应丢失记`unknown`，不能当作免费或已成功。普通用户公共上传因global失败时显示等待管理员修复，不能要求用户改个人Key。
-6. 返回202含稳定import_id、job_id、status、revision和status_url。任务处于配置预检时可以queued/running；预检失败时返回可恢复needs_action。ARQ不可用仍保留任务，不返回“上传失败”诱导用户生成另一幂等键。
+4. BEGIN IMMEDIATE：查幂等键；新建根任务、attempt、payload，并按policy为每个必需scope创建独立、持久的`credential_preflight` job；COMMIT。配置缺失也必须保留根任务和对应预检job，置为可恢复的`needs_action`，不能因预检失败回滚已接受的上传。此时不得派发提取/分类/聚类工作。重复同键请求返回同一root和现有预检job，不另发探测。
+5. 每个`credential_preflight`先用短事务按scope预留配额并写`reserved`调用账本，COMMIT后在事务外执行最小连通性ping；不得持SQLite写锁等待网络。每次结果再用短事务更新调用账本状态并保存该scope预检结果/配置指纹：所有必需scope通过后才原子创建首个业务job；任一失败则root进入needs_action、记录阻塞scope和允许动作，且不创建业务处理job。ping响应丢失记`unknown`，不能当作免费或已成功。普通用户公共上传因global失败时显示等待管理员修复，不能要求用户改个人Key。
+6. 返回202含稳定import_id、job_id、status、revision和status_url；`job_id`可以是尚待执行的预检job。缺少配置时可直接返回可恢复`needs_action`；真实provider探测异步完成后再更新状态。ARQ不可用仍保留任务，不返回“上传失败”诱导用户生成另一幂等键。
 
 ### 2.2 步骤执行和fencing
 
@@ -291,7 +291,7 @@ location接口按同一稳定排序计算rank/page；如果岗位筛选排除目
 6. 迁移脚本默认dry-run，输出counts、候选ID、冲突原因，不输出题干/图片/Key。`--apply`必须有匹配的manifest hash，重复运行不增加实体或attempt。
 7. 现存5029/5030只作为需检查的历史案例；部署时重新查询，不把当日pending快照当当前事实。若原文已保存，只修复失败/缺失步骤，不重新上传。
 8. 清理策略：活跃、needs_action、partial_failed和failed恢复任务及被其引用的payload不被旧90天清理删除。completed超过90天仅清大payload/checkpoint正文，保留import摘要和结果引用；历史恢复材料缺失返回SOURCE_EXPIRED并提示重新提供，不能空跑。备份保留按既有政策记录。
-9. 灰度feature flag `UPLOAD_RECOVERY_V2`默认off；先跑迁移和隔离回归，再前后端共同启用。开启后所有新入口落同一policy服务。
-10. 回退关闭新接受入口，已接受v2任务仍由兼容worker执行或明确挂起；不能把v2任务交给旧worker。禁止DROP新表或恢复旧数据库覆盖切换后用户数据。运维保留能理解新schema的worker镜像直至清空v2活跃队列。
+9. 上传新入口统一走接受服务，不保留flag=off时的裸job/旧图写入分支。当前前端任务中心依赖v2根任务和by-key接口，禁用后端v2会造成前后端协议错配；回滚通过revert相应代码提交完成，不能靠关闭运行时flag切回另一条写路径。
+10. 回滚时保留已创建的新表和字段；已接受的v2任务只能由理解其schema的兼容worker继续执行，或明确挂起等待再次部署，不能交给旧worker。禁止DROP新表或恢复旧数据库覆盖切换后用户数据。运维保留能理解新schema的worker镜像直至清空v2活跃队列。
 
 发布观测至少包含：根任务各状态数量、最老pending年龄、无job队列桶数量、lease回收/旧fence拒绝数、恢复重复抑制数、401按scope、LLM物理调用/unknown数、resolution覆盖率。日志关联import_id/job_id/attempt_no/request_id，不打印原文或Key。

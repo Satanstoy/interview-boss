@@ -105,22 +105,80 @@ def test_accept_shared_admin_preflights_global_scope():
     conn.close()
 
 
-def test_accept_shared_regular_user_preflights_user_scope():
-    """R01：普通用户 share 首阶段（私人保存）先验 user scope（AC-004）。"""
+def test_accept_shared_regular_user_preflights_both_scopes_before_business_work():
+    """普通用户公共申请先验公共与个人模型；任一未通过都不能建提取 job。"""
 
     conn = _db()
     result = _accept(conn, key="k-share-u", target="share", is_admin=False)
     conn.commit()
-    preflight = conn.execute(
-        "SELECT * FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+    preflights = conn.execute(
+        "SELECT j.id, j.upload_attempt_id, p.payload FROM jobs j "
+        "JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' ORDER BY j.id",
         (result["import_id"],),
-    ).fetchone()
-    payload = json.loads(
-        conn.execute(
-            "SELECT payload FROM job_payloads WHERE job_id = ?", (preflight["id"],)
-        ).fetchone()["payload"]
-    )
-    assert payload["credential_scope"] == "user", "普通 share 先验 user（私人阶段）"
+    ).fetchall()
+    scopes = {json.loads(row["payload"])["credential_scope"] for row in preflights}
+    assert scopes == {"user", "global"}
+    assert len({row["upload_attempt_id"] for row in preflights}) == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (result["import_id"],),
+    ).fetchone()[0] == 0
+    conn.close()
+
+
+def test_shared_upload_creates_submit_job_only_after_both_preflights_succeed():
+    """scope 预检按 attempt 聚合，第二个 scope 通过后才创建提取 job。"""
+
+    from app.services.credential_preflight import run_credential_preflight
+
+    conn = _db()
+    result = _accept(conn, key="k-share-gate", target="share")
+    conn.commit()
+    rows = conn.execute(
+        "SELECT j.id, j.upload_attempt_id, p.payload FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight'",
+        (result["import_id"],),
+    ).fetchall()
+    assert len(rows) == 2
+
+    for row in rows:
+        payload = json.loads(row["payload"])
+        outcome = run_credential_preflight(
+            conn,
+            job_id=row["id"],
+            probe=lambda credential: {"status": "ok", "latency_ms": 1},
+            user_config_loader=lambda uid: {
+                "api_key": "user-key",
+                "base_url": "https://user.example.com/v1",
+                "model": "user-model",
+            },
+            global_config_loader=lambda: {
+                "api_key": "global-key",
+                "base_url": "https://global.example.com/v1",
+                "model": "global-model",
+            },
+        )
+        assert outcome.status == "ok"
+        successful_scopes = conn.execute(
+            "SELECT COUNT(DISTINCT json_extract(p.payload, '$.credential_scope')) "
+            "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+            "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+            "AND s.status = 'succeeded' WHERE j.root_import_id = ?",
+            (result["import_id"],),
+        ).fetchone()[0]
+        submit_count = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+            (result["import_id"],),
+        ).fetchone()[0]
+        assert submit_count == (1 if successful_scopes == 2 else 0)
+
+    submits = conn.execute(
+        "SELECT id, upload_attempt_id FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (result["import_id"],),
+    ).fetchall()
+    assert len(submits) == 1
+    assert submits[0]["upload_attempt_id"] == rows[0]["upload_attempt_id"]
     conn.close()
 
 
@@ -201,12 +259,12 @@ def test_preflight_auth_failure_blocks_extract_with_needs_action():
     ).fetchone()
     assert root["status"] == "needs_action"
     assert root["error_code"] == "MODEL_AUTH_INVALID"
-    # 提取 job 留在 pending 且不派发（无成功预检）
+    # 未通过预检时没有任何业务提取 job
     extract = conn.execute(
         "SELECT status FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
         (import_id,),
     ).fetchone()
-    assert extract["status"] in ("pending", "queued")
+    assert extract is None
     conn.close()
 
 
@@ -281,7 +339,7 @@ def test_preflight_success_clears_needs_action_after_config_fix():
     )
     conn.commit()
 
-    # 配置修复后恢复 → 建立新的预检 job → 探测成功 → root 回 queued
+    # 配置修复后恢复 → 建立新的预检 job → 探测成功后原子创建提取 job
     from app.services.upload_lifecycle import restore_upload
 
     restored = restore_upload(conn, actor_id=101, import_id=import_id)
@@ -313,12 +371,12 @@ def test_preflight_success_clears_needs_action_after_config_fix():
     ).fetchone()
     assert root["status"] == "queued", "预检通过后根任务应回到 queued 可派发"
     assert root["error_code"] is None
-    assert restored["planned_job_id"], "恢复同时规划了提取 job"
-    # 提取 job 保持 pending（预检通过后可派发）
+    assert restored["planned_job_id"], "恢复先规划 durable preflight job"
     extract = conn.execute(
-        "SELECT status FROM jobs WHERE id = ?", (restored["planned_job_id"],)
+        "SELECT status FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (import_id,),
     ).fetchone()
-    assert extract["status"] == "pending"
+    assert extract is not None and extract["status"] == "pending"
     conn.close()
 
 

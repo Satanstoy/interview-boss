@@ -139,8 +139,8 @@ def test_default_global_scope_succeeds_with_system_config():
     conn.close()
 
 
-def test_accept_entry_blocks_on_missing_user_config_with_valid_global():
-    """实际上传入口：U1 缺个人 Key 而 global 有效 → needs_action，无业务 job。"""
+def test_accept_entry_persists_preflight_when_user_config_is_missing():
+    """缺个人配置时仍持久化 attempt 与 user preflight，但不建业务 job。"""
 
     conn = _db()
     conn.execute("BEGIN IMMEDIATE")
@@ -158,14 +158,23 @@ def test_accept_entry_blocks_on_missing_user_config_with_valid_global():
     assert result["error"]["code"] == "MODEL_CONFIG_MISSING"
     assert result["error"]["scope"] == "user"
     assert result["status"] == "needs_action"
-    # 不允许任何模型工作被创建（提取/分类/聚类的业务 job 都不得存在）
-    jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-    assert jobs == 0, f"配置缺失时不得派发业务 job，实际 {jobs}"
+    scopes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') FROM jobs j "
+            "JOIN job_payloads p ON p.job_id = j.id WHERE j.job_type = 'credential_preflight'"
+        )
+    }
+    assert scopes == {"user"}, "失败任务必须留下可追踪的个人 scope 预检"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'submit_import'"
+    ).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
     conn.close()
 
 
 def test_accept_entry_blocks_share_when_global_ok_but_user_missing():
-    """普通用户 share：global 有效、私人暂存需 user → 预检失败同样 needs_action。"""
+    """普通用户 share：两种 scope 均持久化，个人配置缺失不创建提取任务。"""
 
     conn = _db()
     conn.execute("BEGIN IMMEDIATE")
@@ -179,12 +188,58 @@ def test_accept_entry_blocks_share_when_global_ok_but_user_missing():
     assert result["status"] == "needs_action"
     assert result["error"]["code"] == "MODEL_CONFIG_MISSING"
     assert result["error"]["scope"] == "user"
-    assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    scopes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') FROM jobs j "
+            "JOIN job_payloads p ON p.job_id = j.id WHERE j.job_type = 'credential_preflight'"
+        )
+    }
+    assert scopes == {"user", "global"}
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'submit_import'"
+    ).fetchone()[0] == 0
     conn.close()
 
 
-def test_configured_user_then_accept_creates_first_business_job():
-    """修复正确 scope 后从同一入口提交：预检通过，创建首个业务 job。"""
+def test_accept_share_requires_global_config_even_when_user_config_is_valid(monkeypatch):
+    """公共目标 global 缺失时应报告 global 阻塞，并持久化两个预检 job。"""
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO user_llm_config (user_id, api_key, base_url, model) "
+        "VALUES (101, 'user-key', 'https://user.example.com/v1', 'user-model')"
+    )
+    monkeypatch.setattr("app.core.config._get_global_llm_config", lambda: None)
+    # 删除 global 配置，保留有效的个人配置。
+    conn.execute("DELETE FROM user_profile WHERE key IN ('llm_api_key', 'llm_base_url', 'llm_model')")
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        result = _accept(conn, idempotency_key="k-share-global-missing", target_intent="share")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    assert result["status"] == "needs_action"
+    assert result["error"]["scope"] == "global"
+    scopes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') FROM jobs j "
+            "JOIN job_payloads p ON p.job_id = j.id WHERE j.job_type = 'credential_preflight'"
+        )
+    }
+    assert scopes == {"user", "global"}
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'submit_import'"
+    ).fetchone()[0] == 0
+    conn.close()
+
+
+def test_configured_user_accept_persists_preflight_without_business_job():
+    """配置齐全也必须先完成真实 provider ping，再创建提取 job。"""
 
     conn = _db()
     # 用户配置好个人模型（加密或明文均可——decrypt 容错）
@@ -202,10 +257,12 @@ def test_configured_user_then_accept_creates_first_business_job():
         raise
 
     assert result["error"] is None
-    assert result["status"] in ("queued", "running")
+    assert result["status"] == "queued"
     assert result["job_id"] is not None
-    row = conn.execute(
-        "SELECT work_key FROM jobs WHERE id = ?", (result["job_id"],)
-    ).fetchone()
-    assert row is not None and row["work_key"]
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'credential_preflight'"
+    ).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'submit_import'"
+    ).fetchone()[0] == 0
     conn.close()

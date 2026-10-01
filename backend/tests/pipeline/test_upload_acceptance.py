@@ -80,7 +80,7 @@ def _jobs(conn):
 # ── 幂等与事务 ───────────────────────────────────────────────
 
 
-def test_accept_creates_root_attempt_and_job_in_one_transaction():
+def test_accept_creates_root_attempt_and_preflight_in_one_transaction():
     conn = _db()
     result = _accept(conn)
     assert result["created"] is True
@@ -89,15 +89,13 @@ def test_accept_creates_root_attempt_and_job_in_one_transaction():
     assert conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
     jobs = _jobs(conn)
-    # v2 + R01：submit_import 提取 job + credential_preflight 预检 job 同事务
-    assert len(jobs) == 2, [dict(j) for j in jobs]
+    # AC-004：同事务持久化 attempt + preflight；provider ping 通过后再建业务 job。
+    assert len(jobs) == 1, [dict(j) for j in jobs]
     submit_jobs = [j for j in jobs if j["job_type"] == "submit_import"]
     preflight_jobs = [j for j in jobs if j["job_type"] == "credential_preflight"]
-    assert len(submit_jobs) == 1 and len(preflight_jobs) == 1
-    assert submit_jobs[0]["root_import_id"] == result["import_id"]
-    assert submit_jobs[0]["work_key"]
+    assert len(submit_jobs) == 0 and len(preflight_jobs) == 1
     assert preflight_jobs[0]["root_import_id"] == result["import_id"]
-    assert result["job_id"] == submit_jobs[0]["id"]
+    assert result["job_id"] == preflight_jobs[0]["id"]
     conn.close()
 
 
@@ -119,8 +117,8 @@ def test_same_key_same_hash_returns_same_root_and_no_new_job():
     assert second["created"] is False
     assert second["import_id"] == first["import_id"]
     assert second["job_id"] == first["job_id"]
-    # 同键复用不新建 job（submit + preflight 各 1，保持稳定）
-    assert len(_jobs(conn)) == 2
+    # 同键复用不新建 job（只保留同 attempt 的 preflight）
+    assert len(_jobs(conn)) == 1
     assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
     conn.close()
 
@@ -131,8 +129,8 @@ def test_same_key_different_hash_conflicts():
     with pytest.raises(Exception) as exc:
         _accept(conn, text="完全不同的另一篇面经")
     assert getattr(exc.value, "code", "") == "IDEMPOTENCY_CONFLICT"
-    # 冲突后不产生幽灵 job：submit + preflight 维持各 1
-    assert len(_jobs(conn)) == 2
+    # 冲突后不产生幽灵 job：原 preflight 维持 1 条
+    assert len(_jobs(conn)) == 1
     conn.close()
 
 
@@ -141,8 +139,8 @@ def test_same_key_isolated_between_users():
     mine = _accept(conn, actor_id=101)
     other = _accept(conn, actor_id=102)
     assert mine["import_id"] != other["import_id"]
-    # 两人各 1 个 root → preflight + submit = 4 个 job（隔离不串单）
-    assert len(_jobs(conn)) == 4
+    # 两人各 1 个 root → 每个 root 独立保留自己的 preflight。
+    assert len(_jobs(conn)) == 2
     conn.close()
 
 
@@ -313,13 +311,16 @@ def test_missing_user_key_accepts_root_as_needs_action_without_llm_calls():
     )
     assert result["status"] == "needs_action"
     assert result["error"]["code"] == "MODEL_CONFIG_MISSING"
-    assert result["job_id"] is None, "无 Key 时不得创建会调用模型的 job"
+    assert result["job_id"] is not None, "无 Key 时也必须保存可恢复的 preflight job"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'submit_import'"
+    ).fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM upload_llm_calls").fetchone()[0] == 0
     assert calls["global"] == 0, "个人上传绝不借用系统配置"
 
-    # 原稿与根任务都在；attempt 等待恢复时创建
+    # 原稿、根任务、attempt 和预检 outbox 都在，尚无业务 job
     assert conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
 
 
 def test_fixing_config_allows_restore_of_same_root():
@@ -329,6 +330,19 @@ def test_fixing_config_allows_restore_of_same_root():
         credential_loaders={"user": lambda uid: None, "global": lambda: None},
     )
     assert result["status"] == "needs_action"
+
+    from app.services.credential_preflight import run_credential_preflight
+
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE job_type = 'credential_preflight'"
+    ).fetchone()
+    blocked = run_credential_preflight(
+        conn,
+        job_id=preflight["id"],
+        user_config_loader=lambda uid: None,
+        global_config_loader=lambda: None,
+    )
+    assert blocked.status == "blocked"
 
     from app.services.upload_lifecycle import restore_upload
 

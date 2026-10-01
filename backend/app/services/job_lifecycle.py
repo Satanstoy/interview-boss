@@ -215,15 +215,38 @@ def create_answer_generation_jobs(
     search_scope: str = "user",
 ) -> list[int]:
     """Persist one idempotent answer job per newly imported question."""
+    parent = conn.execute(
+        "SELECT root_import_id, upload_attempt_id FROM jobs WHERE id = ?",
+        (parent_job_id,),
+    ).fetchone()
+    root_import_id = parent["root_import_id"] if parent else None
+    upload_attempt_id = parent["upload_attempt_id"] if parent else None
     job_ids: list[int] = []
     for question_id, question_text in answer_tasks:
         idempotency_key = f"submit:{parent_job_id}:answer:{question_id}"
-        conn.execute(
-            "INSERT OR IGNORE INTO jobs "
-            "(job_type, status, progress_total, created_by, idempotency_key) "
-            "VALUES (?, 'pending', 1, ?, ?)",
-            (ANSWER_GENERATION_JOB_TYPE, user_id, idempotency_key),
-        )
+        if root_import_id:
+            conn.execute(
+                "INSERT OR IGNORE INTO jobs "
+                "(job_type, status, progress_total, created_by, idempotency_key, "
+                "parent_job_id, root_import_id, upload_attempt_id, work_key) "
+                "VALUES (?, 'pending', 1, ?, ?, ?, ?, ?, ?)",
+                (
+                    ANSWER_GENERATION_JOB_TYPE,
+                    user_id,
+                    idempotency_key,
+                    parent_job_id,
+                    root_import_id,
+                    upload_attempt_id,
+                    f"answer:{int(question_id)}:v1",
+                ),
+            )
+        else:
+            conn.execute(
+                "INSERT OR IGNORE INTO jobs "
+                "(job_type, status, progress_total, created_by, idempotency_key, parent_job_id) "
+                "VALUES (?, 'pending', 1, ?, ?, ?)",
+                (ANSWER_GENERATION_JOB_TYPE, user_id, idempotency_key, parent_job_id),
+            )
         row = conn.execute(
             "SELECT id FROM jobs WHERE job_type = ? AND idempotency_key = ?",
             (ANSWER_GENERATION_JOB_TYPE, idempotency_key),
@@ -251,8 +274,61 @@ def create_answer_generation_jobs(
                 ),
             ),
         )
+        if root_import_id:
+            update_upload_answer_stage(conn, answer_job_id, "pending")
         job_ids.append(answer_job_id)
     return job_ids
+
+
+def update_upload_answer_stage(
+    conn,
+    job_id: int,
+    status: str,
+    *,
+    error_code: str | None = None,
+    result_json: str | None = None,
+) -> str | None:
+    """Mirror a root-bound answer job into its per-question upload checkpoint."""
+
+    row = conn.execute(
+        "SELECT j.root_import_id, j.upload_attempt_id, p.payload, i.input_version, "
+        "i.pipeline_version FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "JOIN upload_imports i ON i.id = j.root_import_id "
+        "WHERE j.id = ? AND j.job_type = ?",
+        (job_id, ANSWER_GENERATION_JOB_TYPE),
+    ).fetchone()
+    if row is None or not row["root_import_id"]:
+        return None
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    question_id = payload.get("question_id")
+    if question_id is None:
+        return None
+    unit_key = f"answer:{int(question_id)}"
+    conn.execute(
+        "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+        "pipeline_version, status, result_json, error_code, retryable, job_id) "
+        "VALUES (?, 'answer', ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+        "pipeline_version = excluded.pipeline_version, status = excluded.status, "
+        "result_json = excluded.result_json, error_code = excluded.error_code, "
+        "retryable = excluded.retryable, job_id = excluded.job_id, "
+        "updated_at = CURRENT_TIMESTAMP",
+        (
+            row["root_import_id"],
+            unit_key,
+            int(row["input_version"] or 1),
+            row["pipeline_version"] or "upload-pipeline-v1",
+            status,
+            result_json,
+            error_code,
+            1 if status in ("pending", "running") else 0,
+            job_id,
+        ),
+    )
+    return str(row["root_import_id"])
 
 
 def _now() -> str:

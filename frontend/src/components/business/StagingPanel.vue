@@ -19,7 +19,6 @@ import {
   attachJob,
   clearDraftKey,
 } from '@/composables/useSubmitJobs.js'
-import { useModelGuard } from '@/composables/useModelGuard.js'
 import { useConfirm } from '@/composables/useNotification.js'
 import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
 
@@ -223,9 +222,6 @@ async function onSubmit() {
     }
   }
 
-  const { ensureModelReady } = useModelGuard()
-  if (!await ensureModelReady({ action: '提交解析' })) return
-
   isSubmitting.value = true
   try {
     const formData = new FormData()
@@ -261,7 +257,7 @@ async function onSubmit() {
     toast[terminalNeedsAction ? 'warning' : 'success'](
       terminalNeedsAction
         ? '需要先配置模型才能继续，内容已保留'
-        : '任务已提交，正在后台处理中',
+        : '任务已提交，正在检查目标模型并后台处理',
     )
     if (submitSuccess.value) {
       setTimeout(() => { submitSuccess.value = false }, 3000)

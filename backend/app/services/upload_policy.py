@@ -131,6 +131,31 @@ class UploadPolicy:
         }
 
 
+def initial_preflight_scopes(policy: UploadPolicy | dict) -> tuple[str, ...]:
+    """Return every credential scope required before initial processing.
+
+    A regular user's public contribution first goes through private
+    preprocessing and later becomes a public write. Both model configurations
+    must be checked before any extraction starts. Direct admin public imports
+    use only the system credential; private imports use only the requester's
+    credential.
+    """
+
+    if isinstance(policy, dict):
+        target_intent = policy.get("target_intent")
+        credential_scope = policy.get("credential_scope") or "user"
+        post_approval_scope = policy.get("post_approval_credential_scope")
+    else:
+        target_intent = policy.target_intent
+        credential_scope = policy.credential_scope
+        post_approval_scope = policy.post_approval_credential_scope
+
+    scopes = {credential_scope}
+    if target_intent == "share" and post_approval_scope:
+        scopes.add(post_approval_scope)
+    return tuple(scope for scope in ("global", "user") if scope in scopes)
+
+
 def resolve_upload_policy(
     *,
     actor_id: int | None,

@@ -563,6 +563,23 @@ function _sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function _retrySSEConnection(url, onEvent, options, isRetry, error, lastStatus) {
+  if (options.signal?.aborted) return
+  if (typeof options.isTerminal !== 'function') throw error
+  if (lastStatus != null && options.isTerminal(lastStatus)) throw error
+  const attempt = options.reconnectAttempt || 0
+  if (options.maxReconnects != null && attempt >= options.maxReconnects) throw error
+  await _sleep(_sseReconnectDelay(attempt))
+  if (options.signal?.aborted) return
+  options.onReconnect?.(attempt + 1)
+  return getSSE(
+    url,
+    onEvent,
+    { ...options, reconnectAttempt: attempt + 1 },
+    isRetry,
+  )
+}
+
 export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
   // 支持旧的 3 参数调用: getSSE(url, onEvent, true)
   if (options === true) {
@@ -588,12 +605,18 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
     const token = getAuthToken()
     if (token) authHeaders['Authorization'] = `Bearer ${token}`
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders, ...(options.headers || {}) },
-      signal: controller.signal,
-      credentials: 'same-origin',
-    })
+    let res
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders, ...(options.headers || {}) },
+        signal: controller.signal,
+        credentials: 'same-origin',
+      })
+    } catch (err) {
+      if (controller.signal.aborted || err?.name === 'AbortError') return
+      return _retrySSEConnection(url, onEvent, options, _isRetry, err)
+    }
 
     // 401 → 尝试刷新 token 并重试一次
     if (res.status === 401 && !_isRetry) {
@@ -607,7 +630,12 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
       const text = await res.text()
       let detail
       try { detail = JSON.parse(text).detail } catch { detail = text }
-      throw new Error(detail || getStatusMessage(res.status))
+      const error = new Error(detail || getStatusMessage(res.status))
+      error.status = res.status
+      if (res.status >= 500 || res.status === 408 || res.status === 429) {
+        return _retrySSEConnection(url, onEvent, options, _isRetry, error)
+      }
+      throw error
     }
 
     let lastStatus
@@ -615,24 +643,19 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
       if (event && typeof event === 'object' && 'status' in event) lastStatus = event.status
       return onEvent(event)
     }
-    const result = await _consumeSSEStream(res.body.getReader(), _track)
+    let result
+    try {
+      result = await _consumeSSEStream(res.body.getReader(), _track)
+    } catch (err) {
+      if (controller.signal.aborted || err?.name === 'AbortError') return
+      return _retrySSEConnection(url, onEvent, options, _isRetry, err, lastStatus)
+    }
 
     // AC-010：正常 EOF 但业务未终态 → 退避重连；终态/被 abort 不再重连
     if (typeof options.isTerminal === 'function' && !options.signal?.aborted) {
       const status = lastStatus ?? result?.status
       if (!options.isTerminal(status)) {
-        const attempt = options.reconnectAttempt || 0
-        if (options.maxReconnects == null || attempt < options.maxReconnects) {
-          await _sleep(_sseReconnectDelay(attempt))
-          if (options.signal?.aborted) return result
-          options.onReconnect?.(attempt + 1)
-          return getSSE(
-            url,
-            onEvent,
-            { ...options, reconnectAttempt: attempt + 1 },
-            _isRetry,
-          )
-        }
+        return _retrySSEConnection(url, onEvent, options, _isRetry, new Error('SSE stream ended'), status)
       }
     }
     return result
