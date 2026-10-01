@@ -147,14 +147,21 @@ docker compose --profile test run --rm test uv run pytest \
 | 范围 | 结果 |
 |---|---|
 | upload 域（含 5 契约用例） | `5 failed → 0 failed`，**345 passed / 9 skipped**（此前 341 passed / 4 failed） |
-| 全量后端 | `21 failed / 3292 passed / 11 skipped`（18m07s） |
+| 全量后端（修复前） | `21 failed / 3292 passed / 11 skipped`（18m07s） |
+| 全量后端（修复后） | **`13 failed / 3300 passed / 11 skipped`（17m42s）** |
 | 前端 e2e（upload-task-center + upload-question-data-flow） | **14 passed**（修复第二个掩盖缺陷的 mock 前为 13 passed / 1 failed） |
 | 前端 build | 通过 |
 
-全量 21 条失败分类（逐条隔离复跑确认）：
+全量 21 → 13 条失败分类（逐条隔离复跑确认）：
+
 - **本次引入并已修复（3）**：`test_schema_docs_freshness` ×2（migration 123 使 schema.md 过期 → 已重新生成，并给 test 服务加 `./docs:/app/docs:ro` 挂载，否则容器只看到镜像内旧副本）、`test_interview_server_pagination::test_location_endpoint_returns_page_under_same_ordering`（改为断言岗位 ID + 名称）。
 - **上一轮在途改动遗留（1）**：`test_submit_job_retry::test_retry_binds_root_and_attempt_when_v2_root_exists`（旧 retry 现在先返回预检 job）→ 已按 spec 设计重写。
-- **与本次改动无关的既有失败（17）**：14 条 infra/部署契约测试（0.93s 内隔离复现，读取未被本次改动的部署文件）+ 3 条 `test_upload_credential_preflight` 顺序污染（隔离下 14 passed；同时暴露测试输出中打印**真实生产 API Key**，属独立安全问题）。
+- **与本次改动无关的既有失败（最终仍红 13 条）**：10 条 infra/部署契约测试（读取未被本次改动的部署/合规/runbook 文件，0.93s 内隔离复现）+ 3 条 `test_upload_credential_preflight` 顺序污染（隔离下 14 passed）。
+- **本次改动引入的失败数：0**。
+
+补充观察（未修，属独立问题）：
+1. `test_upload_credential_preflight` 的 3 条在全量顺序下会读到**真实全局模型配置**，并把真实 API Key（`tp-…`）打印进测试输出——既是顺序依赖也是敏感信息泄漏。
+2. 上一轮全量跑红的 `test_operations_runbook_contract` ×2 与 `test_deployment_compliance_matrix` ×2 在本次全量跑变绿，说明这批 infra 契约测试本身存在环境/顺序依赖（未定位根因）。
 
 ### 7.4 仍未对齐（下一步）
 
