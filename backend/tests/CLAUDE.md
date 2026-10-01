@@ -50,6 +50,9 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 | `security/` | 安全测试（认证、CSRF、注入） |
 | `interview/` | 面试流程测试 |
 | `infra/` | 基础设施测试（DB、migration、config） |
+| `integration/` | 上传恢复隔离栈（AC-028）与逐题数据流（AC-029）：`test_upload_recovery_stack.py` 需显式 `UPLOAD_TEST_DB_PATH` + `UPLOAD_TEST_REDIS_PREFIX` 才启动（真实 HTTP + 真实 Redis 隔离队列 + 真实 worker 任务；浏览器腿未覆盖，见文件 docstring）；`test_upload_question_data_flow_worker.py` 走真实 HTTP/worker/审核/聚类且不 seed 中间产物 |
+
+`integration/test_upload_recovery_stack.py` 的 fixture **只 patch `app.db.connection.DB_PATH` + `_db_conn_var`**，不得逐模块 patch `get_db_connection`：测试期间才被导入的模块会永久绑定那个闭包，teardown 无法还原，后续测试会拿到已关闭的连接。
 
 `conftest.py` 的 `questions_detail` fixture 必须与生产写入列一致；当前包含 `diff_tag` 和 migration 042 添加的分布事实列。
 

@@ -165,6 +165,67 @@ docker compose --profile test run --rm test uv run pytest \
 
 ### 7.4 仍未对齐（下一步）
 
-- AC-006 / AC-028 仍被 `UPLOAD_TEST_DB_PATH` 门禁整体 skip；AC-029 仍用手工 `_seed_private_pipeline` 写被验收产物 → 需升级为真实链路用例。
 - 上一轮审计的其余缺口（B5 调用记账仅覆盖预检、B6 管理员公共导入无独立审计实体、C7 enqueue root 首轮 NULL、C9 cluster/answer 无 generation fencing、E5 同 URL 复用覆盖清单、A3 管理端点无 owner 断言等）**尚未处理**。
 - `scripts/line_guard.sh` 仍 FAIL 4 个文件（`worker.py` 1623、`public_contributions.py` 1560 及两个测试文件）。
+
+---
+
+## 8. Phase 3：AC-006 / AC-028 / AC-029 升级为真实链路
+
+### 8.1 AC-006：门禁移除 + 补队列级断言
+
+`backend/tests/pipeline/test_upload_matching_outcomes.py` 原先被 `UPLOAD_TEST_DB_PATH` **模块级门禁整体 skip**（等于 AC-006 从未验收），且它手工搭 DB/patch 模块。现已改为标准 `test_db` fixture、**默认套件即可运行**，并补一条队列级用例：
+
+| 用例 | 断言 |
+|---|---|
+| `test_node_match_outcomes_three_state_honors_failure_without_new_canonical` | failed 的题不入队；no_match 的题入队；节点暴露 `match_failed` 计数 |
+| `test_failed_question_never_reaches_the_personal_queue` | 两行明细都落库（不静默丢题）；`analysis_queue` 只含 no_match 的明细、**不含 failed 的明细**；个人新 canonical 由队列创建，节点同步不建题 |
+
+变异验证：把 `failed_outcome_ids` 从 `excluded_ids` 移除 → 两条用例都变红 ✅（恢复后 2 passed）。
+
+### 8.2 AC-028：真实隔离栈（HTTP + 隔离 Redis + 真实 worker + 重启/重放）
+
+`backend/tests/integration/test_upload_recovery_stack.py` 原先只是**服务层测试 + 环境变量门禁**：不启 API、不启 worker、也没碰 Redis（4 条全部默认 skip）。现已改为真实隔离栈，保留 spec 要求的门禁（缺 `UPLOAD_TEST_DB_PATH`/`UPLOAD_TEST_REDIS_PREFIX` 拒绝启动）：
+
+```
+docker compose --profile test run --rm \
+  -e UPLOAD_TEST_DB_PATH=/tmp/ac028-stack.db \
+  -e UPLOAD_TEST_REDIS_PREFIX=ac028test \
+  test uv run pytest backend/tests/integration/test_upload_recovery_stack.py -q
+→ 4 passed
+```
+
+| 步骤 | 真实链路证据 |
+|---|---|
+| 1 真实 HTTP 接受 | `POST /api/submit-jobs` → 202 + 稳定 `import_id`；只有 user scope 预检 job；**业务 job 数量为 0**（AC-004） |
+| 2 真实预检探测 | `run_credential_preflight` 走**真实配置读取器**（注入 stub loader 会得到不同 `config_fingerprint`，worker 会按设计 defer） |
+| 3 真实 Redis 投递 | 经项目 `enqueue_submit_import_job` 投到隔离队列 `<prefix>:arq`；`queued_jobs()` 里能查到该 `submit_import_task` |
+| 4 停机 | 业务成果为 0，root 仍 queued/running |
+| 5 重启 | 真实 `submit_import_task` 执行（模型 stub）→ 恰好一份私人面经 + 明细 |
+| 6 授权 API | `GET /api/upload-imports/{id}` 返回 `result.interview_id`；**status 必须为 queued**（AC-011：聚类未完成不得 completed），且确有 pending `cluster_batch` job |
+| 7 重放 | 把 job 复位为 queued 再跑一次 → 面经/明细数量不变（F08 检查点复用） |
+
+变异验证：破坏 `_find_existing_linked` 的复用分支 → 重放产生重复面经 → "重放不得重复建面经" 断言变红 ✅。
+
+**未覆盖（如实 not-run）**：真实浏览器对活体栈的断言。前端 e2e 走 mock API，仓库没有"浏览器 + 真实后端 + 真实 worker"的 harness；此处只证明浏览器会读取的授权 API 正确，不宣称浏览器腿已验收。
+
+### 8.3 AC-029：真实链路追踪已存在，补齐覆盖映射
+
+`backend/tests/integration/test_upload_question_data_flow_worker.py` 是**真实链路**用例（不 seed 上传中间产物）：真实 HTTP 接受 → 真实预检 → 真实 `submit_import_task` → 真实审核端点 → 真实 `cluster_batch_task`，并断言逐题 ordinal/cat/tags/resolution、排除项、失败注入（首次只 3 题成功）、恢复只重试失败子项、最终恰 4 题公开 + 私人仍 5 题、授权 API 一致、U2 读不到 U1 私人题。
+
+AC-029 六项要求的覆盖映射：
+
+| 要求 | 覆盖 |
+|---|---|
+| 1 幂等/policy/preflight scope/needs_action/同 root 恢复 | `test_upload_credential_preflight.py`（accept 真实入口 → needs_action）、`test_upload_credential_preflight_job.py`（双 scope 通过才建业务 job；401→needs_action 不派发；配置修复后同 root 回 queued） |
+| 2 逐题 ordinal/分类/标签/resolution | `test_upload_question_data_flow_worker.py`（ordinal 10/20/30/40/50 与 stub 预期一致；私人 resolution 全 `created`） |
+| 3 审核前不可见 / 脱敏 | 同上（public company/url 为空；`public_contribution_items` 未 published 前不公开） |
+| 4 保留项 ↔ public detail/resolution/canonical；排除项不出现；未完成不 published | 同上 |
+| 5 失败注入 + 恢复不重复 | 同上（首次 3 成功、失败子项 `failed`、root 不 completed、重试后 4 题且既有 canonical ID 不变） |
+| 6 只读获批投影 / U2 与管理员隔离 | 同上（U2 的 mine 列表不含 U1）+ `test_upload_task_privacy.py`（AC-018：非本人 root/SSE/旧 jobs 全 404，admin 运维白名单无正文） |
+
+**仍未做**：把逐题 trace 映射导出为可读产物（当前只以断言形式存在）。
+
+### 8.4 本轮顺带修掉的测试隔离缺陷
+
+`test_upload_recovery_stack.py` 的 fixture 原先逐模块 patch `get_db_connection`：**测试期间才被导入的模块会永久绑定那个闭包**（monkeypatch 没记录过它，teardown 无法还原），导致后续测试拿到已关闭的连接。现改为只 patch `DB_PATH` + ContextVar（原始实现本来就按这两者解析连接）。修复前「stack 文件 + AC-006 文件」同跑会红，修复后 7 passed。
