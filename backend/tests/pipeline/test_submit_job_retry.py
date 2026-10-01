@@ -51,7 +51,7 @@ def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
         test_db.execute(
             "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
             "pipeline_version, status, job_id) "
-            "VALUES (?, 'preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
+            "VALUES (?, 'credential_preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
             (import_id, f"initial:{row['scope']}", row["id"]),
         )
         test_db.execute("UPDATE jobs SET status = 'completed' WHERE id = ?", (row["id"],))

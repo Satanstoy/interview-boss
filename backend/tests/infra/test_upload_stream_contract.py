@@ -299,7 +299,7 @@ def test_snapshot_global_preflight_actions_follow_viewer_role(test_db):
     test_db.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
         "pipeline_version, status, error_code, job_id) VALUES "
-        "('imp-global-block', 'preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
+        "('imp-global-block', 'credential_preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
         "'failed', 'MODEL_CONFIG_MISSING', ?)",
         (job_id,),
     )

@@ -270,6 +270,40 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     Raises:
         HTTPException: 用户未配置 LLM 密钥
     """
+    from app.services.upload_llm_accounting import current_upload_llm_context
+    upload_context = current_upload_llm_context()
+    if upload_context is not None:
+        from app.services.upload_credentials import resolve_upload_credentials
+
+        # Upload policy and its successful preflight own the credential scope.
+        # Legacy helpers often omit llm_scope or user_id; in an upload context
+        # those defaults must never select a different payer/configuration.
+        resolved = resolve_upload_credentials(
+            credential_scope=upload_context.credential_scope,
+            user_id=(
+                upload_context.user_id
+                if upload_context.credential_scope == "user"
+                else None
+            ),
+            stage=upload_context.stage,
+            unit_key=upload_context.unit_key,
+        )
+        upload_context.credential = resolved
+        scoped_client = _make_client(
+            resolved.api_key,
+            resolved.base_url,
+            resolved.timeout,
+            resolved.provider,
+            api_format=resolved.api_format,
+        )
+        return (
+            scoped_client,
+            resolved.model,
+            resolved.timeout,
+            resolved.base_url,
+            resolved.provider,
+        )
+
     from app.core.config import get_user_llm_config
     from fastapi import HTTPException
 
@@ -370,6 +404,14 @@ from app.services.llm_status import (
 
 def _resolve_client_and_model(user_id: int = None, llm_scope: str = "user"):
     """解析 LLM 客户端和模型。user_id 有值时使用用户配置，否则使用全局配置。"""
+    from app.services.upload_llm_accounting import current_upload_llm_context
+
+    upload_context = current_upload_llm_context()
+    if upload_context is not None:
+        return get_llm_client_for_user(
+            upload_context.user_id,
+            llm_scope=upload_context.credential_scope,
+        )
     if user_id is not None or llm_scope == "global":
         return get_llm_client_for_user(user_id, llm_scope=llm_scope)
     from app.core.config import LLM_BASE_URL
@@ -428,7 +470,13 @@ async def _llm_with_tools_call(
             "prompt_cache_control", False
         ):
             call_kwargs["cache_control"] = cache_control or {"type": "ephemeral"}
-        response = await resolved_client.messages.create(**call_kwargs)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.messages.create(**call_kwargs),
+            model=model,
+            provider="anthropic",
+        )
 
         tool_calls = _extract_tool_calls(response, "anthropic")
         text_content = _extract_anthropic_text(response)
@@ -477,7 +525,13 @@ async def _llm_with_tools_call(
         if not thinking and _supports_thinking_disable(base_url, model):
             # 与 raw_llm_call 对齐：mimo 关思考 → reasoning.effort=none
             call_kwargs["reasoning"] = {"effort": "none"}
-        response = await resolved_client.responses.create(**call_kwargs)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**call_kwargs),
+            model=model,
+            provider=provider,
+        )
 
         tool_calls = _extract_responses_tool_calls(response)
         text_content = _extract_responses_text(response)
@@ -514,7 +568,13 @@ async def _llm_with_tools_call(
         # mimo 默认开启深度思考：关掉才能提速并让 temperature 真正生效，
         # 否则 reasoning 会吃光 max_tokens 预算（与 _call_llm_with_retry 对齐）。
         call_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-    response = await resolved_client.chat.completions.create(**call_kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**call_kwargs),
+        model=model,
+        provider=provider,
+    )
 
     msg = response.choices[0].message
     tool_calls = _extract_tool_calls(response, "openai")
@@ -746,7 +806,13 @@ async def _call_anthropic(
     ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
-    response = await anthropic_client.messages.create(**body)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: anthropic_client.messages.create(**body),
+        model=model,
+        provider="anthropic",
+    )
     return _extract_anthropic_text(response)
 
 
@@ -901,7 +967,11 @@ async def _call_responses(
     ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
-    response = await client.responses.create(**body)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: client.responses.create(**body), model=model, provider="openai"
+    )
     return _extract_responses_text(response)
 
 
@@ -1025,7 +1095,13 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
             body["text"] = {"format": {"type": "json_object"}}
         if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
             body["reasoning"] = {"effort": "none"}
-        response = await resolved_client.responses.create(**body)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**body),
+            model=kwargs["model"],
+            provider=provider,
+        )
         return _extract_responses_text(response)
 
     if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
@@ -1037,7 +1113,13 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
 
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
-    response = await resolved_client.chat.completions.create(**kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**kwargs),
+        model=kwargs["model"],
+        provider=provider,
+    )
     return response.choices[0].message.content.strip()
 
 
@@ -1151,7 +1233,13 @@ async def _call_llm_with_retry(
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     kwargs["max_tokens"] = caps["max_output_tokens"]
 
-    response = await resolved_client.chat.completions.create(**kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**kwargs),
+        model=resolved_model,
+        provider=provider,
+    )
     return response.choices[0].message.content.strip()
 
 
@@ -1230,10 +1318,22 @@ async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **k
         if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
             kwargs["text"] = {"format": {"type": "json_object"}}
         kwargs.pop("response_format", None)
-        response = await resolved_client.responses.create(**kwargs)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**kwargs),
+            model=kwargs["model"],
+            provider=provider,
+        )
         return _extract_responses_text(response)
 
-    response = await resolved_client.chat.completions.create(messages=messages, **kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(messages=messages, **kwargs),
+        model=kwargs["model"],
+        provider=provider,
+    )
     return response.choices[0].message.content.strip()
 
 

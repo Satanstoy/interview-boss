@@ -10,12 +10,19 @@
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.db.migrations import run_migrations
 from app.services import llm_quota
-from app.services.upload_credentials import reserve_llm_call
+from app.services.upload_credentials import UploadCredentialError, reserve_llm_call
+from app.services.upload_llm_accounting import (
+    call_provider_with_upload_ledger,
+    upload_llm_context,
+)
+from app.services.upload_stage_names import canonical_upload_stage
 
 
 def _db():
@@ -41,6 +48,78 @@ def test_reserve_call_does_not_commit_inside_transaction():
     conn.execute("ROLLBACK")
     assert conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
     conn.close()
+
+
+def test_upload_and_system_call_limits_reject_before_ledger_insert():
+    conn = _db()
+    reserve_llm_call(
+        conn,
+        root_import_id="imp-1",
+        stage="cluster",
+        call_key="system-1",
+        credential_scope="global",
+        payer_type="system",
+        provider="openai",
+        model="system-model",
+        config_fingerprint="fingerprint",
+        day="2026-09-29",
+        system_daily_limit=1,
+        import_call_limit=10,
+    )
+    with pytest.raises(UploadCredentialError) as system_limit:
+        reserve_llm_call(
+            conn,
+            root_import_id="imp-1",
+            stage="cluster",
+            call_key="system-2",
+            credential_scope="global",
+            payer_type="system",
+            day="2026-09-29",
+            system_daily_limit=1,
+            import_call_limit=10,
+        )
+    assert system_limit.value.code == "QUOTA_EXCEEDED"
+
+    with pytest.raises(UploadCredentialError) as import_limit:
+        reserve_llm_call(
+            conn,
+            root_import_id="imp-1",
+            stage="cluster",
+            call_key="system-3",
+            credential_scope="global",
+            payer_type="system",
+            day="2026-09-29",
+            system_daily_limit=10,
+            import_call_limit=1,
+        )
+    assert import_limit.value.code == "QUOTA_EXCEEDED"
+    assert conn.execute("SELECT COUNT(*) FROM upload_llm_calls").fetchone()[0] == 1
+    assert conn.execute("SELECT stage FROM upload_llm_calls").fetchone()[0] == "resolve"
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    ("legacy", "canonical"),
+    [
+        ("preflight", "credential_preflight"),
+        ("complete", "extract"),
+        ("fill", "extract"),
+        ("tag", "classify"),
+        ("match", "resolve"),
+        ("cluster", "resolve"),
+        ("save", "persist"),
+    ],
+)
+def test_internal_upload_stages_use_contract_names(legacy, canonical):
+    assert canonical_upload_stage(legacy) == canonical
+    with upload_llm_context(
+        root_import_id="imp-1",
+        stage=legacy,
+        unit_key="document",
+        credential_scope="user",
+        user_id=101,
+    ) as context:
+        assert context.stage == canonical
 
 
 def test_old_wrapper_still_commits_and_respects_limit(monkeypatch):
@@ -72,4 +151,21 @@ def test_retries_use_distinct_call_keys():
     rows = conn.execute("SELECT COUNT(*) FROM llm_usage WHERE user_id = 101").fetchone()[0]
     assert rows == 1  # 同一天同一用户一行，call_count=3
     assert conn.execute("SELECT call_count FROM llm_usage").fetchone()[0] == 3
+    conn.close()
+
+
+@pytest.mark.asyncio
+async def test_non_upload_provider_call_does_not_write_upload_ledger():
+    conn = _db()
+    response = SimpleNamespace(usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+    request = AsyncMock(return_value=response)
+
+    result = await call_provider_with_upload_ledger(
+        request, model="regular-model", provider="openai"
+    )
+
+    assert result is response
+    request.assert_awaited_once()
+    assert conn.execute("SELECT COUNT(*) FROM upload_llm_calls").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
     conn.close()

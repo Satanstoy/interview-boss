@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import sqlite3
 from dataclasses import dataclass, field
 
@@ -22,6 +23,12 @@ CREDENTIAL_SCOPES = ("user", "global")
 PAYER_TYPES = ("user", "system")
 
 CALL_STATUSES = ("reserved", "succeeded", "failed", "unknown")
+UPLOAD_MAX_LLM_CALLS_PER_IMPORT = int(
+    os.environ.get("UPLOAD_MAX_LLM_CALLS_PER_IMPORT", "200")
+)
+UPLOAD_SYSTEM_DAILY_CALL_LIMIT = int(
+    os.environ.get("UPLOAD_SYSTEM_DAILY_CALL_LIMIT", "1000")
+)
 
 
 class UploadCredentialError(Exception):
@@ -215,6 +222,8 @@ def reserve_llm_call(
     model: str | None = None,
     config_fingerprint: str | None = None,
     daily_limit: int | None = None,
+    system_daily_limit: int | None = None,
+    import_call_limit: int | None = None,
     day: str | None = None,
     tokens: int = 0,
 ):
@@ -223,6 +232,10 @@ def reserve_llm_call(
     同一 ``call_key`` 只能登记一次；配额不足抛 ``QUOTA_EXCEEDED``，不写账本。
     """
 
+    from app.services.upload_stage_names import canonical_upload_stage
+
+    stage = canonical_upload_stage(stage)
+
     if credential_scope not in CREDENTIAL_SCOPES:
         raise ValueError(f"不支持的 credential_scope: {credential_scope!r}")
     if payer_type not in PAYER_TYPES:
@@ -230,13 +243,52 @@ def reserve_llm_call(
     if payer_type == "user" and not payer_user_id:
         raise ValueError("payer_type=user 必须提供 payer_user_id")
 
-    if payer_type == "user":
-        from app.services import llm_quota
+    from app.services import llm_quota
 
+    budget_day = day or llm_quota._today()
+    effective_import_limit = (
+        UPLOAD_MAX_LLM_CALLS_PER_IMPORT
+        if import_call_limit is None
+        else int(import_call_limit)
+    )
+    if root_import_id and effective_import_limit >= 0:
+        used_for_import = conn.execute(
+            "SELECT COUNT(*) FROM upload_llm_calls WHERE root_import_id = ?",
+            (root_import_id,),
+        ).fetchone()[0]
+        if int(used_for_import) >= effective_import_limit:
+            raise UploadCredentialError(
+                "QUOTA_EXCEEDED",
+                scope=credential_scope,
+                action="wait_for_daily_reset",
+                message="该上传任务的模型调用次数已达上限",
+            )
+
+    if payer_type == "system":
+        system_day = conn.execute("SELECT date('now')").fetchone()[0]
+        effective_system_limit = (
+            UPLOAD_SYSTEM_DAILY_CALL_LIMIT
+            if system_daily_limit is None
+            else int(system_daily_limit)
+        )
+        used_for_system = conn.execute(
+            "SELECT COUNT(*) FROM upload_llm_calls WHERE payer_type = 'system' "
+            "AND date(started_at) = ?",
+            (system_day,),
+        ).fetchone()[0]
+        if effective_system_limit <= 0 or int(used_for_system) >= effective_system_limit:
+            raise UploadCredentialError(
+                "QUOTA_EXCEEDED",
+                scope=credential_scope,
+                action="wait_for_daily_reset",
+                message="系统今日模型调用额度已用完",
+            )
+
+    if payer_type == "user":
         allowed = llm_quota.reserve_call(
             conn,
             user_id=int(payer_user_id),
-            day=day or llm_quota._today(),
+            day=budget_day,
             tokens=tokens,
             limit=daily_limit,
         )

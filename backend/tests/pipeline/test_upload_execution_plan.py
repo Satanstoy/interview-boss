@@ -84,7 +84,7 @@ def _pass_preflight(conn, import_id: str) -> int | None:
         conn.execute(
             "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
             "pipeline_version, status, job_id) "
-            "VALUES (?, 'preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
+            "VALUES (?, 'credential_preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
             (import_id, f"initial:{row['scope']}", row["id"]),
         )
         conn.execute("UPDATE jobs SET status = 'completed' WHERE id = ?", (row["id"],))
@@ -376,7 +376,7 @@ def test_finalize_global_model_actions_follow_root_owner_role(is_admin, expected
     conn.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
         "pipeline_version, status, error_code, job_id) "
-        "VALUES (?, 'preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
+        "VALUES (?, 'credential_preflight', 'global-attempt-1', 1, 'upload-pipeline-v1', "
         "'needs_action', 'MODEL_CONFIG_MISSING', ?)",
         (import_id, result["job_id"]),
     )

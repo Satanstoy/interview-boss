@@ -21,6 +21,9 @@ async def persist_public_node(state: SubmitState) -> dict:
         import_id = state.get("import_id")
         if not is_admin:
             raise PermissionError("普通用户的公共化必须先创建审核申请")
+        if import_id and not state.get("user_id"):
+            raise PermissionError("上传根任务的公共导入缺少管理员主体")
+        audited_admin_import = bool(is_admin and import_id)
         record_owner_id = None
         record_status = "approved" if is_admin else "pending"
 
@@ -28,20 +31,60 @@ async def persist_public_node(state: SubmitState) -> dict:
             f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
         )
         source_ordinals = data.get("题目 ordinal") or None
+        # Direct administrator publication is still an explicit reviewed
+        # projection. Until a field is separately confirmed, identifiable
+        # source metadata must not leak through the public interview/detail.
+        public_data = dict(data)
+        public_rows = tagged_rows
+        source_snapshot = None
+        if audited_admin_import:
+            public_data["公司"] = ""
+            public_data["面试轮次"] = ""
+            public_rows = [["", "", "", *row[3:]] for row in tagged_rows]
+            source_snapshot = {
+                "source": {
+                    "company": data.get("公司"),
+                    "round": data.get("面试轮次"),
+                    "focus": data.get("考察重点"),
+                    "difficulty": data.get("难易程度"),
+                    "season": season,
+                    "source_url": saved_url,
+                    "job_position": current_pos,
+                },
+                "items": [
+                    {
+                        "question": row[3],
+                        "cat1": row[4],
+                        "cat2": row[5],
+                        "tags": row[6],
+                        "difficulty": row[7],
+                        "source_ordinal": (
+                            int(source_ordinals[index])
+                            if source_ordinals is not None and index < len(source_ordinals)
+                            else index + 1
+                        ),
+                    }
+                    for index, row in enumerate(tagged_rows)
+                ],
+            }
         interview_id, _detail_ids = await run_db(
             lambda: submit_interview_txn_tag_only(
-                saved_url,
-                data,
+                "" if audited_admin_import else saved_url,
+                public_data,
                 questions,
                 season,
                 record_owner_id,
                 record_status,
                 current_pos,
-                tagged_rows,
+                public_rows,
                 import_id=import_id,
                 source_ordinals=source_ordinals,
                 enqueue=True,
                 return_detail_ids=True,
+                admin_public_import_actor_id=(
+                    int(state["user_id"]) if audited_admin_import else None
+                ),
+                admin_public_source_snapshot=source_snapshot,
             )
         )
 

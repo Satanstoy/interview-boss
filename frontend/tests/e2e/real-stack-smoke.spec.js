@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { configureDisposableUserModel } from '../_helpers/real-stack-model.js'
 
 test.describe('disposable real stack', () => {
   // The Compose stack injects a stubbed provider; no real LLM credentials are used.
@@ -17,19 +18,25 @@ test.describe('disposable real stack', () => {
     await page.getByLabel('邮箱').fill(email)
     await page.getByRole('button', { name: '注册', exact: true }).click()
     await expect(page).toHaveURL(/\/master-bank/, { timeout: 30000 })
+    await configureDisposableUserModel(page)
 
     await page.goto('/import')
     await expect(page.getByText('文本内容')).toBeVisible()
     await page.getByPlaceholder('粘贴面经或 JD 内容...').fill(
       '职位描述\n公司：InterviewBoss Stub\n岗位：后端工程师\n职位要求：Python、SQLite。',
     )
+    const acceptedResponse = page.waitForResponse((response) => {
+      const requestUrl = new URL(response.url())
+      return requestUrl.pathname === '/api/submit-jobs' && response.request().method() === 'POST'
+    })
     await page.getByRole('button', { name: '提交解析' }).click()
+    const accepted = await acceptedResponse
+    expect(accepted.status(), await accepted.text()).toBe(202)
+    const { import_id: importId } = await accepted.json()
 
-    await expect(page.getByTestId('import-job-item')).toBeVisible({ timeout: 30000 })
-    const progressToggle = page.getByTestId('job-progress-toggle')
-    await expect(progressToggle).toBeVisible({ timeout: 30000 })
-    await progressToggle.click()
-    await expect(page.getByTestId('job-progress-panel')).toContainText('处理完成', { timeout: 120000 })
+    await page.getByRole('button', { name: '上传任务中心' }).click()
+    const task = page.locator('li').filter({ hasText: importId })
+    await expect(task).toContainText('已完成', { timeout: 180000 })
 
     await page.goto('/jd')
     await expect(page.getByText('InterviewBoss Stub')).toBeVisible({ timeout: 30000 })

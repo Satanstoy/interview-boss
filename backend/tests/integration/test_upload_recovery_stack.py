@@ -335,6 +335,66 @@ async def test_http_upload_survives_worker_restart_without_duplicate_work(
     ).fetchone()[0] == len(details_before)
 
 
+async def test_successful_preflight_worker_immediately_dispatches_business_job(
+    isolated_stack, isolated_redis, monkeypatch
+):
+    """AC-004：预检通过创建业务 job 后，worker 应立即投递到 ARQ。"""
+
+    from app.services.upload_lifecycle import accept_upload
+    from app.worker import credential_preflight_task
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="ac004-immediate-dispatch",
+        target_intent="private",
+        source_type="interview",
+        text="面经：解释 TCP 三次握手",
+        position_name="后端开发",
+        files=[],
+        images=[],
+        entry="api",
+        credential_loaders=_loaders(),
+    )
+    conn.commit()
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? "
+        "AND job_type = 'credential_preflight'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert preflight is not None
+
+    # 只替换外部模型探测；配置解析、预检状态机、job 创建和 Redis 入队走真代码。
+    monkeypatch.setattr(
+        "app.services.credential_preflight._default_probe",
+        lambda credential: {
+            "status": "ok",
+            "provider": credential.provider,
+            "model": credential.model,
+            "latency_ms": 1,
+        },
+    )
+
+    await credential_preflight_task({}, int(preflight["id"]))
+
+    submit_job = conn.execute(
+        "SELECT id, status, arq_job_id FROM jobs WHERE root_import_id = ? "
+        "AND job_type = 'submit_import'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert submit_job is not None, "预检成功必须创建业务 job"
+    assert submit_job["arq_job_id"], "worker 成功预检后必须立即完成 ARQ handoff"
+
+    pool = await isolated_redis["new_pool"]()
+    queued = await pool.queued_jobs()
+    assert any(
+        job.function == "submit_import_task" and job.args[0] == submit_job["id"]
+        for job in queued
+    ), "业务 job 必须在本次预检 worker 执行后进入隔离 Redis 队列"
+
+
 def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
     conn = isolated_stack
     from app.services.upload_lifecycle import accept_upload, build_thread_id

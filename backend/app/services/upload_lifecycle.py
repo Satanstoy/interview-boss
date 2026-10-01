@@ -332,7 +332,7 @@ def finalize_attempt_and_aggregate_root(
     if lease_generation is None:
         raise TypeError("v2 根状态聚合必须提供 lease_generation")
 
-    from app.services.job_lifecycle import assert_job_fence
+    from app.services.job_lifecycle import assert_job_generation_for_aggregation
 
     # 找出绑定本 root 的提交 job 并校验代次（旧 worker 迟到写入被拒）
     submit_job = conn.execute(
@@ -342,7 +342,9 @@ def finalize_attempt_and_aggregate_root(
         (import_id,),
     ).fetchone()
     if submit_job is not None:
-        assert_job_fence(conn, int(submit_job["id"]), int(lease_generation))
+        assert_job_generation_for_aggregation(
+            conn, int(submit_job["id"]), int(lease_generation)
+        )
 
     rows = conn.execute(
         "SELECT stage, unit_key, status, error_code FROM upload_stage_results "
@@ -486,7 +488,8 @@ def finalize_attempt_and_aggregate_root(
         failed_preflight = conn.execute(
             "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
             "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
-            "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+            "JOIN upload_stage_results s ON s.job_id = j.id "
+            "AND s.stage = 'credential_preflight' "
             "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
             "AND s.status = 'failed' ORDER BY j.id DESC LIMIT 1",
             (import_id,),
@@ -525,7 +528,8 @@ def upload_action_credential_scope(conn, *, import_id: str, fallback: str = "use
     row = conn.execute(
         "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
         "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
-        "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+            "JOIN upload_stage_results s ON s.job_id = j.id "
+            "AND s.stage = 'credential_preflight' "
         "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
         "AND s.status = 'failed' ORDER BY j.id DESC LIMIT 1",
         (import_id,),

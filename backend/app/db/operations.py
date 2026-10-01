@@ -854,6 +854,8 @@ def submit_interview_txn_tag_only(
     source_ordinals: list[int] | None = None,
     enqueue: bool = False,
     return_detail_ids: bool = False,
+    admin_public_import_actor_id: int | None = None,
+    admin_public_source_snapshot: dict | None = None,
 ):
     """提交新面经（仅打标签）：insert_interview + insert_details，不做聚类。
 
@@ -890,6 +892,24 @@ def submit_interview_txn_tag_only(
                         "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (import_id, ordinal, detail_id),
                     )
+            contribution_request_id = None
+            if admin_public_import_actor_id is not None:
+                from app.services.public_contributions import (
+                    create_admin_public_import_approval,
+                )
+
+                conn.execute(
+                    "UPDATE interview SET publish_status = 'pending' WHERE id = ?",
+                    (interview_id,),
+                )
+                contribution_request_id = create_admin_public_import_approval(
+                    conn,
+                    import_id=import_id,
+                    admin_id=int(admin_public_import_actor_id),
+                    interview_id=int(interview_id),
+                    detail_ids=[int(detail_id) for detail_id in detail_ids],
+                    source_snapshot=admin_public_source_snapshot or {},
+                )
             if enqueue:
                 from app.services.pipeline.queue import enqueue_questions
 
@@ -897,6 +917,7 @@ def submit_interview_txn_tag_only(
                     interview_id,
                     owner_id=owner_id,
                     question_detail_ids=detail_ids,
+                    contribution_request_id=contribution_request_id,
                     root_import_id=import_id,
                     conn=conn,
                 )

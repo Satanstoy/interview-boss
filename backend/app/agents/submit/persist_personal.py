@@ -10,8 +10,10 @@ from app.agents.shared.events import (
 )
 
 logger = logging.getLogger("interview-boss")
+from app.services.upload_llm_accounting import upload_llm_stage
 
 
+@upload_llm_stage("match", unit_key="question-batch")
 async def match_and_persist_personal_node(state: SubmitState) -> dict:
     """个人题库: 匹配 + 写入（跨库匹配：先匹配个人，再匹配公共）"""
     from app.services.clustering import match_outcomes

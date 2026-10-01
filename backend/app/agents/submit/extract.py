@@ -6,6 +6,7 @@ from app.agents.shared.quality import evaluate_extraction_quality
 from app.agents.shared.events import emit_progress, build_extraction_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")
+from app.services.upload_llm_accounting import upload_llm_stage
 
 
 async def recognize_node(state: SubmitState) -> dict:
@@ -21,6 +22,7 @@ async def recognize_node(state: SubmitState) -> dict:
     return {"doc_type": ""}
 
 
+@upload_llm_stage("extract", unit_key="document")
 async def extract_node(state: SubmitState) -> dict:
     """LLM 提取结构化数据节点（F08：支持从阶段检查点复用已成功结果）。"""
     from app.services.llm import _call_llm_with_retry_messages, _extract_json, get_llm_client_for_user, _should_use_response_format

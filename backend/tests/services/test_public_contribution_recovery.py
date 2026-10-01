@@ -18,11 +18,25 @@ import pytest
 
 from app.db.migrations import run_migrations
 from app.services.public_contributions import (
+    mark_public_contribution_queue_done,
     publish_items_with_resolutions,
     refresh_public_interview_projection,
     request_publish_status,
 )
 from app.services.question_resolution import record_resolution
+
+
+def test_queue_done_legacy_schema_does_not_leave_open_write_transaction():
+    """A compatibility early return must close the transaction it opened."""
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE analysis_queue (id INTEGER PRIMARY KEY)")
+
+    assert mark_public_contribution_queue_done(conn, [1]) == 0
+
+    assert not conn.in_transaction
+    conn.close()
 
 
 def _db():

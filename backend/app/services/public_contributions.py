@@ -213,6 +213,148 @@ def bind_contribution_request_to_root(
     )
 
 
+def create_admin_public_import_approval(
+    conn,
+    *,
+    import_id: str | None,
+    admin_id: int,
+    interview_id: int,
+    detail_ids: list[int],
+    source_snapshot: dict,
+) -> int:
+    """Persist the authorization and safe public projection for admin imports.
+
+    The caller owns the surrounding transaction, so the interview, details,
+    approval event, root link, and queue rows can become visible atomically.
+    """
+    import hashlib
+
+    admin = conn.execute(
+        "SELECT is_admin FROM users WHERE id = ?", (int(admin_id),)
+    ).fetchone()
+    if not admin or not admin["is_admin"]:
+        raise PermissionError("公共直导必须由当前管理员执行")
+
+    if import_id:
+        root = conn.execute(
+            "SELECT requester_id, target_intent, policy_json FROM upload_imports WHERE id = ?",
+            (import_id,),
+        ).fetchone()
+        if not root or int(root["requester_id"]) != int(admin_id):
+            raise PermissionError("上传根任务与管理员主体不匹配")
+        policy = _loads(root["policy_json"], {})
+        if root["target_intent"] != "share" or not policy.get("audit_public_import"):
+            raise PermissionError("上传根任务没有管理员公共导入授权")
+
+    snapshot = source_snapshot or {}
+    raw_source = snapshot.get("source") or {}
+    raw_items = snapshot.get("items") or []
+    if len(detail_ids) != len(raw_items) or not detail_ids:
+        raise ValueError("管理员公共导入的审核题目与公共明细必须一一对应")
+    reviewed_at = _now_iso()
+    source_projection = {
+        "company": None,
+        "round": None,
+        "focus": raw_source.get("focus"),
+        "difficulty": raw_source.get("difficulty"),
+        "season": raw_source.get("season"),
+        "source_url": None,
+    }
+
+    cursor = conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(source_type, source_id, requester_id, status, snapshot_json, review_json, "
+        "review_projection_json, projection_hash, public_interview_id, reviewed_by, reviewed_at) "
+        "VALUES ('interview', ?, ?, 'approved_for_processing', ?, ?, ?, ?, ?, ?, ?)",
+        (
+            int(interview_id),
+            int(admin_id),
+            _json(snapshot),
+            _json({"action": "admin_import_approved", "import_id": import_id}),
+            "{}",
+            "pending",
+            int(interview_id),
+            int(admin_id),
+            reviewed_at,
+        ),
+    )
+    request_id = int(cursor.lastrowid)
+
+    projection_items = []
+    for index, (detail_id, item) in enumerate(zip(detail_ids, raw_items)):
+        source_ordinal = item.get("source_ordinal")
+        safe_item = {
+            "question": item.get("question"),
+            "cat1": item.get("cat1"),
+            "cat2": item.get("cat2"),
+            "tags": item.get("tags"),
+            "difficulty": item.get("difficulty"),
+            "source_ordinal": source_ordinal,
+        }
+        item_cursor = conn.execute(
+            "INSERT INTO public_contribution_items "
+            "(request_id, source_item_type, source_item_id, ordinal, status, "
+            "snapshot_json, review_json, public_detail_id) "
+            "VALUES (?, 'question', ?, ?, 'approved_for_processing', ?, ?, ?)",
+            (
+                request_id,
+                int(detail_id),
+                index,
+                _json(item),
+                _json(safe_item),
+                int(detail_id),
+            ),
+        )
+        projection_items.append(
+            {
+                "item_id": int(item_cursor.lastrowid),
+                "ordinal": index,
+                **safe_item,
+            }
+        )
+
+    hash_material = {
+        "source": source_projection,
+        "items": projection_items,
+        "excluded_item_ids": [],
+    }
+    projection_hash = hashlib.sha256(
+        json.dumps(
+            hash_material, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    projection = {
+        "schema_version": 1,
+        "source_type": "interview",
+        "source": source_projection,
+        "items": projection_items,
+        "excluded_item_ids": [],
+        "reviewer_id": int(admin_id),
+        "reviewed_at": reviewed_at,
+        "source_snapshot_unchanged": snapshot,
+        "hash": projection_hash,
+    }
+    conn.execute(
+        "UPDATE public_contribution_requests SET review_projection_json = ?, "
+        "projection_hash = ? WHERE id = ?",
+        (_json(projection), projection_hash, request_id),
+    )
+    _event(
+        conn,
+        request_id,
+        int(admin_id),
+        "admin_import_approved",
+        None,
+        "approved_for_processing",
+        {"import_id": import_id, "projection_hash": projection_hash},
+    )
+    if import_id:
+        bind_contribution_request_to_root(
+            conn, import_id=import_id, contribution_request_id=request_id
+        )
+    return request_id
+
+
 def get_public_contribution_request(conn, request_id: int, *, include_snapshot=True) -> dict:
     row = _request_row(conn, request_id)
     item_rows = conn.execute(
@@ -1428,14 +1570,30 @@ def withdraw_public_contribution(conn, request_id: int, requester_id: int) -> di
     return get_public_contribution_request(conn, request_id)
 
 
-def mark_public_contribution_queue_done(conn, queue_ids: list[int]) -> int:
+def mark_public_contribution_queue_done(
+    conn,
+    queue_ids: list[int],
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+) -> int:
     """Close contribution items only when clustering wrote a valid resolution."""
     if not queue_ids:
         return 0
+    owns_transaction = not conn.in_transaction
+    _begin_immediate(conn)
+    try:
+        _assert_contribution_write_fences(conn, job_fence, scope_fence)
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        raise
     queue_columns = {
         row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
     }
     if "contribution_request_id" not in queue_columns:
+        if owns_transaction:
+            conn.commit()
         return 0
     root_projection = (
         "root_import_id" if "root_import_id" in queue_columns else "NULL AS root_import_id"
@@ -1536,14 +1694,30 @@ def mark_public_contribution_queue_done(conn, queue_ids: list[int]) -> int:
         from app.services.upload_lifecycle import refresh_completed_upload_roots
 
         refresh_completed_upload_roots(conn, root_import_ids)
-    conn.commit()
+    if owns_transaction:
+        conn.commit()
     return updated
 
 
-def mark_public_contribution_queue_failed(conn, queue_ids: list[int], error: str) -> int:
+def mark_public_contribution_queue_failed(
+    conn,
+    queue_ids: list[int],
+    error: str,
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+) -> int:
     """Keep failed public contribution children visible for retry/audit."""
     if not queue_ids:
         return 0
+    owns_transaction = not conn.in_transaction
+    _begin_immediate(conn)
+    try:
+        _assert_contribution_write_fences(conn, job_fence, scope_fence)
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        raise
     placeholders = ",".join("?" * len(queue_ids))
     rows = conn.execute(
         "SELECT DISTINCT contribution_request_id, question_detail_id "
@@ -1578,5 +1752,22 @@ def mark_public_contribution_queue_failed(conn, queue_ids: list[int], error: str
             "failed",
             {"error": error[:500]},
         )
-    conn.commit()
+    if owns_transaction:
+        conn.commit()
     return updated
+
+
+def _assert_contribution_write_fences(conn, job_fence, scope_fence):
+    if job_fence is not None:
+        from app.services.job_lifecycle import assert_job_fence
+
+        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+    if scope_fence is not None:
+        from app.services.upload_scope_leases import assert_upload_scope_lease
+
+        assert_upload_scope_lease(
+            conn,
+            scope_fence[0],
+            holder_token=scope_fence[1],
+            generation=int(scope_fence[2]),
+        )

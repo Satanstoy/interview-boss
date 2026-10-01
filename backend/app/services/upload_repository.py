@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import uuid
 
+from app.services.upload_stage_names import canonical_upload_stage
+
 UPLOAD_PIPELINE_VERSION_DEFAULT = "upload-pipeline-v1"
 
 
@@ -147,6 +149,7 @@ def save_stage_result(
         raise ValueError(f"不合法的 stage 状态: {status}")
     if status == "skipped" and not error_code:
         raise ValueError("skipped 必须带 reason（记在 error_code）")
+    stage = canonical_upload_stage(stage)
     cursor = conn.execute(
         "INSERT INTO upload_stage_results ("
         "  import_id, stage, unit_key, input_version, pipeline_version, status, "
@@ -172,6 +175,7 @@ def save_stage_result(
 def get_stage_result(conn, *, import_id: str, stage: str, unit_key: str, input_version: int):
     """读取某版本输入的检查点；不存在返回 None。"""
 
+    stage = canonical_upload_stage(stage)
     return conn.execute(
         "SELECT * FROM upload_stage_results WHERE import_id = ? AND stage = ? "
         "AND unit_key = ? AND input_version = ?",

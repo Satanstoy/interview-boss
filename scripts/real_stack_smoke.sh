@@ -38,6 +38,24 @@ copy_failure_artifacts() {
   printf 'Real-stack failure artifacts: %s\n' "$FINAL_ARTIFACT_ROOT/$PROJECT" >&2
 }
 
+copy_ac028_result_artifacts() {
+  local artifact_dir="$FINAL_ARTIFACT_ROOT/$PROJECT"
+  local copied=0
+  if [ -f "$TEMP_ARTIFACTS/ac028-browser-result.png" ]; then
+    mkdir -p "$artifact_dir"
+    cp "$TEMP_ARTIFACTS/ac028-browser-result.png" "$artifact_dir/"
+    copied=1
+  fi
+  if [ -f "$TEMP_ARTIFACTS/ac028-browser-result.json" ]; then
+    mkdir -p "$artifact_dir"
+    cp "$TEMP_ARTIFACTS/ac028-browser-result.json" "$artifact_dir/"
+    copied=1
+  fi
+  if [ "$copied" -eq 1 ]; then
+    printf 'AC-028 browser result artifacts: %s\n' "$artifact_dir"
+  fi
+}
+
 cleanup() {
   RUN_STATUS=$?
   set +e
@@ -48,6 +66,7 @@ cleanup() {
     'import sqlite3; c=sqlite3.connect("/app/backend/data/interview-boss.db"); print(c.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone())' \
     >"$TEMP_ARTIFACTS/schema-version.txt" 2>&1
 
+  copy_ac028_result_artifacts
   if [ "$RUN_STATUS" -ne 0 ]; then
     copy_failure_artifacts
   fi
@@ -63,16 +82,81 @@ cd "$PROJECT_DIR"
 command -v docker >/dev/null 2>&1
 command -v curl >/dev/null 2>&1
 command -v npm >/dev/null 2>&1
+[ -x "$PROJECT_DIR/frontend/node_modules/.bin/playwright" ] || {
+  printf 'Frontend Playwright dependencies are missing. Install them before starting the disposable stack.\n' >&2
+  exit 1
+}
+
+run_frontend_playwright() {
+  PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/data/home/ubuntu/cache/ms-playwright}" \
+    "$PROJECT_DIR/frontend/node_modules/.bin/playwright" test \
+    --config "$PROJECT_DIR/frontend/playwright.config.js" "$@"
+}
 
 compose config --quiet
-ensure_real_stack_builder
-compose build --builder "$REAL_STACK_BUILDER" backend worker nginx oauth-gateway llm-stub
-compose up -d --wait --wait-timeout 180
+if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
+  for image in \
+    interview-boss-app:real-e2e \
+    interview-boss-nginx:real-e2e \
+    interview-boss-oauth-gateway:real-e2e \
+    interview-boss-llm-stub:real-e2e; do
+    docker image inspect "$image" >/dev/null 2>&1 || {
+      printf 'Requested image reuse, but image is missing: %s\n' "$image" >&2
+      exit 1
+    }
+  done
+  compose up --no-build -d --wait --wait-timeout 180
+else
+  ensure_real_stack_builder
+  compose build --builder "$REAL_STACK_BUILDER" backend worker nginx oauth-gateway llm-stub
+  compose up -d --wait --wait-timeout 180
+fi
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/api/health" >/dev/null
 
 cd "$PROJECT_DIR/frontend"
 REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
-  "$PROJECT_DIR/scripts/frontend-test.sh" tests/e2e/real-stack-smoke.spec.js \
+  run_frontend_playwright tests/e2e/real-stack-smoke.spec.js \
   --timeout "${REAL_STACK_TEST_TIMEOUT:-120000}"
+
+# AC-028: keep the API/Redis/provider/frontend stack alive but stop its worker.
+# The browser submits through the real UI and waits until its durable root job
+# is visible as queued. Its explicit signal lets this runner restart the same
+# worker container at that point, after which the browser opens the saved result.
+cd "$PROJECT_DIR"
+compose stop worker
+restart_signal="$TEMP_ARTIFACTS/ac028-worker-restart"
+restart_log="$TEMP_ARTIFACTS/ac028-worker-restart.log"
+restart_worker_after_browser_queue() {
+  local attempt=0
+  while [ "$attempt" -lt 1200 ]; do
+    if [ -f "$restart_signal" ]; then
+      compose up -d --wait --wait-timeout 120 worker >>"$restart_log" 2>&1
+      touch "$restart_signal.done"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.25
+  done
+  printf 'Timed out waiting for the browser to observe a queued AC-028 upload.\n' >"$restart_log"
+  return 1
+}
+restart_worker_after_browser_queue &
+restart_monitor_pid=$!
+
+cd "$PROJECT_DIR/frontend"
+set +e
+REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+  AC028_WORKER_RESTART_SIGNAL="$TEMP_ARTIFACTS/ac028-worker-restart" \
+  AC028_BROWSER_RESULT_SCREENSHOT="$TEMP_ARTIFACTS/ac028-browser-result.png" \
+  AC028_BROWSER_RESULT_TRACE="$TEMP_ARTIFACTS/ac028-browser-result.json" \
+  run_frontend_playwright tests/e2e/upload-recovery-real-stack.spec.js \
+  --timeout "${AC028_REAL_STACK_TEST_TIMEOUT:-210000}"
+browser_status=$?
+if [ "$browser_status" -ne 0 ]; then
+  kill "$restart_monitor_pid" >/dev/null 2>&1 || true
+  wait "$restart_monitor_pid" >/dev/null 2>&1 || true
+  exit "$browser_status"
+fi
+wait "$restart_monitor_pid"

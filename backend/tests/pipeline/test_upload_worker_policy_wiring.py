@@ -92,7 +92,7 @@ def _seed_root(test_db, *, target_intent="private", actor_id=101, is_admin=0):
     test_db.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
         "pipeline_version, status, result_json, job_id) "
-        "VALUES ('imp-1', 'preflight', 'credential:v1:scope:user:attempt:1:run:1', 1, "
+        "VALUES ('imp-1', 'credential_preflight', 'credential:v1:scope:user:attempt:1:run:1', 1, "
         "'upload-pipeline-v1', 'succeeded', '{\"config_fingerprint\":\"test-fingerprint\",\"model\":\"test-model\"}', ?)",
         (preflight_job_id,),
     )
@@ -272,7 +272,7 @@ async def test_worker_match_failed_drives_partial_failed(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
         "pipeline_version, status) VALUES "
         "('imp-1', 'extract', 'extract:document:v1', 1, 'upload-pipeline-v1', 'succeeded'), "
-        "('imp-1', 'match', 'match:failed:v1', 1, 'upload-pipeline-v1', 'running')"
+        "('imp-1', 'resolve', 'match:failed:v1', 1, 'upload-pipeline-v1', 'running')"
     )
     test_db.commit()
 
@@ -299,6 +299,6 @@ async def test_worker_match_failed_drives_partial_failed(
     )
     failed_stage = test_db.execute(
         "SELECT status FROM upload_stage_results "
-        "WHERE import_id = 'imp-1' AND stage = 'match'"
+        "WHERE import_id = 'imp-1' AND stage = 'resolve'"
     ).fetchone()
     assert failed_stage["status"] == "failed", "match 阶段必须标记 failed"

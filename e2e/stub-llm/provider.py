@@ -64,7 +64,41 @@ class StubHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": {"message": "stub provider failure"}})
             return
 
-        if "请为以下题目列表标记" in serialized or "questions" in serialized and "一级大类" in serialized:
+        if "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "公共参考答案" in serialized:
+            content = (
+                "### 核心结论\n"
+                "TCP 三次握手通过 SYN、SYN-ACK、ACK 建立可靠连接，确认双方收发能力并协商初始序列号。\n\n"
+                "### 建连过程\n"
+                "1. 客户端发送 SYN 并进入 SYN-SENT。\n"
+                "2. 服务端返回 SYN-ACK 并进入 SYN-RECEIVED。\n"
+                "3. 客户端确认 ACK 后进入 ESTABLISHED，服务端收到 ACK 后也进入 ESTABLISHED。\n\n"
+                "### 设计原因\n"
+                "双向确认可以降低旧连接报文造成错误建连的可能，并让双方确认对方的初始序列号。"
+            )
+        elif "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "面试题聚类专家" in serialized:
+            content = json.dumps({"clusters": []}, ensure_ascii=False)
+        elif "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "面试题去重专家" in serialized:
+            content = json.dumps({"matches": []}, ensure_ascii=False)
+        elif "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "一级大类" not in serialized:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC028 隔离恢复演练",
+                        "面试轮次": "一面",
+                        "考察重点": "上传任务恢复",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {
+                                "ordinal": 1,
+                                "question": "AC028 恢复后结果题",
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        elif "请为以下题目列表标记" in serialized or "questions" in serialized and "一级大类" in serialized:
             content = json.dumps(
                 {
                     "questions": [

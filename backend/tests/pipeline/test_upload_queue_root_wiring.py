@@ -51,7 +51,7 @@ def test_enqueue_propagates_root_from_detail_import_id():
     assert {r["root_import_id"] for r in rows} == {"imp-1"}
     stages = conn.execute(
         "SELECT unit_key, status FROM upload_stage_results "
-        "WHERE import_id = 'imp-1' AND stage = 'cluster' ORDER BY unit_key"
+        "WHERE import_id = 'imp-1' AND stage = 'resolve' ORDER BY unit_key"
     ).fetchall()
     assert [(row["unit_key"], row["status"]) for row in stages] == [
         ("detail:11", "pending"),
@@ -76,14 +76,14 @@ def test_cluster_queue_lease_updates_and_releases_root_checkpoint():
         assert batch[0]["root_import_id"] == "imp-1"
         stage = conn.execute(
             "SELECT status FROM upload_stage_results WHERE import_id = 'imp-1' "
-            "AND stage = 'cluster' AND unit_key = 'detail:11'"
+            "AND stage = 'resolve' AND unit_key = 'detail:11'"
         ).fetchone()
         assert stage["status"] == "running"
 
         queue.mark_batch_failed([batch[0]["queue_id"]])
         stage = conn.execute(
             "SELECT status FROM upload_stage_results WHERE import_id = 'imp-1' "
-            "AND stage = 'cluster' AND unit_key = 'detail:11'"
+            "AND stage = 'resolve' AND unit_key = 'detail:11'"
         ).fetchone()
         queue_row = conn.execute(
             "SELECT status, locked_until FROM analysis_queue WHERE id = ?",

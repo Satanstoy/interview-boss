@@ -23,7 +23,7 @@ from uuid import uuid4
 logger = logging.getLogger("interview-boss")
 
 PREFLIGHT_JOB_TYPE = "credential_preflight"
-PREFLIGHT_STAGE = "preflight"
+PREFLIGHT_STAGE = "credential_preflight"
 PREFLIGHT_PIPELINE_VERSION = "upload-pipeline-v1"
 
 
@@ -214,7 +214,7 @@ def run_credential_preflight(
         credential = resolve_upload_credentials(
             credential_scope=credential_scope,
             user_id=int(user_id) if user_id is not None and credential_scope == "user" else None,
-            stage="preflight",
+            stage=PREFLIGHT_STAGE,
             user_config_loader=user_config_loader,
             global_config_loader=global_config_loader,
         )

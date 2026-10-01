@@ -328,17 +328,30 @@ def _is_endpoint_mismatch(exc: Exception) -> bool:
 async def _probe_api_format(client, model: str, timeout: float, api_format: str):
     """用不带工具/提示词的最小请求验证单一协议。"""
     wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
     if api_format == "anthropic":
-        request = client.messages.create(
+        request = lambda: client.messages.create(
             model=model, max_tokens=1, messages=[{"role": "user", "content": "ping"}]
         )
+        provider = "anthropic"
     elif api_format == "responses":
-        request = client.responses.create(model=model, input="ping", max_output_tokens=1)
+        request = lambda: client.responses.create(
+            model=model, input="ping", max_output_tokens=1
+        )
+        provider = "openai"
     else:
-        request = client.chat.completions.create(
+        request = lambda: client.chat.completions.create(
             model=model, messages=[{"role": "user", "content": "ping"}], max_tokens=1
         )
-    return await asyncio.wait_for(request, timeout=wait_for)
+        provider = "openai"
+
+    async def bounded_request():
+        return await asyncio.wait_for(request(), timeout=wait_for)
+
+    return await call_provider_with_upload_ledger(
+        bounded_request, model=model, provider=provider
+    )
 
 
 async def resolve_api_format_async(
@@ -354,6 +367,26 @@ async def resolve_api_format_async(
     _return_probe_error: bool = False,
 ) -> str | tuple[str, Exception | None, bool]:
     """解析协议：显式配置 → 缓存 → endpoint hint → 最小探测 → Chat。"""
+
+    from app.services.upload_llm_accounting import current_upload_llm_context
+
+    upload_context = current_upload_llm_context()
+    if upload_context is not None:
+        user_id = (
+            upload_context.user_id
+            if upload_context.credential_scope == "user"
+            else None
+        )
+        llm_scope = upload_context.credential_scope
+        credential = upload_context.credential
+        if credential is not None:
+            api_key = credential.api_key
+            if credential.api_format:
+                return (
+                    (credential.api_format, None, False)
+                    if _return_probe_error
+                    else credential.api_format
+                )
 
     def result(api_format: str, probe_error: Exception | None = None, probed: bool = False):
         if _return_probe_error:

@@ -37,7 +37,9 @@ GLOBAL_CONFIG = {
 
 
 @pytest.mark.asyncio
-async def test_http_upload_to_personal_and_public_question_trace(client, test_db, monkeypatch):
+async def test_http_upload_to_personal_and_public_question_trace(
+    client, test_db, monkeypatch, tmp_path
+):
     """Trace each ordinal through private storage, review, public cluster and retry."""
 
     import numpy as np
@@ -157,24 +159,40 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         },
         ensure_ascii=False,
     )
-
-    async def tag_questions(*, url, company, round_, questions, **_kwargs):
-        expected = {question: (cat1, cat2, tag) for _, question, cat1, cat2, tag in QUESTIONS}
-        return [
-            [url, company, round_, question, *expected[question], "中等"]
-            for question in questions
-        ]
+    tag_response = json.dumps(
+        {
+            "questions": [
+                {
+                    "id": index,
+                    "题目": question,
+                    "一级大类": cat1,
+                    "二级子类": cat2,
+                    "考点标签": tag,
+                    "难度标签": "L2-中等",
+                }
+                for index, (_, question, cat1, cat2, tag) in enumerate(QUESTIONS)
+            ]
+        },
+        ensure_ascii=False,
+    )
+    provider_responses = []
+    for content in (extract_response, tag_response):
+        provider_response = MagicMock()
+        provider_response.choices = [MagicMock(message=MagicMock(content=content))]
+        provider_response.usage = MagicMock(prompt_tokens=37, completion_tokens=29)
+        provider_responses.append(provider_response)
+    fake_llm_client = MagicMock()
+    fake_llm_client.chat.completions.create = AsyncMock(
+        side_effect=provider_responses
+    )
 
     with patch(
-        "app.services.llm._call_llm_with_retry_messages",
-        new=AsyncMock(return_value=extract_response),
+        "app.services.llm._make_client", return_value=fake_llm_client
     ), patch(
-        "app.services.llm.get_llm_client_for_user",
-        return_value=(MagicMock(), USER_CONFIG["model"], 5, "", "openai"),
+        "app.services.llm.resolve_api_format_async",
+        new=AsyncMock(return_value="chat"),
     ), patch(
         "app.services.llm._should_use_response_format", return_value=False
-    ), patch(
-        "app.services.submit_service.tag_questions_batch", new=AsyncMock(side_effect=tag_questions)
     ), patch(
         "app.db.connection.get_taxonomy_for_position",
         return_value={
@@ -188,6 +206,45 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         # Actual upload graph worker; no direct writes to interview/details.
         await submit_import_task({}, submit_job_id)
     test_db.commit()
+
+    extract_calls = test_db.execute(
+        "SELECT credential_scope, payer_type, payer_user_id, provider, model, "
+        "config_fingerprint, status, input_tokens, output_tokens FROM upload_llm_calls "
+        "WHERE root_import_id = ? AND stage = 'extract'",
+        (import_id,),
+    ).fetchall()
+    assert len(extract_calls) == 1, "实际提取请求必须进入上传调用账本"
+    extract_call = extract_calls[0]
+    assert tuple(extract_call) == (
+        "user",
+        "user",
+        101,
+        "openai",
+        USER_CONFIG["model"],
+        extract_call["config_fingerprint"],
+        "succeeded",
+        37,
+        29,
+    )
+    assert extract_call["config_fingerprint"]
+
+    classify_calls = test_db.execute(
+        "SELECT credential_scope, payer_type, payer_user_id, provider, model, "
+        "config_fingerprint, status "
+        "FROM upload_llm_calls WHERE root_import_id = ? AND stage = 'classify'",
+        (import_id,),
+    ).fetchall()
+    assert len(classify_calls) == 1
+    assert tuple(classify_calls[0]) == (
+        "user",
+        "user",
+        101,
+        "openai",
+        USER_CONFIG["model"],
+        classify_calls[0]["config_fingerprint"],
+        "succeeded",
+    )
+    assert classify_calls[0]["config_fingerprint"]
 
     private_interview = test_db.execute(
         "SELECT * FROM interview WHERE owner_id = 101 AND status = 'approved' "
@@ -248,6 +305,14 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         assert private_cluster_job is not None
         await cluster_batch_task({}, int(private_cluster_job["id"]))
     test_db.commit()
+
+    private_scope_lease = test_db.execute(
+        "SELECT scope_key, generation, holder_token FROM upload_scope_leases "
+        "ORDER BY scope_key LIMIT 1"
+    ).fetchone()
+    assert private_scope_lease is not None, "上传私有聚类必须持有scope lease"
+    assert private_scope_lease["generation"] >= 1
+    assert private_scope_lease["holder_token"] is None, "聚类结束后必须释放scope lease"
 
     private_resolution_rows = test_db.execute(
         "SELECT d.source_ordinal, d.cat1, d.cat2, d.tags, r.status, r.canonical_scope, "
@@ -462,28 +527,17 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
     assert [row["source_ordinal"] for row in final_public_rows] == [10, 20, 30, 40]
     assert final_public_rows[0]["question"].startswith("已审核编辑：")
     assert "分布式锁如何避免误释放" not in "\n".join(row["question"] for row in final_public_rows)
+    public_scope_lease = test_db.execute(
+        "SELECT scope_key, generation, holder_token FROM upload_scope_leases "
+        "WHERE scope_key LIKE '%:public' ORDER BY scope_key LIMIT 1"
+    ).fetchone()
+    assert public_scope_lease is not None
+    assert public_scope_lease["generation"] >= 2, "公共失败重试必须重新取得新代次scope lease"
+    assert public_scope_lease["holder_token"] is None
     for row in final_public_rows:
         expected = next(question for question in QUESTIONS if question[0] == row["source_ordinal"])
         assert (row["cat1"], row["cat2"]) == expected[2:4]
         assert expected[4] in row["tags"]
-    assert {
-        int(row["canonical_id"])
-        for row in test_db.execute(
-            "SELECT r.canonical_id FROM question_resolutions r "
-            "JOIN public_contribution_items i ON i.public_detail_id = r.detail_id "
-            "WHERE i.request_id = ? AND i.status = 'published' AND r.invalidated_at IS NULL",
-            (contribution["id"],),
-        ).fetchall()
-    } == first_public_success_ids | {
-        int(
-            test_db.execute(
-                "SELECT canonical_id FROM question_resolutions "
-                "WHERE detail_id = ? AND invalidated_at IS NULL",
-                (failed_detail,),
-            ).fetchone()[0]
-        )
-    }
-
     # Authorized public APIs agree with the traced database projection.
     monkeypatch.setattr("app.routers.questions.get_master_bank_cache", AsyncMock(return_value=None))
     monkeypatch.setattr("app.routers.questions.set_master_bank_cache", AsyncMock())
@@ -513,6 +567,144 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         clear_user()
     assert not any(item["owner_id"] == 101 for item in other_user_bank["items"])
 
+    # AC-029 trace artifact contains stable test IDs/statuses, never source
+    # material or model credentials. One row covers every input ordinal,
+    # including the item excluded from the public projection.
+    trace_rows = test_db.execute(
+        "SELECT source.source_ordinal, source.id AS private_detail_id, "
+        "private_resolution.id AS private_resolution_id, "
+        "private_resolution.canonical_id AS private_canonical_id, "
+        "item.id AS contribution_item_id, item.status AS contribution_status, "
+        "item.public_detail_id, public_detail.id AS materialized_public_detail_id, "
+        "public_resolution.id AS public_resolution_id, "
+        "public_resolution.canonical_id AS public_canonical_id, "
+        "public_resolution.status AS public_resolution_status "
+        "FROM questions_detail source "
+        "LEFT JOIN question_resolutions private_resolution "
+        "ON private_resolution.detail_id = source.id "
+        "AND private_resolution.invalidated_at IS NULL "
+        "LEFT JOIN public_contribution_items item "
+        "ON item.request_id = ? AND item.source_item_id = source.id "
+        "LEFT JOIN questions_detail public_detail ON public_detail.id = item.public_detail_id "
+        "LEFT JOIN question_resolutions public_resolution "
+        "ON public_resolution.detail_id = public_detail.id "
+        "AND public_resolution.invalidated_at IS NULL "
+        "WHERE source.import_id = ? ORDER BY source.source_ordinal",
+        (contribution["id"], import_id),
+    ).fetchall()
+    assert len(trace_rows) == len(QUESTIONS)
+    stage_rows = test_db.execute(
+        "SELECT id, stage, unit_key, status FROM upload_stage_results WHERE import_id = ? "
+        "ORDER BY id",
+        (import_id,),
+    ).fetchall()
+    stage_trace = [
+        {
+            "id": int(row["id"]),
+            "stage": row["stage"],
+            "unit_key": row["unit_key"],
+            "status": row["status"],
+        }
+        for row in stage_rows
+    ]
+    review = test_db.execute(
+        "SELECT revision, projection_hash, review_projection_json "
+        "FROM public_contribution_requests WHERE id = ?",
+        (contribution["id"],),
+    ).fetchone()
+    projection = json.loads(review["review_projection_json"] or "{}")
+    projection_source = projection.get("source") or {}
+    trace_items = []
+    for row, expected in zip(trace_rows, QUESTIONS):
+        ordinal = int(row["source_ordinal"])
+        assert ordinal == expected[0]
+        is_excluded = ordinal == 50
+        related_detail_units = {
+            f"detail:{int(row['private_detail_id'])}",
+            f"detail:{int(row['public_detail_id'])}" if row["public_detail_id"] else None,
+        }
+        item_stages = [
+            stage for stage in stage_trace
+            if stage["stage"] != "resolve"
+            or not stage["unit_key"].startswith("detail:")
+            or stage["unit_key"] in related_detail_units
+        ]
+        assert bool(row["materialized_public_detail_id"]) is (not is_excluded)
+        if not is_excluded:
+            assert row["public_resolution_id"] is not None
+            assert row["public_canonical_id"] is not None
+            assert row["contribution_status"] == "published"
+        trace_items.append(
+            {
+                "input_ordinal": ordinal,
+                "expected_category": [expected[2], expected[3]],
+                "stages": item_stages,
+                "private_detail_id": int(row["private_detail_id"]),
+                "private_resolution_id": int(row["private_resolution_id"]),
+                "private_canonical_id": int(row["private_canonical_id"]),
+                "contribution_item_id": int(row["contribution_item_id"]),
+                "contribution_status": row["contribution_status"],
+                "review_projection": {
+                    "revision": int(review["revision"]),
+                    "hash": review["projection_hash"],
+                    "source_company_redacted": projection_source.get("company") is None,
+                    "source_url_redacted": projection_source.get("source_url") is None,
+                    "excluded": is_excluded,
+                },
+                "public_detail_id": (
+                    int(row["materialized_public_detail_id"])
+                    if row["materialized_public_detail_id"]
+                    else None
+                ),
+                "public_resolution_id": (
+                    int(row["public_resolution_id"])
+                    if row["public_resolution_id"]
+                    else None
+                ),
+                "public_canonical_id": (
+                    int(row["public_canonical_id"])
+                    if row["public_canonical_id"]
+                    else None
+                ),
+                "public_resolution_status": row["public_resolution_status"],
+            }
+        )
+    trace_path = tmp_path / "ac029-question-trace.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "import_id": str(import_id),
+                "contribution_request_id": int(contribution["id"]),
+                "stages": stage_trace,
+                "items": trace_items,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    written_trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert [item["input_ordinal"] for item in written_trace["items"]] == [10, 20, 30, 40, 50]
+    required_stages = {"extract", "classify", "persist", "resolve"}
+    recorded_stages = {stage["stage"] for stage in stage_trace}
+    assert not recorded_stages.intersection(
+        {"preflight", "complete", "fill", "tag", "match", "save", "cluster"}
+    )
+    for item in written_trace["items"]:
+        stage_refs = item["stages"]
+        assert required_stages <= {stage["stage"] for stage in stage_refs}
+        assert all(stage["id"] and stage["unit_key"] and stage["status"] for stage in stage_refs)
+        private_unit = f"detail:{item['private_detail_id']}"
+        assert private_unit in {
+            stage["unit_key"] for stage in stage_refs if stage["stage"] == "resolve"
+        }
+        if item["public_detail_id"]:
+            assert f"detail:{item['public_detail_id']}" in {
+                stage["unit_key"] for stage in stage_refs if stage["stage"] == "resolve"
+            }
+    assert "test-user-key" not in trace_path.read_text(encoding="utf-8")
+    assert "test-system-key" not in trace_path.read_text(encoding="utf-8")
+
     # AC-007 血缘：v2 上传产生的每一条队列行都必须带 root_import_id。
     # 私人路径显式传 root，公共路径靠 contribution_request_id → upload_imports 回填；
     # 缺失会让对账无法按 root 续调（AC-012 桶调度按 root 聚合）。
@@ -526,3 +718,100 @@ async def test_http_upload_to_personal_and_public_question_trace(client, test_db
         "SELECT DISTINCT root_import_id FROM analysis_queue"
     ).fetchall()
     assert [str(row["root_import_id"]) for row in linked_queue_rows] == [str(import_id)]
+
+
+@pytest.mark.asyncio
+async def test_admin_public_import_persists_approved_projection_audit(
+    client, test_db
+):
+    """AC-003: 管理员显式公共导入要留下可追溯的批准投影。"""
+
+    from app.agents.submit.persist_public import persist_public_node
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (201, 'admin-201', 'x', 1)"
+    )
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
+        "VALUES ('imp-admin-public', 201, 'admin-public-1', 'hash-admin-public', 'share', "
+        "'interview', 'v1', '{\"audit_public_import\":true}', '{}', 'queued')"
+    )
+    test_db.commit()
+
+    result = await persist_public_node(
+        {
+            "extracted_data": {
+                "公司": "AC 审计公司",
+                "面试轮次": "一面",
+                "具体题目清单": ["事务隔离级别有哪些？"],
+            },
+            "tagged_rows": [
+                [
+                    "internal://admin-public",
+                    "AC 审计公司",
+                    "一面",
+                    "事务隔离级别有哪些？",
+                    "数据库",
+                    "事务",
+                    "ACID",
+                    "中等",
+                ]
+            ],
+            "job_position": "后端开发",
+            "saved_url": "internal://admin-public",
+            "season": "2026 秋招",
+            "user_id": 201,
+            "is_admin": True,
+            "import_id": "imp-admin-public",
+        }
+    )
+    test_db.commit()
+
+    audit = test_db.execute(
+        "SELECT id, status, reviewed_by, review_projection_json "
+        "FROM public_contribution_requests WHERE requester_id = 201 "
+        "AND source_id = ? ORDER BY id DESC LIMIT 1",
+        (result["saved_interview_id"],),
+    ).fetchone()
+    assert audit is not None, "管理员公共直导必须创建持久化批准记录"
+    assert audit["status"] == "approved_for_processing"
+    assert audit["reviewed_by"] == 201
+    projection = json.loads(audit["review_projection_json"])
+    assert projection["source"]["company"] is None
+    assert projection["source"]["round"] is None
+    assert projection["source"]["source_url"] is None
+    assert projection["items"][0]["question"] == "事务隔离级别有哪些？"
+
+    interview = test_db.execute(
+        "SELECT url, company, round, publish_status FROM interview WHERE id = ?",
+        (result["saved_interview_id"],),
+    ).fetchone()
+    assert tuple(interview) == ("", "", "", "pending")
+
+    event = test_db.execute(
+        "SELECT actor_id, action, to_status, metadata_json "
+        "FROM public_contribution_events WHERE request_id = ? ORDER BY id DESC LIMIT 1",
+        (audit["id"],),
+    ).fetchone()
+    assert event is not None
+    assert (event["actor_id"], event["action"], event["to_status"]) == (
+        201,
+        "admin_import_approved",
+        "approved_for_processing",
+    )
+    assert json.loads(event["metadata_json"])["import_id"] == "imp-admin-public"
+
+    root_link = test_db.execute(
+        "SELECT contribution_request_id FROM upload_imports WHERE id = ?",
+        ("imp-admin-public",),
+    ).fetchone()
+    assert root_link["contribution_request_id"] == audit["id"]
+
+    queue_link = test_db.execute(
+        "SELECT COUNT(*) FROM analysis_queue WHERE interview_id = ? "
+        "AND contribution_request_id = ? AND root_import_id = ?",
+        (result["saved_interview_id"], audit["id"], "imp-admin-public"),
+    ).fetchone()[0]
+    assert queue_link == 1

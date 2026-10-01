@@ -278,7 +278,7 @@ def _record_queue_resolutions(
                 "INSERT INTO upload_stage_results "
                 "(import_id, stage, unit_key, input_version, pipeline_version, status, "
                 "result_json, error_code, retryable) "
-                "VALUES (?, 'cluster', ?, 1, 'upload-pipeline-v1', ?, ?, ?, ?) "
+                "VALUES (?, 'resolve', ?, 1, 'upload-pipeline-v1', ?, ?, ?, ?) "
                 "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
                 "status = excluded.status, result_json = excluded.result_json, "
                 "error_code = excluded.error_code, retryable = excluded.retryable, "
@@ -295,7 +295,13 @@ def _record_queue_resolutions(
     return recorded
 
 
-async def _refresh_completed_roots(batch: List[Dict], *, include_contributions=False):
+async def _refresh_completed_roots(
+    batch: List[Dict],
+    *,
+    include_contributions=False,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
     root_ids = {
         str(item["root_import_id"])
         for item in batch
@@ -307,8 +313,9 @@ async def _refresh_completed_roots(batch: List[Dict], *, include_contributions=F
 
     def _refresh():
         conn = get_db_connection()
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         try:
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
             from app.services.upload_lifecycle import refresh_completed_upload_roots
 
             reports = refresh_completed_upload_roots(conn, root_ids)
@@ -321,7 +328,28 @@ async def _refresh_completed_roots(batch: List[Dict], *, include_contributions=F
     await _run_db(_refresh)
 
 
-async def _persist_unmapped_queue_items(batch: List[Dict]):
+def _assert_upload_write_fences(conn, job_fence, scope_fence):
+    if job_fence is not None:
+        from app.services.job_lifecycle import assert_job_fence
+
+        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+    if scope_fence is not None:
+        from app.services.upload_scope_leases import assert_upload_scope_lease
+
+        assert_upload_scope_lease(
+            conn,
+            scope_fence[0],
+            holder_token=scope_fence[1],
+            generation=int(scope_fence[2]),
+        )
+
+
+async def _persist_unmapped_queue_items(
+    batch: List[Dict],
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
     """Persist sanitization rejects as failed resolutions and cluster stages."""
 
     if not batch:
@@ -329,8 +357,9 @@ async def _persist_unmapped_queue_items(batch: List[Dict]):
 
     def _write():
         conn = get_db_connection()
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         try:
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
             result = _record_queue_resolutions(
                 conn,
                 batch,
@@ -351,6 +380,8 @@ async def _persist_unmapped_queue_items(batch: List[Dict]):
 async def cluster_batch(
     batch: List[Dict], user_id: int = None, skip_clean: bool = False,
     return_new_ids: bool = False,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
 ) -> int | Dict:
     """对一批问题做增量聚类:匹配已有聚类 → 内部聚类剩余 → 原子写入 question_bank
 
@@ -366,8 +397,14 @@ async def cluster_batch(
 
     batch, filtered = sanitize_batch(batch)
     if filtered:
-        await _persist_unmapped_queue_items(filtered)
-        mark_batch_done([item["queue_id"] for item in filtered])
+        await _persist_unmapped_queue_items(
+            filtered, job_fence=job_fence, scope_fence=scope_fence
+        )
+        mark_batch_done(
+            [item["queue_id"] for item in filtered],
+            job_fence=job_fence,
+            scope_fence=scope_fence,
+        )
         logger.info(f"清洗拦截 {len(filtered)} 条脏数据")
     if not batch:
         return {"count": 0, "ids": []} if return_new_ids else 0
@@ -410,8 +447,9 @@ async def cluster_batch(
 
         def _pre_clean():
             c = get_db_connection()
-            c.execute("BEGIN")
+            c.execute("BEGIN IMMEDIATE")
             try:
+                _assert_upload_write_fences(c, job_fence, scope_fence)
                 from app.db.operations import (
                     _cleanup_old_sources_txn_v2,
                     cleanup_interview_question_bank_sources,
@@ -479,9 +517,10 @@ async def cluster_batch(
         answer_cache=saved_answers,
     ):
         conn = get_db_connection()
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         new_qb_ids = []
         try:
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
             apply_matched(conn, matched_rows, job_position, answer_cache)
             new_qb_ids = insert_new_clusters(
                 conn, new_cluster_rows, job_position, answer_cache, owner_id=owner_id
@@ -501,7 +540,9 @@ async def cluster_batch(
 
     write_result = await _run_db(_atomic_write)
     qb_ids = write_result["ids"]
-    await _refresh_completed_roots(batch)
+    await _refresh_completed_roots(
+        batch, job_fence=job_fence, scope_fence=scope_fence
+    )
 
     # Incremental FAISS cache maintenance: add newly created clusters to the
     # in-memory index via add_with_ids instead of full reload.

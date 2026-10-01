@@ -146,3 +146,32 @@ def _migration_123_public_publish_gate(conn):
         "WHERE publish_status IS NULL OR publish_status = ''"
     )
     logger.info("migration_123: public publish gate is ready")
+
+
+def _migration_124_upload_spec_stage_names(conn):
+    """Normalize persisted upload phase aliases to contracts.md §1.4/§1.7."""
+
+    aliases = {
+        "preflight": "credential_preflight",
+        "complete": "extract",
+        "fill": "extract",
+        "tag": "classify",
+        "match": "resolve",
+        "cluster": "resolve",
+        "save": "persist",
+    }
+    case_sql = "CASE stage " + " ".join(
+        f"WHEN '{old}' THEN '{new}'" for old, new in aliases.items()
+    ) + " ELSE stage END"
+    placeholders = ",".join("?" for _ in aliases)
+    conn.execute(
+        "UPDATE upload_stage_results SET stage = " + case_sql
+        + f" WHERE stage IN ({placeholders})",
+        tuple(aliases),
+    )
+    conn.execute(
+        "UPDATE upload_llm_calls SET stage = " + case_sql
+        + f" WHERE stage IN ({placeholders})",
+        tuple(aliases),
+    )
+    logger.info("migration_124: upload stage names follow the upload spec")

@@ -28,7 +28,7 @@ def test_snapshot_progress_uses_extracted_question_and_answer_outcomes(test_db):
         (json.dumps({"提取计数": {"extracted": 10, "retained": 10, "excluded": 0}}),),
     )
     # Additional stage checkpoints are not additional questions.
-    for stage in ("fill", "tag", "match", "save", "cluster"):
+    for stage in ("classify", "resolve", "persist"):
         test_db.execute(
             "INSERT INTO upload_stage_results (import_id, stage, unit_key, pipeline_version, status) "
             "VALUES ('progress-root', ?, 'document', 'upload-pipeline-v1', 'succeeded')",

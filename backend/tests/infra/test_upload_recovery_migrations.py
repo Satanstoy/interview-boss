@@ -135,6 +135,62 @@ def test_running_migrations_twice_changes_nothing():
     conn.close()
 
 
+def test_legacy_upload_stage_names_migrate_to_contract_names():
+    conn = _fresh()
+    import_id, _ = _make_import(conn)
+    legacy_stages = (
+        ("preflight", "credential:user"),
+        ("fill", "fill:running"),
+        ("tag", "tag:running"),
+        ("match", "match:running"),
+        ("save", "save:running"),
+        ("cluster", "detail:901"),
+    )
+    for stage, unit_key in legacy_stages:
+        conn.execute(
+            "INSERT INTO upload_stage_results "
+            "(import_id, stage, unit_key, input_version, pipeline_version, status) "
+            "VALUES (?, ?, ?, 1, 'upload-pipeline-v1', 'succeeded')",
+            (import_id, stage, unit_key),
+        )
+    for stage, call_key in (("preflight", "preflight-call"), ("complete", "complete-call"), ("cluster", "cluster-call")):
+        conn.execute(
+            "INSERT INTO upload_llm_calls "
+            "(root_import_id, stage, call_key, credential_scope, payer_type) "
+            "VALUES (?, ?, ?, 'user', 'user')",
+            (import_id, stage, call_key),
+        )
+    # Re-run only the new data migration against rows written by the old code.
+    conn.execute("DELETE FROM schema_version WHERE version = 124")
+    conn.commit()
+
+    run_migrations(conn)
+
+    stage_names = {
+        row[0]
+        for row in conn.execute(
+            "SELECT DISTINCT stage FROM upload_stage_results WHERE import_id = ?",
+            (import_id,),
+        )
+    }
+    assert stage_names == {
+        "credential_preflight",
+        "extract",
+        "classify",
+        "resolve",
+        "persist",
+    }
+    call_stages = {
+        row[0]
+        for row in conn.execute(
+            "SELECT stage FROM upload_llm_calls WHERE root_import_id = ?",
+            (import_id,),
+        )
+    }
+    assert call_stages == {"credential_preflight", "extract", "resolve"}
+    conn.close()
+
+
 def test_legacy_database_upgrade_keeps_old_rows_readable():
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row

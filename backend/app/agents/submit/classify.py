@@ -6,8 +6,10 @@ from app.agents.shared.quality import evaluate_tagging_quality
 from app.agents.shared.events import emit_progress, build_tagging_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")
+from app.services.upload_llm_accounting import upload_llm_stage
 
 
+@upload_llm_stage("complete", unit_key="source")
 async def complete_node(state: SubmitState) -> dict:
     """字段补全节点 -- 补全公司/轮次/难度等缺失字段"""
     from app.services.llm import raw_llm_call, _extract_json, get_llm_client_for_user, _should_use_response_format
@@ -83,6 +85,7 @@ async def complete_node(state: SubmitState) -> dict:
     }
 
 
+@upload_llm_stage("classify", unit_key="question-batch")
 async def classify_node(state: SubmitState) -> dict:
     """分类标注节点 -- 调用现有 tag_questions_batch + 质量检查（F08：支持复用检查点）"""
     from app.services.submit_service import tag_questions_batch

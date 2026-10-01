@@ -186,6 +186,7 @@ async def _schedule_cluster_answer_jobs(
     *,
     owner_id: int | None,
     actor_id: int | None,
+    job_fence: tuple[int, int] | None = None,
 ) -> list[int]:
     """Create durable answer jobs with the final question-bank scope.
 
@@ -207,6 +208,13 @@ async def _schedule_cluster_answer_jobs(
     def _create():
         placeholders = ",".join("?" * len(ids))
         with get_db_connection() as conn:
+            owns_transaction = not conn.in_transaction
+            if owns_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if job_fence is not None:
+                from app.services.job_lifecycle import assert_job_fence
+
+                assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
             rows = conn.execute(
                 "SELECT id, question FROM question_bank "
                 f"WHERE id IN ({placeholders}) AND deleted_at IS NULL "
@@ -223,7 +231,8 @@ async def _schedule_cluster_answer_jobs(
                 llm_scope=llm_scope,
                 search_scope=search_scope,
             )
-            conn.commit()
+            if owns_transaction:
+                conn.commit()
             return job_ids
 
     try:
@@ -302,7 +311,7 @@ async def _cluster_preflight_ready(job_id: int) -> bool:
                     current = resolve_upload_credentials(
                         credential_scope=credential_scope,
                         user_id=int(user_id) if user_id is not None and credential_scope == "user" else None,
-                        stage="cluster",
+                        stage="resolve",
                     )
                     result = json.loads(preflight["result_json"] or "{}")
                 except Exception:
@@ -331,10 +340,19 @@ async def cluster_batch_task(ctx, job_id: int):
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
         CLUSTER_BATCH_JOB_TYPE,
+        JobFenceError,
         claim_job,
+        claim_job_with_generation,
         complete_job,
         default_worker_id,
         fail_job,
+        heartbeat_job,
+    )
+    from app.services.upload_scope_leases import (
+        UploadScopeLeaseError,
+        acquire_upload_scope_lease,
+        heartbeat_upload_scope_lease,
+        release_upload_scope_lease,
     )
     from app.services.pipeline import (
         BATCH_SIZE,
@@ -352,12 +370,25 @@ async def cluster_batch_task(ctx, job_id: int):
 
     def _claim_and_load():
         with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=CLUSTER_BATCH_JOB_TYPE,
-            )
+            candidate = conn.execute(
+                "SELECT root_import_id FROM jobs WHERE id = ? AND job_type = ?",
+                (job_id, CLUSTER_BATCH_JOB_TYPE),
+            ).fetchone()
+            if candidate and candidate["root_import_id"]:
+                task = claim_job_with_generation(
+                    conn,
+                    job_id,
+                    worker_id=worker_id,
+                    job_type=CLUSTER_BATCH_JOB_TYPE,
+                    lease_seconds=120,
+                )
+            else:
+                task = claim_job(
+                    conn,
+                    job_id,
+                    worker_id,
+                    job_type=CLUSTER_BATCH_JOB_TYPE,
+                )
             if not task:
                 return None
             payload_row = conn.execute(
@@ -365,42 +396,234 @@ async def cluster_batch_task(ctx, job_id: int):
             ).fetchone()
             conn.commit()
             payload = json.loads(payload_row["payload"]) if payload_row else {}
-            return payload
+            return dict(task), payload
 
-    payload = await asyncio.to_thread(_claim_and_load)
-    if payload is None:
+    claimed = await asyncio.to_thread(_claim_and_load)
+    if claimed is None:
         logger.info("聚类攒批任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
+    task, payload = claimed
+    root_import_id = task.get("root_import_id")
+    job_fence = (job_id, int(task["lease_generation"])) if root_import_id else None
 
     def _complete(result):
         with get_db_connection() as conn:
-            complete_job(conn, job_id, worker_id, result=json.dumps(result, ensure_ascii=False))
+            completed = complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=json.dumps(result, ensure_ascii=False),
+                lease_generation=job_fence[1] if job_fence else None,
+            )
             conn.commit()
+            return completed
 
     def _fail(error):
         with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
+            outcome = fail_job(
+                conn,
+                job_id,
+                worker_id,
+                error,
+                lease_generation=job_fence[1] if job_fence else None,
+            )
             conn.commit()
             return outcome
 
+    scope_lease = None
+    scope_fence = None
+    heartbeat_stop = asyncio.Event()
+    heartbeat_lost = asyncio.Event()
+    lease_heartbeat_task = None
     batch = []
     try:
-        if payload.get("root_import_id"):
+        if root_import_id:
+            def _load_scope_key():
+                with get_db_connection() as conn:
+                    row = conn.execute(
+                        "SELECT r.position_id, r.position_name, aq.owner_id, i.job_position "
+                        "FROM upload_imports r LEFT JOIN analysis_queue aq "
+                        "ON aq.root_import_id = r.id AND aq.status = 'pending' "
+                        "LEFT JOIN interview i ON i.id = aq.interview_id "
+                        "WHERE r.id = ? ORDER BY aq.id LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    if row is None or (
+                        row["owner_id"] is None
+                        and row["position_id"] is None
+                        and not row["job_position"]
+                        and not row["position_name"]
+                    ):
+                        return None
+                    position_id = row["position_id"]
+                    position_name = row["job_position"] or row["position_name"] or "unknown"
+                    if position_id is None:
+                        position = conn.execute(
+                            "SELECT id FROM job_positions WHERE name = ? LIMIT 1",
+                            (position_name,),
+                        ).fetchone()
+                        position_id = position["id"] if position else None
+                    position_key = (
+                        str(position_id)
+                        if position_id is not None
+                        else f"name:{position_name}"
+                    )
+                    suffix = (
+                        "public"
+                        if row["owner_id"] is None
+                        else f"user:{int(row['owner_id'])}"
+                    )
+                    return f"{position_key}:{suffix}"
+
+            scope_key = await asyncio.to_thread(_load_scope_key)
+            if scope_key:
+                holder_token = f"{worker_id}:job:{job_id}:generation:{job_fence[1]}"
+
+                def _try_acquire_scope():
+                    with get_db_connection() as conn:
+                        lease = acquire_upload_scope_lease(
+                            conn,
+                            scope_key,
+                            holder_token=holder_token,
+                            lease_seconds=120,
+                        )
+                        conn.commit()
+                        return lease
+
+                while scope_lease is None:
+                    scope_lease = await asyncio.to_thread(_try_acquire_scope)
+                    if scope_lease is None:
+                        def _keep_job_alive():
+                            with get_db_connection() as conn:
+                                alive = heartbeat_job(
+                                    conn, job_id, job_fence[1], lease_seconds=120
+                                )
+                                conn.commit()
+                                return alive
+
+                        if not await asyncio.to_thread(_keep_job_alive):
+                            raise JobFenceError(
+                                "聚类任务等待scope lease期间租约失效",
+                                job_id=job_id,
+                                generation=job_fence[1],
+                            )
+                        await asyncio.sleep(1)
+
+                scope_fence = (
+                    scope_key,
+                    holder_token,
+                    int(scope_lease["generation"]),
+                )
+
+                def _heartbeat_owned():
+                    with get_db_connection() as conn:
+                        job_ok = heartbeat_job(
+                            conn, job_id, job_fence[1], lease_seconds=120
+                        )
+                        scope_ok = heartbeat_upload_scope_lease(
+                            conn,
+                            scope_key,
+                            holder_token=holder_token,
+                            generation=scope_fence[2],
+                            lease_seconds=120,
+                        )
+                        conn.commit()
+                        return bool(job_ok and scope_ok)
+
+                async def _renew_leases():
+                    while not heartbeat_stop.is_set():
+                        try:
+                            await asyncio.wait_for(heartbeat_stop.wait(), timeout=30)
+                            continue
+                        except asyncio.TimeoutError:
+                            pass
+                        if not await asyncio.to_thread(_heartbeat_owned):
+                            heartbeat_lost.set()
+                            return
+
+                lease_heartbeat_task = asyncio.create_task(_renew_leases())
+
+        if root_import_id:
             batch = dequeue_batch(
                 BATCH_SIZE,
                 owner_id=payload.get("owner_id"),
-                root_import_id=payload["root_import_id"],
+                root_import_id=root_import_id,
+                job_fence=job_fence,
+                scope_fence=scope_fence,
             )
         else:
             batch = dequeue_batch(BATCH_SIZE)
         if not batch:
             result = {"status": "empty", "new_count": 0}
-            _complete(result)
+            if not _complete(result) and job_fence:
+                raise JobFenceError(
+                    "聚类任务租约已失效，不能完成任务",
+                    job_id=job_id,
+                    generation=job_fence[1],
+                )
             return {"job_id": job_id, **result}
 
-        cluster_result = await cluster_batch(
-            batch, user_id=payload.get("user_id"), return_new_ids=True
-        )
+        batch_root_import_id = batch[0].get("root_import_id")
+        if batch_root_import_id:
+            from app.services.upload_llm_accounting import upload_llm_context
+
+            owner_id = batch[0].get("owner_id")
+
+            def _load_upload_scope():
+                with get_db_connection() as conn:
+                    root = conn.execute(
+                        "SELECT requester_id, target_intent, policy_json "
+                        "FROM upload_imports WHERE id = ?",
+                        (batch_root_import_id,),
+                    ).fetchone()
+                    if not root:
+                        raise ValueError("聚类队列引用的上传根任务不存在")
+                    try:
+                        policy = json.loads(root["policy_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        policy = {}
+                    if owner_id is not None:
+                        return "user", int(owner_id)
+                    scope = policy.get("post_approval_credential_scope")
+                    if not scope:
+                        scope = (
+                            policy.get("credential_scope")
+                            if root["target_intent"] == "share"
+                            else "global"
+                        )
+                    return scope or "global", int(root["requester_id"])
+
+            credential_scope, scope_user_id = await asyncio.to_thread(
+                _load_upload_scope
+            )
+            with upload_llm_context(
+                root_import_id=str(batch_root_import_id),
+                stage="resolve",
+                unit_key="queue-batch",
+                credential_scope=credential_scope,
+                user_id=scope_user_id,
+            ):
+                cluster_result = await cluster_batch(
+                    batch,
+                    user_id=payload.get("user_id"),
+                    return_new_ids=True,
+                    job_fence=job_fence,
+                    scope_fence=scope_fence,
+                )
+        else:
+            cluster_result = await cluster_batch(
+                batch,
+                user_id=payload.get("user_id"),
+                return_new_ids=True,
+                job_fence=job_fence,
+                scope_fence=scope_fence,
+            )
+        if heartbeat_lost.is_set():
+            raise JobFenceError(
+                "聚类期间任务或scope lease心跳失败",
+                job_id=job_id,
+                generation=job_fence[1] if job_fence else None,
+            )
         if isinstance(cluster_result, dict):
             new_count = int(cluster_result.get("count", 0))
             new_qb_ids = cluster_result.get("ids", [])
@@ -408,30 +631,76 @@ async def cluster_batch_task(ctx, job_id: int):
             new_count = int(cluster_result or 0)
             new_qb_ids = []
         queue_ids = [item["queue_id"] for item in batch]
-        mark_batch_done(queue_ids)
+        mark_batch_done(
+            queue_ids, job_fence=job_fence, scope_fence=scope_fence
+        )
         from app.services.public_contributions import mark_public_contribution_queue_done
 
         with get_db_connection() as connection:
-            mark_public_contribution_queue_done(connection, queue_ids)
+            mark_public_contribution_queue_done(
+                connection,
+                queue_ids,
+                job_fence=job_fence,
+                scope_fence=scope_fence,
+            )
         await _schedule_cluster_answer_jobs(
             job_id,
             new_qb_ids,
             owner_id=batch[0].get("owner_id"),
             actor_id=payload.get("user_id"),
+            job_fence=job_fence,
         )
         result = {"status": "done", "new_count": new_count, "processed": len(batch)}
-        _complete(result)
+        if not _complete(result) and job_fence:
+            raise JobFenceError(
+                "聚类任务租约已失效，不能完成任务",
+                job_id=job_id,
+                generation=job_fence[1],
+            )
         return {"job_id": job_id, **result}
     except Exception as exc:
+        if isinstance(exc, (JobFenceError, UploadScopeLeaseError)):
+            logger.info("聚类任务失去generation/scope fence: job_id=%s", job_id)
+            return {"status": "stale", "job_id": job_id}
         queue_ids = [item["queue_id"] for item in batch]
-        mark_batch_failed(queue_ids)
-        from app.services.public_contributions import mark_public_contribution_queue_failed
+        try:
+            mark_batch_failed(
+                queue_ids, job_fence=job_fence, scope_fence=scope_fence
+            )
+            from app.services.public_contributions import mark_public_contribution_queue_failed
 
-        with get_db_connection() as connection:
-            mark_public_contribution_queue_failed(connection, queue_ids, str(exc))
+            with get_db_connection() as connection:
+                mark_public_contribution_queue_failed(
+                    connection,
+                    queue_ids,
+                    str(exc),
+                    job_fence=job_fence,
+                    scope_fence=scope_fence,
+                )
+        except (JobFenceError, UploadScopeLeaseError):
+            logger.info("聚类失败处理时generation/scope fence已失效: job_id=%s", job_id)
+            return {"status": "stale", "job_id": job_id}
         outcome = _fail(str(exc)[:500])
         logger.exception("聚类攒批任务失败: job_id=%s", job_id)
         return {"status": outcome["status"], "job_id": job_id}
+    finally:
+        heartbeat_stop.set()
+        if lease_heartbeat_task is not None:
+            lease_heartbeat_task.cancel()
+            await asyncio.gather(lease_heartbeat_task, return_exceptions=True)
+        if scope_fence:
+            def _release_scope():
+                with get_db_connection() as conn:
+                    released = release_upload_scope_lease(
+                        conn,
+                        scope_fence[0],
+                        holder_token=scope_fence[1],
+                        generation=scope_fence[2],
+                    )
+                    conn.commit()
+                    return released
+
+            await asyncio.to_thread(_release_scope)
 
 
 async def cluster_rebuild_task(ctx, job_id: int):

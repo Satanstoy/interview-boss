@@ -371,16 +371,21 @@ def claim_job_with_generation(
     *,
     worker_id: str,
     lease_seconds: int = WORKER_LEASE_SECONDS,
+    job_type: str | None = None,
 ):
     """领取一个 job 并递增 ``lease_generation``；本次领取的 fence 就是返回的代次。"""
 
+    type_clause = " AND job_type = ?" if job_type else ""
+    params = [worker_id, f"+{int(lease_seconds)} seconds", job_id]
+    if job_type:
+        params.append(job_type)
     cur = conn.execute(
         "UPDATE jobs SET status = 'running', attempts = attempts + 1, "
         "lease_generation = lease_generation + 1, worker_id = ?, "
         "started_at = COALESCE(started_at, CURRENT_TIMESTAMP), "
         "locked_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND status IN ('pending', 'queued')",
-        (worker_id, f"+{int(lease_seconds)} seconds", job_id),
+        "WHERE id = ? AND status IN ('pending', 'queued')" + type_clause,
+        params,
     )
     if not cur.rowcount:
         return None
@@ -396,13 +401,52 @@ def assert_job_fence(conn, job_id: int, generation: int) -> dict:
     if generation is None:
         raise TypeError("v2 业务提交必须显式提供 lease_generation")
     row = conn.execute(
-        "SELECT lease_generation, status FROM jobs WHERE id = ?", (job_id,)
+        "SELECT lease_generation, status, locked_until, "
+        "CASE WHEN locked_until IS NOT NULL AND locked_until > CURRENT_TIMESTAMP "
+        "THEN 1 ELSE 0 END AS lease_valid FROM jobs WHERE id = ?",
+        (job_id,),
     ).fetchone()
     if row is None:
         raise JobFenceError(f"任务不存在: {job_id}", job_id=job_id, generation=generation)
     if int(row["lease_generation"]) != int(generation):
         raise JobFenceError(
             f"任务 {job_id} 的租约已易主，拒绝旧代次写入",
+            job_id=job_id,
+            generation=generation,
+        )
+    if row["status"] != "running" or not row["lease_valid"]:
+        raise JobFenceError(
+            f"任务 {job_id} 的租约已失效，拒绝写入",
+            job_id=job_id,
+            generation=generation,
+        )
+    return dict(row)
+
+
+def assert_job_generation_for_aggregation(conn, job_id: int, generation: int) -> dict:
+    """Fence a root status projection by the submit generation that produced it.
+
+    Root aggregation intentionally runs just after the submit job reaches a
+    terminal state, and can run again after asynchronous child work completes.
+    Canonical writes still require :func:`assert_job_fence` while running.
+    A terminal generation is safe here because terminal jobs cannot be claimed
+    again; any retry gets a new generation and fails this check.
+    """
+
+    row = conn.execute(
+        "SELECT lease_generation, status FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    if row is None or int(row["lease_generation"]) != int(generation):
+        raise JobFenceError(
+            f"任务 {job_id} 的根聚合代次已失效",
+            job_id=job_id,
+            generation=generation,
+        )
+    if row["status"] == "running":
+        return assert_job_fence(conn, job_id, generation)
+    if row["status"] not in ("completed", "failed"):
+        raise JobFenceError(
+            f"任务 {job_id} 尚未完成有效处理，拒绝根聚合",
             job_id=job_id,
             generation=generation,
         )
@@ -419,7 +463,8 @@ def heartbeat_job(
 
     cur = conn.execute(
         "UPDATE jobs SET locked_until = datetime('now', ?), updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND lease_generation = ? AND status = 'running'",
+        "WHERE id = ? AND lease_generation = ? AND status = 'running' "
+        "AND locked_until > CURRENT_TIMESTAMP",
         (f"+{int(lease_seconds)} seconds", job_id, int(generation)),
     )
     return bool(cur.rowcount)
@@ -457,7 +502,7 @@ def claim_dispatch_batch(
             JOIN upload_stage_results AS preflight_stage
               ON preflight_stage.job_id = preflight_job.id
              AND preflight_stage.import_id = preflight_job.root_import_id
-             AND preflight_stage.stage = 'preflight'
+             AND preflight_stage.stage = 'credential_preflight'
              AND preflight_stage.status = 'succeeded'
             JOIN job_payloads AS preflight_payload ON preflight_payload.job_id = preflight_job.id
             WHERE preflight_job.root_import_id = j.root_import_id
@@ -478,7 +523,7 @@ def claim_dispatch_batch(
               AND NOT EXISTS (
                 SELECT 1 FROM upload_stage_results AS newer_stage
                 WHERE newer_stage.job_id = preflight_job.id
-                  AND newer_stage.stage = 'preflight'
+                  AND newer_stage.stage = 'credential_preflight'
                   AND newer_stage.id > preflight_stage.id
               )
           )))
@@ -499,7 +544,7 @@ def claim_dispatch_batch(
               JOIN upload_stage_results AS preflight_stage
                 ON preflight_stage.job_id = preflight_job.id
                AND preflight_stage.import_id = preflight_job.root_import_id
-               AND preflight_stage.stage = 'preflight'
+               AND preflight_stage.stage = 'credential_preflight'
                AND preflight_stage.status = 'succeeded'
               JOIN job_payloads AS cluster_payload ON cluster_payload.job_id = j.id
               WHERE preflight_job.root_import_id = j.root_import_id
@@ -520,7 +565,7 @@ def claim_dispatch_batch(
                 AND NOT EXISTS (
                   SELECT 1 FROM upload_stage_results AS newer_stage
                   WHERE newer_stage.job_id = preflight_job.id
-                    AND newer_stage.stage = 'preflight'
+                    AND newer_stage.stage = 'credential_preflight'
                     AND newer_stage.id > preflight_stage.id
                 )
             )
@@ -567,7 +612,7 @@ def get_successful_upload_preflight(
         "JOIN upload_stage_results AS preflight_stage "
         "  ON preflight_stage.job_id = preflight_job.id "
         " AND preflight_stage.import_id = preflight_job.root_import_id "
-        " AND preflight_stage.stage = 'preflight' "
+        " AND preflight_stage.stage = 'credential_preflight' "
         "WHERE preflight_job.root_import_id = ? "
         "  AND preflight_job.job_type = 'credential_preflight' "
         "  AND preflight_job.upload_attempt_id IS ? "
@@ -583,7 +628,7 @@ def get_successful_upload_preflight(
         "        AND newer_preflight.id > preflight_job.id) "
         "  AND NOT EXISTS (SELECT 1 FROM upload_stage_results AS newer_stage "
         "      WHERE newer_stage.job_id = preflight_job.id "
-        "        AND newer_stage.stage = 'preflight' "
+        "        AND newer_stage.stage = 'credential_preflight' "
         "        AND newer_stage.id > preflight_stage.id) "
         "  AND preflight_stage.status = 'succeeded' "
         "ORDER BY preflight_stage.id DESC LIMIT 1",
@@ -678,6 +723,7 @@ def touch_job(
     progress_message: str | None = None,
     progress_phase: str | None = None,
     lease_seconds: int = WORKER_LEASE_SECONDS,
+    lease_generation: int | None = None,
 ) -> bool:
     """Refresh the worker lease and optionally persist visible progress."""
     fields = [
@@ -698,10 +744,17 @@ def touch_job(
         fields.append("progress_phase = ?")
         params.append(progress_phase)
     params.extend([job_id, worker_id])
+    generation_clause = ""
+    if lease_generation is not None:
+        generation_clause = (
+            " AND lease_generation = ? AND locked_until > CURRENT_TIMESTAMP"
+        )
+        params.append(int(lease_generation))
     cur = conn.execute(
         "UPDATE jobs SET status = 'running', "
         + ", ".join(fields)
-        + " WHERE id = ? AND worker_id = ? AND status = 'running'",
+        + " WHERE id = ? AND worker_id = ? AND status = 'running'"
+        + generation_clause,
         params,
     )
     return bool(cur.rowcount)
@@ -712,13 +765,25 @@ def complete_job(
     job_id: int,
     worker_id: str,
     result: str | None = None,
+    lease_generation: int | None = None,
 ) -> bool:
+    generation_clause = " AND lease_generation = ?" if lease_generation is not None else ""
+    active_lease_clause = (
+        " AND status = 'running' AND locked_until > CURRENT_TIMESTAMP"
+        if lease_generation is not None
+        else ""
+    )
+    params = [result, job_id, worker_id]
+    if lease_generation is not None:
+        params.append(int(lease_generation))
     cur = conn.execute(
         "UPDATE jobs SET status = 'completed', result = ?, "
         "last_error = NULL, locked_until = NULL, worker_id = NULL, "
         "completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-        "WHERE id = ? AND worker_id = ? AND status = 'running'",
-        (result, job_id, worker_id),
+        "WHERE id = ? AND worker_id = ? AND status = 'running'"
+        + generation_clause
+        + active_lease_clause,
+        params,
     )
     return bool(cur.rowcount)
 
@@ -729,11 +794,26 @@ def fail_job(
     worker_id: str,
     error: str,
     max_attempts: int = MAX_JOB_ATTEMPTS,
+    lease_generation: int | None = None,
 ) -> dict:
     """Retry through the DB dispatcher, or make the job terminally failed."""
+    generation_clause = " AND lease_generation = ?" if lease_generation is not None else ""
+    active_lease_clause = (
+        " AND status = 'running' AND locked_until > CURRENT_TIMESTAMP"
+        if lease_generation is not None
+        else ""
+    )
+    params = [job_id, worker_id]
+    if lease_generation is not None:
+        params.append(int(lease_generation))
     row = conn.execute(
-        "SELECT attempts FROM jobs WHERE id = ? AND worker_id = ?", (job_id, worker_id)
+        "SELECT attempts FROM jobs WHERE id = ? AND worker_id = ?"
+        + generation_clause
+        + active_lease_clause,
+        params,
     ).fetchone()
+    if lease_generation is not None and row is None:
+        return {"status": "stale", "attempts": 0}
     attempts = int(row["attempts"] or 0) if row else max_attempts
     message = str(error)[:500]
     if attempts < max_attempts:
@@ -742,15 +822,19 @@ def fail_job(
             "UPDATE jobs SET status = 'pending', last_error = ?, "
             "available_at = datetime('now', ?), locked_until = NULL, "
             "arq_job_id = NULL, worker_id = NULL, updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND worker_id = ?",
-            (message, f"+{delay} seconds", job_id, worker_id),
+            "WHERE id = ? AND worker_id = ?" + generation_clause + active_lease_clause,
+            (message, f"+{delay} seconds", job_id, worker_id)
+            + ((int(lease_generation),) if lease_generation is not None else ()),
         )
         return {"status": "retrying", "attempts": attempts}
 
     conn.execute(
         "UPDATE jobs SET status = 'failed', last_error = ?, "
         "locked_until = NULL, worker_id = NULL, completed_at = CURRENT_TIMESTAMP, "
-        "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND worker_id = ?",
-        (message, job_id, worker_id),
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND worker_id = ?"
+        + generation_clause
+        + active_lease_clause,
+        (message, job_id, worker_id)
+        + ((int(lease_generation),) if lease_generation is not None else ()),
     )
     return {"status": "failed", "attempts": attempts}

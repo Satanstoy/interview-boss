@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -330,7 +331,7 @@ def test_root_submit_dispatch_waits_for_latest_same_attempt_preflight():
     conn.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
         "pipeline_version, status, result_json, job_id) "
-        "VALUES ('preflight-root', 'preflight', 'credential:v1:attempt:1:run:1', 1, 'v1', "
+        "VALUES ('preflight-root', 'credential_preflight', 'credential:v1:attempt:1:run:1', 1, 'v1', "
         "'succeeded', ?, ?)",
         (json.dumps({"model": "model-a"}), first_preflight_id),
     )
@@ -404,7 +405,7 @@ def test_public_cluster_dispatch_requires_global_preflight_for_share():
     )
     conn.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, pipeline_version, status, job_id) "
-        "VALUES ('share-cluster-root', 'preflight', 'user-check', 'v1', 'succeeded', ?)",
+        "VALUES ('share-cluster-root', 'credential_preflight', 'user-check', 'v1', 'succeeded', ?)",
         (user_preflight_id,),
     )
     conn.commit()
@@ -422,7 +423,7 @@ def test_public_cluster_dispatch_requires_global_preflight_for_share():
     )
     conn.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, pipeline_version, status, job_id) "
-        "VALUES ('share-cluster-root', 'preflight', 'global-check', 'v1', 'succeeded', ?)",
+        "VALUES ('share-cluster-root', 'credential_preflight', 'global-check', 'v1', 'succeeded', ?)",
         (global_preflight_id,),
     )
     assert [row["id"] for row in claim_dispatch_batch(conn, job_type="cluster_batch")] == [
@@ -591,13 +592,13 @@ def test_public_cluster_results_create_one_resolution_per_source_detail():
     ]
     checkpoint = conn.execute(
         "SELECT status, result_json FROM upload_stage_results "
-        "WHERE import_id = 'root-a' AND stage = 'cluster' AND unit_key = 'detail:901'"
+        "WHERE import_id = 'root-a' AND stage = 'resolve' AND unit_key = 'detail:901'"
     ).fetchone()
     assert checkpoint["status"] == "succeeded"
     assert '"canonical_id": 801' in checkpoint["result_json"]
     failed_checkpoint = conn.execute(
         "SELECT status, error_code FROM upload_stage_results "
-        "WHERE import_id = 'root-a' AND stage = 'cluster' AND unit_key = 'detail:903'"
+        "WHERE import_id = 'root-a' AND stage = 'resolve' AND unit_key = 'detail:903'"
     ).fetchone()
     assert tuple(failed_checkpoint) == ("failed", "CLUSTER_RESOLUTION_MISSING")
     conn.close()
@@ -629,7 +630,7 @@ def test_root_stays_queued_until_async_cluster_checkpoint_finishes():
         "INSERT INTO upload_stage_results "
         "(import_id, stage, unit_key, pipeline_version, status) "
         "VALUES ('root-cluster', 'persist', 'document', 'v1', 'succeeded'), "
-        "('root-cluster', 'cluster', 'detail:1', 'v1', 'pending')"
+        "('root-cluster', 'resolve', 'detail:1', 'v1', 'pending')"
     )
     conn.commit()
 
@@ -637,11 +638,11 @@ def test_root_stays_queued_until_async_cluster_checkpoint_finishes():
         conn, import_id="root-cluster", actor_id=101, lease_generation=0
     )
     assert pending["status"] == "queued"
-    assert pending["stage"] == "cluster"
+    assert pending["stage"] == "resolve"
 
     conn.execute(
         "UPDATE upload_stage_results SET status = 'succeeded' "
-        "WHERE import_id = 'root-cluster' AND stage = 'cluster'"
+        "WHERE import_id = 'root-cluster' AND stage = 'resolve'"
     )
     completed = finalize_attempt_and_aggregate_root(
         conn, import_id="root-cluster", actor_id=101, lease_generation=0
@@ -722,7 +723,8 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
     conn.execute(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
         "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
-        "VALUES ('admin-root', 201, 'k', 'h', 'share', 'interview', 'v1', '{}', '{}', 'queued')"
+        "VALUES ('admin-root', 201, 'k', 'h', 'share', 'interview', 'v1', "
+        "'{\"audit_public_import\":true,\"credential_scope\":\"global\"}', '{}', 'queued')"
     )
     conn.commit()
     monkeypatch.setattr(db_operations, "get_db_connection", lambda: conn)
@@ -769,16 +771,33 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
         (result["saved_interview_id"],),
     ).fetchone()
     queue = conn.execute(
-        "SELECT root_import_id, question_detail_id FROM analysis_queue WHERE interview_id = ?",
+        "SELECT root_import_id, question_detail_id, contribution_request_id "
+        "FROM analysis_queue WHERE interview_id = ?",
         (result["saved_interview_id"],),
     ).fetchone()
     assert detail["import_id"] == "admin-root"
     assert detail["source_ordinal"] == 7
     assert queue["root_import_id"] == "admin-root"
     assert queue["question_detail_id"] == detail["id"]
+    assert queue["contribution_request_id"] is not None
+    published = conn.execute(
+        "SELECT url, company, round, publish_status FROM interview WHERE id = ?",
+        (result["saved_interview_id"],),
+    ).fetchone()
+    assert tuple(published) == ("", "", "", "pending")
+    approval = conn.execute(
+        "SELECT status, reviewed_by, review_projection_json FROM public_contribution_requests "
+        "WHERE id = ?",
+        (queue["contribution_request_id"],),
+    ).fetchone()
+    assert approval["status"] == "approved_for_processing"
+    assert approval["reviewed_by"] == 201
+    projection = json.loads(approval["review_projection_json"])
+    assert projection["source"]["source_url"] is None
+    assert projection["source"]["company"] is None
     checkpoint = conn.execute(
         "SELECT status FROM upload_stage_results WHERE import_id = 'admin-root' "
-        "AND stage = 'cluster' AND unit_key = ?",
+        "AND stage = 'resolve' AND unit_key = ?",
         (f"detail:{detail['id']}",),
     ).fetchone()
     assert checkpoint["status"] == "pending"

@@ -163,7 +163,8 @@ def test_shared_upload_creates_submit_job_only_after_both_preflights_succeed():
         successful_scopes = conn.execute(
             "SELECT COUNT(DISTINCT json_extract(p.payload, '$.credential_scope')) "
             "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
-            "JOIN upload_stage_results s ON s.job_id = j.id AND s.stage = 'preflight' "
+            "JOIN upload_stage_results s ON s.job_id = j.id "
+            "AND s.stage = 'credential_preflight' "
             "AND s.status = 'succeeded' WHERE j.root_import_id = ?",
             (result["import_id"],),
         ).fetchone()[0]
@@ -213,7 +214,8 @@ def test_preflight_success_marks_stage_and_keeps_extract_dispatchable():
     conn.commit()
     assert outcome.status == "ok"
     stage = conn.execute(
-        "SELECT * FROM upload_stage_results WHERE import_id = ? AND stage = 'preflight'",
+        "SELECT * FROM upload_stage_results WHERE import_id = ? "
+        "AND stage = 'credential_preflight'",
         (import_id,),
     ).fetchone()
     assert stage is not None and stage["status"] == "succeeded"
@@ -300,7 +302,7 @@ def test_preflight_provider_down_uses_upstream_unavailable():
     assert outcome.error_code == "UPSTREAM_UNAVAILABLE"
     stage = conn.execute(
         "SELECT status, error_code FROM upload_stage_results "
-        "WHERE import_id = ? AND stage = 'preflight'",
+        "WHERE import_id = ? AND stage = 'credential_preflight'",
         (import_id,),
     ).fetchone()
     assert stage["status"] == "failed"
@@ -427,7 +429,7 @@ def test_preflight_success_writes_llm_accounting_with_fingerprint():
     ).fetchall()
     assert len(calls) == 1, "预检必须登记一次独立调用记账"
     call = calls[0]
-    assert call["stage"] == "preflight"
+    assert call["stage"] == "credential_preflight"
     assert call["status"] in ("reserved", "succeeded")
     assert call["provider"]
     assert call["model"]
@@ -436,7 +438,7 @@ def test_preflight_success_writes_llm_accounting_with_fingerprint():
     # 阶段结果保留指纹（不发 Key/认证头）
     stage = conn.execute(
         "SELECT result_json FROM upload_stage_results "
-        "WHERE import_id = ? AND stage = 'preflight'",
+        "WHERE import_id = ? AND stage = 'credential_preflight'",
         (root_import_id,),
     ).fetchone()
     stored = json.loads(stage["result_json"])
@@ -477,7 +479,7 @@ def test_preflight_blocked_writes_failed_accounting_ledger():
 
     calls = conn.execute(
         "SELECT status, error_code FROM upload_llm_calls "
-        "WHERE stage = 'preflight'"
+        "WHERE stage = 'credential_preflight'"
     ).fetchall()
     assert len(calls) == 1, "失败的预检也必须记账（物理调用确实发生了）"
     assert calls[0]["status"] == "failed"

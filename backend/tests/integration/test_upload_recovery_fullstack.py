@@ -177,10 +177,11 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
         "SELECT * FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
         (import_id,),
     ).fetchone()
-    submit_job = conn.execute(
-        "SELECT * FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+    assert preflight is not None
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
         (import_id,),
-    ).fetchone()
+    ).fetchone()[0] == 0, "业务 job 只能在凭据预检通过后创建"
 
     # 2) 真实预检 worker（probe stub）
     from app.services.credential_preflight import run_credential_preflight
@@ -196,6 +197,11 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
     )
     conn.commit()
     assert outcome.status == "ok"
+    submit_job = conn.execute(
+        "SELECT * FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (import_id,),
+    ).fetchone()
+    assert submit_job is not None
 
     # 3) 真实 worker 执行（stub LLM/graph 节点仍为生产代码路径）
     from app.worker import submit_import_task
@@ -291,6 +297,25 @@ async def test_real_upload_to_review_to_recovery_full_chain(isolated_stack):
     restored = restore_upload(conn, actor_id=101, import_id=import_id)
     conn.commit()
     assert restored["created_attempt"] is True or restored["attempt_no"] >= 1
+    restored_preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+        "AND job_type = 'credential_preflight' AND status = 'pending'",
+        (import_id, restored["attempt_id"]),
+    ).fetchone()
+    assert restored_preflight is not None, "新恢复批次必须重新预检"
+    from app.services.credential_preflight import run_credential_preflight
+
+    outcome = run_credential_preflight(
+        conn,
+        job_id=restored_preflight["id"],
+        probe=lambda cred: {
+            "status": "ok",
+            "latency_ms": 1,
+            "provider": cred.provider,
+        },
+    )
+    conn.commit()
+    assert outcome.status == "ok"
     planned = conn.execute(
         "SELECT * FROM jobs WHERE root_import_id = ? AND status = 'pending' "
         "AND job_type = 'submit_import'",
@@ -323,6 +348,11 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
     )
     conn.commit()
     import_id = accepted["import_id"]
+    initial_attempt = conn.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ? AND status = 'active'",
+        (import_id,),
+    ).fetchone()
+    assert initial_attempt is not None
 
     # The real worker now enforces the durable preflight contract before
     # claiming this task. Run the same preflight worker against the persisted
@@ -345,6 +375,12 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
     )
     conn.commit()
     assert outcome.status == "ok"
+    submit_job = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import' "
+        "AND upload_attempt_id = ?",
+        (import_id, initial_attempt["id"]),
+    ).fetchone()
+    assert submit_job is not None
 
     def _patcher_with_counter(counter):
         return [
@@ -379,7 +415,7 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
     with ExitStack() as stack:
         for patcher in _patcher_with_counter(counter):
             stack.enter_context(patcher)
-        await submit_import_task({}, accepted["job_id"])
+        await submit_import_task({}, submit_job["id"])
     conn.commit()
     assert counter.get("llm", 0) >= 1, "第一次执行必须调用提取 LLM"
     assert counter.get("tag", 0) >= 1, "第一次执行必须调用打标"
@@ -402,7 +438,30 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
     conn.commit()
     restored = restore_upload(conn, actor_id=101, import_id=import_id)
     conn.commit()
-    new_job_id = restored["planned_job_id"]
+    restored_preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+        "AND job_type = 'credential_preflight'",
+        (import_id, restored["attempt_id"]),
+    ).fetchone()
+    assert restored_preflight is not None
+    outcome = run_credential_preflight(
+        conn,
+        job_id=restored_preflight["id"],
+        probe=lambda cred: {
+            "status": "ok",
+            "latency_ms": 1,
+            "provider": cred.provider,
+        },
+    )
+    conn.commit()
+    assert outcome.status == "ok"
+    new_submit_job = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+        "AND job_type = 'submit_import'",
+        (import_id, restored["attempt_id"]),
+    ).fetchone()
+    assert new_submit_job is not None
+    new_job_id = int(new_submit_job["id"])
 
     before_llm = counter.get("llm", 0)
     before_tag = counter.get("tag", 0)

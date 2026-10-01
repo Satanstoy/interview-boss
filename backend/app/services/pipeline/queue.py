@@ -156,7 +156,7 @@ def enqueue_questions(
             conn.execute(
                 "INSERT INTO upload_stage_results (import_id, stage, unit_key, "
                 "input_version, pipeline_version, status) "
-                "VALUES (?, 'cluster', ?, 1, 'upload-pipeline-v1', 'pending') "
+                "VALUES (?, 'resolve', ?, 1, 'upload-pipeline-v1', 'pending') "
                 "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
                 "status = CASE WHEN upload_stage_results.status IN ('failed','needs_action') "
                 "THEN 'pending' ELSE upload_stage_results.status END, "
@@ -190,33 +190,72 @@ def get_processing_count() -> int:
     return row["c"]
 
 
-def _recover_stuck_processing():
+def _assert_queue_write_fences(conn, job_fence, scope_fence):
+    if job_fence is not None:
+        from app.services.job_lifecycle import assert_job_fence
+
+        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+    if scope_fence is not None:
+        from app.services.upload_scope_leases import assert_upload_scope_lease
+
+        assert_upload_scope_lease(
+            conn,
+            scope_fence[0],
+            holder_token=scope_fence[1],
+            generation=int(scope_fence[2]),
+        )
+
+
+def _recover_stuck_processing(
+    *, job_fence=None, scope_fence=None, root_import_id: str | None = None
+):
     conn = get_db_connection()
-    # contracts §2.5：processing 行按租约回收（locked_until 过期）；
-    # 兼容旧数据：locked_until IS NULL 的“老式 processing 行”按 created_at
-    # 超时兜底回收（不无限悬挂）。created_at 早但租约仍有效的行绝不误伤。
-    queue_columns = {
-        row[1]
-        for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
-    }
-    returning = "root_import_id, question_detail_id" if "root_import_id" in queue_columns else "NULL AS root_import_id, question_detail_id"
-    recovered = conn.execute(
-        "UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
-        "WHERE status = 'processing' AND ("
-        "  (locked_until IS NOT NULL AND locked_until < CURRENT_TIMESTAMP) "
-        "  OR (locked_until IS NULL AND created_at < datetime('now', ?))"
-        f") RETURNING {returning}",
-        (f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",),
-    ).fetchall()
-    for row in recovered:
-        if row["root_import_id"]:
-            conn.execute(
-                "UPDATE upload_stage_results SET status = 'pending', "
-                "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
-                "AND stage = 'cluster' AND unit_key = ? AND status = 'running'",
-                (row["root_import_id"], f"detail:{row['question_detail_id']}"),
-            )
-    conn.commit()
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        _assert_queue_write_fences(conn, job_fence, scope_fence)
+        # contracts §2.5：processing 行按租约回收（locked_until 过期）；
+        # 兼容旧数据：locked_until IS NULL 的“老式 processing 行”按 created_at
+        # 超时兜底回收（不无限悬挂）。created_at 早但租约仍有效的行绝不误伤。
+        queue_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+        }
+        if root_import_id is not None and "root_import_id" not in queue_columns:
+            if owns_transaction:
+                conn.commit()
+            return
+        returning = (
+            "root_import_id, question_detail_id"
+            if "root_import_id" in queue_columns
+            else "NULL AS root_import_id, question_detail_id"
+        )
+        root_filter = " AND root_import_id = ?" if root_import_id is not None else ""
+        params = []
+        if root_import_id is not None:
+            params.append(str(root_import_id))
+        recovered = conn.execute(
+            "UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
+            "WHERE status = 'processing'" + root_filter + " AND ("
+            "  (locked_until IS NOT NULL AND locked_until < CURRENT_TIMESTAMP) "
+            "  OR (locked_until IS NULL AND created_at < datetime('now', ?))"
+            f") RETURNING {returning}",
+            [*params, f"-{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes"],
+        ).fetchall()
+        for row in recovered:
+            if row["root_import_id"]:
+                conn.execute(
+                    "UPDATE upload_stage_results SET status = 'pending', "
+                    "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
+                    "AND stage IN ('cluster','resolve') AND unit_key = ? AND status = 'running'",
+                    (row["root_import_id"], f"detail:{row['question_detail_id']}"),
+                )
+        conn.commit()
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        raise
 
 
 def should_trigger_clustering(batch_size: int = BATCH_SIZE) -> bool:
@@ -232,6 +271,8 @@ def dequeue_batch(
     batch_size: int = BATCH_SIZE,
     owner_id=_ANY_OWNER,
     root_import_id: str | None = None,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
 ) -> List[Dict]:
     """原子取出一批 pending 任务并标记为 processing（防并发重复取出）。
 
@@ -239,7 +280,11 @@ def dequeue_batch(
     user_id for personal). This guarantees ``cluster_batch`` never mixes
     personal and public questions in the same batch.
     """
-    _recover_stuck_processing()
+    _recover_stuck_processing(
+        job_fence=job_fence,
+        scope_fence=scope_fence,
+        root_import_id=root_import_id,
+    )
     conn = get_db_connection()
     cursor = conn.cursor()
     queue_columns = {
@@ -264,8 +309,9 @@ def dequeue_batch(
         else:
             root_filter = " AND aq.root_import_id = ?"
             root_params.append(str(root_import_id))
-    cursor.execute("BEGIN")
+    cursor.execute("BEGIN IMMEDIATE")
     try:
+        _assert_queue_write_fences(conn, job_fence, scope_fence)
         # Pick the owner_id bucket with the most pending items.
         # NULL owner_id (public) gets priority when tied.
         bucket_sql = (
@@ -321,7 +367,7 @@ def dequeue_batch(
                 cursor.execute(
                     "UPDATE upload_stage_results SET status = 'running', "
                     "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
-                    "AND stage = 'cluster' AND unit_key = ? AND status = 'pending'",
+                    "AND stage IN ('cluster','resolve') AND unit_key = ? AND status = 'pending'",
                     (row["root_import_id"], f"detail:{row['qd_id']}"),
                 )
         conn.commit()
@@ -357,51 +403,79 @@ def dequeue_batch(
     return result
 
 
-def mark_batch_done(queue_ids: List[int]):
+def mark_batch_done(
+    queue_ids: List[int],
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
     if not queue_ids:
         return
     conn = get_db_connection()
     placeholders = ",".join("?" * len(queue_ids))
-    conn.execute(
-        f"UPDATE analysis_queue SET status = 'done', processed_at = CURRENT_TIMESTAMP, "
-        f"locked_until = NULL "
-        f"WHERE id IN ({placeholders})",
-        queue_ids,
-    )
-    conn.commit()
-
-
-def mark_batch_failed(queue_ids: List[int]):
-    if not queue_ids:
-        return
-    conn = get_db_connection()
-    placeholders = ",".join("?" * len(queue_ids))
-    queue_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
-    }
-    roots = (
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        _assert_queue_write_fences(conn, job_fence, scope_fence)
         conn.execute(
-            f"SELECT root_import_id, question_detail_id FROM analysis_queue "
+            f"UPDATE analysis_queue SET status = 'done', processed_at = CURRENT_TIMESTAMP, "
+            f"locked_until = NULL "
             f"WHERE id IN ({placeholders})",
             queue_ids,
-        ).fetchall()
-        if "root_import_id" in queue_columns
-        else []
-    )
-    conn.execute(
-        f"UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
-        f"WHERE id IN ({placeholders})",
-        queue_ids,
-    )
-    for row in roots:
-        if row["root_import_id"]:
+        )
+        conn.commit()
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        raise
+
+
+def mark_batch_failed(
+    queue_ids: List[int],
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
+    if not queue_ids:
+        return
+    conn = get_db_connection()
+    placeholders = ",".join("?" * len(queue_ids))
+    owns_transaction = not conn.in_transaction
+    if owns_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        _assert_queue_write_fences(conn, job_fence, scope_fence)
+        queue_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info('analysis_queue')").fetchall()
+        }
+        roots = (
             conn.execute(
-                "UPDATE upload_stage_results SET status = 'pending', "
-                "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
-                "AND stage = 'cluster' AND unit_key = ? AND status = 'running'",
-                (row["root_import_id"], f"detail:{row['question_detail_id']}"),
-            )
-    conn.commit()
+                f"SELECT root_import_id, question_detail_id FROM analysis_queue "
+                f"WHERE id IN ({placeholders})",
+                queue_ids,
+            ).fetchall()
+            if "root_import_id" in queue_columns
+            else []
+        )
+        conn.execute(
+            f"UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
+            f"WHERE id IN ({placeholders})",
+            queue_ids,
+        )
+        for row in roots:
+            if row["root_import_id"]:
+                conn.execute(
+                    "UPDATE upload_stage_results SET status = 'pending', "
+                    "updated_at = CURRENT_TIMESTAMP WHERE import_id = ? "
+                    "AND stage IN ('cluster','resolve') AND unit_key = ? AND status = 'running'",
+                    (row["root_import_id"], f"detail:{row['question_detail_id']}"),
+                )
+        conn.commit()
+    except Exception:
+        if owns_transaction:
+            conn.rollback()
+        raise
 
 
 # ──────────────────────────────────────────────────────────────

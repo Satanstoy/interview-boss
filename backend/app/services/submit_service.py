@@ -68,6 +68,7 @@ async def background_generate_answer(
     skip_search: bool = False,
     llm_scope: str = "user",
     search_scope: str = "user",
+    job_fence: tuple[int, int] | None = None,
 ):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
@@ -109,11 +110,21 @@ async def background_generate_answer(
 
         def _update():
             with get_db_connection() as conn:
-                conn.execute(
-                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (answer, sources_json(search_sources), question_id),
-                )
-                conn.commit()
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if job_fence is not None:
+                        from app.services.job_lifecycle import assert_job_fence
+
+                        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+                    conn.execute(
+                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (answer, sources_json(search_sources), question_id),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
         await run_db(_update)
         logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
@@ -128,8 +139,14 @@ async def background_generate_answer(
             with get_db_connection() as conn:
                 # 生成失败不能覆盖已有的有效参考答案；只有原本没有答案的题目
                 # 才写入失败占位符，避免一次外部接口超时造成数据丢失。
-                conn.execute(
-                    """
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if job_fence is not None:
+                        from app.services.job_lifecycle import assert_job_fence
+
+                        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+                    conn.execute(
+                        """
                     UPDATE question_bank
                     SET ai_answer = CASE
                         WHEN ai_answer IS NULL OR TRIM(ai_answer) = ''
@@ -139,9 +156,12 @@ async def background_generate_answer(
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (question_id,),
-                )
-                conn.commit()
+                        (question_id,),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
         try:
             await run_db(_mark_failed)
         except Exception:

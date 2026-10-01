@@ -557,6 +557,12 @@ async def credential_preflight_task(ctx, job_id: int):
         "credential",
         outcome.status,
     )
+    if outcome.status == "ok":
+        # 预检在上面的事务中创建首个业务 job。立刻尝试持久化 handoff，
+        # 避免新上传只能等待周期 dispatcher；投递失败仍可由 cron 补偿。
+        from app.worker_scheduled import scheduled_submit_job_dispatch_task
+
+        await scheduled_submit_job_dispatch_task(ctx)
     return {"job_id": job_id, "status": outcome.status, "error_code": outcome.error_code}
 
 
@@ -674,7 +680,13 @@ async def submit_import_task(ctx, job_id: int):
 
     def _complete(result: str | None = None):
         with get_db_connection() as conn:
-            completed = complete_job(conn, job_id, worker_id, result=result)
+            completed = complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=result,
+                lease_generation=lease_generation,
+            )
             conn.commit()
             return completed
 
@@ -686,6 +698,7 @@ async def submit_import_task(ctx, job_id: int):
                 worker_id,
                 error,
                 max_attempts=0 if terminal else 3,
+                lease_generation=lease_generation,
             )
             conn.commit()
             return outcome
@@ -749,7 +762,7 @@ async def submit_import_task(ctx, job_id: int):
                 with get_db_connection() as conn:
                     extract_ckpt = conn.execute(
                         "SELECT result_json FROM upload_stage_results "
-                        "WHERE import_id = ? AND stage IN ('extract','fill','match','persist') "
+                        "WHERE import_id = ? AND stage IN ('extract','fill') "
                         "AND status = 'succeeded' ORDER BY id DESC LIMIT 1",
                         (root_import_id,),
                     ).fetchone()
@@ -866,6 +879,9 @@ async def submit_import_task(ctx, job_id: int):
 
         def _update_progress(phase, message=""):
             idx = phase_index.get(phase, 0)
+            from app.services.upload_stage_names import checkpoint_for_upload_phase
+
+            durable_stage, unit_key = checkpoint_for_upload_phase(phase)
             with get_db_connection() as conn:
                 if not touch_job(
                     conn,
@@ -875,6 +891,7 @@ async def submit_import_task(ctx, job_id: int):
                     progress_total=len(PHASES),
                     progress_message=message,
                     progress_phase=phase,
+                    lease_generation=lease_generation,
                 ):
                     raise RuntimeError(f"上传任务 lease 已失效: job_id={job_id}")
                 # R03：execution 进度持久化进阶段检查点（幂等 UNIQUE）
@@ -884,7 +901,7 @@ async def submit_import_task(ctx, job_id: int):
                         "  import_id, stage, unit_key, input_version, pipeline_version, "
                         "  status, job_id"
                         ") VALUES (?, ?, ?, 1, 'upload-pipeline-v1', 'running', ?)",
-                        (root_import_id, phase, f"{phase}:running", job_id),
+                        (root_import_id, durable_stage, unit_key, job_id),
                     )
                 conn.commit()
 
@@ -1063,7 +1080,9 @@ async def submit_import_task(ctx, job_id: int):
                         # AC-006：匹配模型失败 → match 阶段标记 failed（成果
                         # 保留 → 根 partial_failed，失败步骤可重试），其余
                         # 阶段照常 succeeded。
-                        if match_failed and stage_row["stage"] in ("match", "save"):
+                        if match_failed and stage_row["stage"] in (
+                            "resolve", "persist", "match", "save"
+                        ):
                             conn.execute(
                                 "UPDATE upload_stage_results SET status = 'failed', "
                                 "error_code = 'MATCH_FAILED', updated_at = CURRENT_TIMESTAMP "
@@ -1079,7 +1098,7 @@ async def submit_import_task(ctx, job_id: int):
                         # F08：extract/tag 阶段把完整结果（含逐题数据）写进
                         # 检查点，恢复时可复用不重跑 LLM。阶段名以 PHASES
                         # （extract/fill/tag/match/save/cluster）为准。
-                        if stage_row["stage"] in ("extract", "fill", "match"):
+                        if stage_row["stage"] in ("extract", "fill"):
                             stage_payload = json.dumps(
                                 {
                                     "doc_type": final_state_values.get("doc_type", ""),
@@ -1248,10 +1267,13 @@ async def _generate_answer_job(ctx, job_id: int):
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
         ANSWER_GENERATION_JOB_TYPE,
+        JobFenceError,
         claim_job,
+        claim_job_with_generation,
         complete_job,
         default_worker_id,
         fail_job,
+        heartbeat_job,
     )
 
     worker_id = default_worker_id()
@@ -1275,12 +1297,25 @@ async def _generate_answer_job(ctx, job_id: int):
 
     def _claim_and_load():
         with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=ANSWER_GENERATION_JOB_TYPE,
-            )
+            candidate = conn.execute(
+                "SELECT root_import_id FROM jobs WHERE id = ? AND job_type = ?",
+                (job_id, ANSWER_GENERATION_JOB_TYPE),
+            ).fetchone()
+            if candidate and candidate["root_import_id"]:
+                task = claim_job_with_generation(
+                    conn,
+                    job_id,
+                    worker_id=worker_id,
+                    job_type=ANSWER_GENERATION_JOB_TYPE,
+                    lease_seconds=120,
+                )
+            else:
+                task = claim_job(
+                    conn,
+                    job_id,
+                    worker_id,
+                    job_type=ANSWER_GENERATION_JOB_TYPE,
+                )
             if not task:
                 return None, None
             payload_row = conn.execute(
@@ -1296,48 +1331,141 @@ async def _generate_answer_job(ctx, job_id: int):
         logger.info("答案任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
 
+    heartbeat_stop = asyncio.Event()
+    heartbeat_lost = asyncio.Event()
+    lease_heartbeat_task = None
+    if claimed.get("root_import_id"):
+        generation = int(claimed["lease_generation"])
+
+        def _heartbeat_answer_job():
+            with get_db_connection() as conn:
+                alive = heartbeat_job(conn, job_id, generation, lease_seconds=120)
+                conn.commit()
+                return alive
+
+        async def _renew_answer_job():
+            while not heartbeat_stop.is_set():
+                try:
+                    await asyncio.wait_for(heartbeat_stop.wait(), timeout=30)
+                    continue
+                except asyncio.TimeoutError:
+                    pass
+                if not await asyncio.to_thread(_heartbeat_answer_job):
+                    heartbeat_lost.set()
+                    return
+
+        lease_heartbeat_task = asyncio.create_task(_renew_answer_job())
+
+    async def _stop_answer_heartbeat():
+        heartbeat_stop.set()
+        if lease_heartbeat_task is not None:
+            lease_heartbeat_task.cancel()
+            await asyncio.gather(lease_heartbeat_task, return_exceptions=True)
+
     def _finish(result=None):
         with get_db_connection() as conn:
-            completed = complete_job(conn, job_id, worker_id, result=result)
-            if completed:
+            if claimed.get("root_import_id"):
+                conn.execute("BEGIN IMMEDIATE")
+                from app.services.job_lifecycle import assert_job_fence
+
+                assert_job_fence(conn, job_id, int(claimed["lease_generation"]))
                 _sync_upload_root(conn, "succeeded", result_json=result)
+            completed = complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=result,
+                lease_generation=(
+                    int(claimed["lease_generation"])
+                    if claimed.get("root_import_id")
+                    else None
+                ),
+            )
+            if completed:
+                if not claimed.get("root_import_id"):
+                    _sync_upload_root(conn, "succeeded", result_json=result)
             conn.commit()
             return completed
 
     def _fail(error: str, terminal: bool = False):
         with get_db_connection() as conn:
+            if claimed.get("root_import_id"):
+                conn.execute("BEGIN IMMEDIATE")
+                from app.services.job_lifecycle import assert_job_fence
+
+                assert_job_fence(conn, job_id, int(claimed["lease_generation"]))
             outcome = fail_job(
                 conn,
                 job_id,
                 worker_id,
                 error,
                 max_attempts=0 if terminal else 3,
+                lease_generation=(
+                    int(claimed["lease_generation"])
+                    if claimed.get("root_import_id")
+                    else None
+                ),
             )
-            _sync_upload_root(
-                conn,
-                "failed" if outcome["status"] == "failed" else "pending",
-                error_code="ANSWER_GENERATION_FAILED" if outcome["status"] == "failed" else None,
-            )
+            if outcome["status"] != "stale":
+                _sync_upload_root(
+                    conn,
+                    "failed" if outcome["status"] == "failed" else "pending",
+                    error_code="ANSWER_GENERATION_FAILED" if outcome["status"] == "failed" else None,
+                )
             conn.commit()
             return outcome
 
     if not payload:
-        _fail("答案任务数据不存在", terminal=True)
-        return {"status": "failed", "job_id": job_id}
+        try:
+            outcome = _fail("答案任务数据不存在", terminal=True)
+        except JobFenceError:
+            outcome = {"status": "stale"}
+        await _stop_answer_heartbeat()
+        return {"status": outcome["status"], "job_id": job_id}
 
     try:
         from app.services.submit_service import background_generate_answer
+        root_import_id = claimed.get("root_import_id")
+        if root_import_id:
+            from app.services.upload_llm_accounting import upload_llm_context
 
-        answer_result = await background_generate_answer(
-            int(payload["question_id"]),
-            payload["question_text"],
-            payload.get("user_id"),
-            raise_on_error=True,
-            skip_search=bool(payload.get("skip_search", False)),
-            llm_scope=payload.get("llm_scope", "user"),
-            search_scope=payload.get("search_scope", "user"),
-        )
-        _finish(
+            with upload_llm_context(
+                root_import_id=str(root_import_id),
+                stage="answer",
+                unit_key=f"question:{int(payload['question_id'])}",
+                credential_scope=payload.get("llm_scope", "user"),
+                user_id=payload.get("user_id"),
+            ):
+                answer_result = await background_generate_answer(
+                    int(payload["question_id"]),
+                    payload["question_text"],
+                    payload.get("user_id"),
+                    raise_on_error=True,
+                    skip_search=bool(payload.get("skip_search", False)),
+                    llm_scope=payload.get("llm_scope", "user"),
+                    search_scope=payload.get("search_scope", "user"),
+                    job_fence=(
+                        job_id,
+                        int(claimed["lease_generation"]),
+                    ),
+                )
+        else:
+            answer_result = await background_generate_answer(
+                int(payload["question_id"]),
+                payload["question_text"],
+                payload.get("user_id"),
+                raise_on_error=True,
+                skip_search=bool(payload.get("skip_search", False)),
+                llm_scope=payload.get("llm_scope", "user"),
+                search_scope=payload.get("search_scope", "user"),
+            )
+        if heartbeat_lost.is_set():
+            raise JobFenceError(
+                "答案生成期间job lease心跳失败",
+                job_id=job_id,
+                generation=claimed.get("lease_generation"),
+            )
+        completed = _finish(
             json.dumps(
                 {
                     "question_id": int(payload["question_id"]),
@@ -1346,13 +1474,24 @@ async def _generate_answer_job(ctx, job_id: int):
                 ensure_ascii=False,
             )
         )
+        if not completed:
+            raise JobFenceError(
+                "答案任务租约失效，不能完成任务",
+                job_id=job_id,
+                generation=claimed.get("lease_generation"),
+            )
+        await _stop_answer_heartbeat()
         if payload.get("parent_job_id"):
             await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
         return {"status": "completed", "job_id": job_id}
     except Exception as exc:
         logger.exception("答案生成任务失败: job_id=%s", job_id)
-        outcome = _fail(str(exc)[:500])
-        if payload.get("parent_job_id"):
+        try:
+            outcome = _fail(str(exc)[:500])
+        except JobFenceError:
+            outcome = {"status": "stale"}
+        await _stop_answer_heartbeat()
+        if payload.get("parent_job_id") and outcome["status"] != "stale":
             await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
         return {"status": outcome["status"], "job_id": job_id}
 
