@@ -31,7 +31,7 @@ START → recognize → extract
 | `classify_node` | `classify.py` | LLM 分类打标（cat1/cat2/tags/difficulty） |
 | `retry_extract_node` / `retry_classify_node` | `extract.py` / `classify.py` | 质量不足时重试 |
 | `match_and_persist_personal_node` | `persist_personal.py` | 个人题库匹配、入库、生成 answer_tasks |
-| `jd_persist_node` / `error_empty_node` | `persist_personal.py` | JD 直接入库；空题错误结束 |
+| `jd_persist_node` / `error_empty_node` | `persist_personal.py` | JD 直接入库；空题错误结束。**target 判定必须与 `graph.after_classify` 同词表**：只有 `target == "public"` 是公共，其余（`personal`/worker 传的 `write_scope="private"`）都算私人；worker 在唯一入口把 `write_scope` 规范化成 `personal/public`，节点不得要求恰好等于 `"personal"`（否则私人 JD 会落成 `owner_id=NULL/status='pending'` 的公共待审数据） |
 | `persist_public_node` | `persist_public.py` | 公共题库入库 |
 | `cluster_public_node` | `persist_public.py` | 公共题库入库后的 LLM 聚类去重（**异步化**：调度后台攒批任务，不再同步 await；SSE 到 save 即完成） |
 

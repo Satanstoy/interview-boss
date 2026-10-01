@@ -513,6 +513,8 @@ def materialize_public_interview_from_projection(
         "season": source.get("season") or "",
         "owner_id": None,
         "status": "approved",
+        # AC-015/README §5.3：审批通过 ≠ published，公共处理落定前不可被公开读取
+        "publish_status": "pending",
         "url_signature": url_signature,
         "job_position": job_position,
     }
@@ -1135,6 +1137,22 @@ def refresh_public_interview_projection(conn, *, public_interview_id: int) -> di
         "UPDATE interview SET questions_list = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (questions_list, public_interview_id),
     )
+    # 发布门槛（AC-015/README §5.3）：该申请的公共子项全部落定后才公开面经行。
+    # 仍有 queued/processing 子项时保持 pending；同 URL 复用的既有面经不降级。
+    in_flight = conn.execute(
+        "SELECT COUNT(*) FROM public_contribution_items i "
+        "JOIN public_contribution_requests r ON r.id = i.request_id "
+        "WHERE r.public_interview_id = ? "
+        "AND i.status IN ('queued', 'processing', 'approved_for_processing')",
+        (public_interview_id,),
+    ).fetchone()[0]
+    if not in_flight:
+        conn.execute(
+            "UPDATE interview SET publish_status = 'published', "
+            "updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND publish_status != 'published'",
+            (public_interview_id,),
+        )
     return {
         "public_interview_id": public_interview_id,
         "published_details": len(rows),

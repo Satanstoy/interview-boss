@@ -1,8 +1,8 @@
 # InterviewBoss SQLite Schema
 
-> Generated: 2026-09-29
-> Source migration commit: aa59b461
-> Latest migration: 122 (upload_resolution)
+> Generated: 2026-10-01
+> Source migration commit: unknown
+> Latest migration: 123 (public_publish_gate)
 > foreign_key_check: 0
 > Source of truth: `backend/app/db/migrations/` applied to a fresh in-memory SQLite database.
 > Runtime: SQLite WAL with `PRAGMA foreign_keys=ON`; soft-deleted rows use `deleted_at IS NULL` filters where documented by the owning service.
@@ -130,6 +130,7 @@
 | 120 | `clear_db_confirmations` | yes |
 | 121 | `upload_recovery_core` | yes |
 | 122 | `upload_resolution` | yes |
+| 123 | `public_publish_gate` | yes |
 
 ## Tables (94)
 
@@ -304,7 +305,7 @@
 - Indexes: `idx_harness_releases_target_status` (target_type, status, id); `sqlite_autoindex_harness_releases_1` UNIQUE (harness_key, version)
 
 ### `interview`
-- Columns: `id`:INTEGER, `url`:TEXT, `company`:TEXT, `round`:TEXT, `focus`:TEXT, `questions_list`:TEXT, `difficulty`:TEXT, `created_at`:TIMESTAMP, `season`:TEXT, `owner_id`:INTEGER, `status`:TEXT, `job_position`:TEXT, `url_signature`:TEXT, `updated_at`:TIMESTAMP, `deleted_at`:TIMESTAMP, `analysis_status`:TEXT, `analysis_stage`:TEXT, `analysis_result`:TEXT, `analysis_updated_at`:TIMESTAMP
+- Columns: `id`:INTEGER, `url`:TEXT, `company`:TEXT, `round`:TEXT, `focus`:TEXT, `questions_list`:TEXT, `difficulty`:TEXT, `created_at`:TIMESTAMP, `season`:TEXT, `owner_id`:INTEGER, `status`:TEXT, `job_position`:TEXT, `url_signature`:TEXT, `updated_at`:TIMESTAMP, `deleted_at`:TIMESTAMP, `analysis_status`:TEXT, `analysis_stage`:TEXT, `analysis_result`:TEXT, `analysis_updated_at`:TIMESTAMP, `publish_status`:TEXT
 - Foreign keys: `owner_id` -> `users`.`id` (NO ACTION)
 - Indexes: `idx_interview_owner_status` (owner_id, status); `idx_interview_url_owner_deleted` (url, owner_id, deleted_at); `idx_interview_url_sig` (url_signature); `idx_interview_url_unique` UNIQUE partial (url, owner_id); `idx_interview_url` (url)
 

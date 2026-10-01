@@ -214,6 +214,8 @@ services:
       # frontend-contract 结构测试需要读取 frontend/src 源码(经 /app/frontend 相对路径)
       - ./frontend:/app/frontend:ro
       - ./scripts:/app/scripts:ro
+      # schema 文档新鲜度测试需要读取仓库 docs/（否则容器只看到镜像内旧副本）
+      - ./docs:/app/docs:ro
       - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network

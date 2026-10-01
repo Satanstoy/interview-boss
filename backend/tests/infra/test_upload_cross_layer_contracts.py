@@ -135,9 +135,10 @@ def test_task_center_reads_an_interview_id_field_the_snapshot_provides(
     ).read_text(encoding="utf-8")
     body = re.search(r"async function openResult\(task\)\s*\{(?P<body>.*?)\n\}", source, re.S)
     assert body, "openResult 结构变化，契约测试需要同步更新"
-    read = re.search(r"task((?:\.[A-Za-z_]\w*)+)", body.group("body"))
+    read = re.search(r"task((?:\??\.[A-Za-z_]\w*)+)", body.group("body"))
     assert read, "openResult 未读取任务字段"
-    keys = [part for part in read.group(1).split(".") if part]
+    # 支持可选链写法（task.result?.interview_id）
+    keys = [part.rstrip("?") for part in read.group(1).split(".") if part and part != "?"]
 
     _insert_completed_root(test_db, interview_id=555)
 

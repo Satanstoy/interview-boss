@@ -122,3 +122,27 @@ def _migration_122_upload_resolution(conn):
     )
 
     logger.info("migration_122: upload resolution and publication columns are ready")
+
+
+def _migration_123_public_publish_gate(conn):
+    """migration 123：公共面经发布门槛（AC-015 / README §5.3）。
+
+    审批通过不等于 published：公共贡献物化出的 ``interview`` 在处理完成前
+    不能被普通用户的面经/统计/来源接口查询出来。旧数据与私人面经默认
+    ``published``，只有新物化的公共申请从 ``pending`` 开始。
+    """
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('interview')").fetchall()
+    }
+    if "publish_status" not in columns:
+        conn.execute(
+            "ALTER TABLE interview ADD COLUMN publish_status TEXT NOT NULL "
+            "DEFAULT 'published'"
+        )
+    # 存量行（含历史公共面经）一律视为已发布，不改变既有可见性
+    conn.execute(
+        "UPDATE interview SET publish_status = 'published' "
+        "WHERE publish_status IS NULL OR publish_status = ''"
+    )
+    logger.info("migration_123: public publish gate is ready")

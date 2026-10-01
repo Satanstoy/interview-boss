@@ -182,7 +182,7 @@ async def get_analytics(user: dict = Depends(get_current_user)):
 
             # 过滤 questions_detail 数据（通过关联 interview 表，all 口径）
             qd_position_filter = "(qd.job_position = ? OR qd.job_position = '' OR qd.job_position IS NULL)"
-            qd_where = f"WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?) AND {qd_position_filter}"
+            qd_where = f"WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?) AND (iv.owner_id IS NOT NULL OR iv.publish_status = 'published') AND {qd_position_filter}"
             qd_params = (uid, current_pos)
 
             for r in conn.execute(

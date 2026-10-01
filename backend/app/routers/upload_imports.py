@@ -52,28 +52,16 @@ def _error_dto(code, message, *, credential_scope="user", is_admin=False):
 
 
 def _stage_counts(conn, import_id: str) -> dict:
-    """按实际问题单元统计根任务（R04/AC-013：逐题口径，非检查点行数）。
+    """按实际问题结果统计根任务，绝不把阶段检查点行数当题目数。
 
     - extracted/retained/excluded/needs_review 来自 extract 阶段
       result_json 的「提取计数」（AC-019 守恒计数，节点已持久化）；
     - resolved 是逐题当前 resolution（matched/created）成功数；
-    - answered/failed/total 维持既有聚合语义。
+    - answered/failed 来自逐题 answer 检查点与旧版答案子 job；
+    - total 只有提取计数可用时才有值。
     """
 
     import json as _json
-
-    rows = conn.execute(
-        "SELECT stage, status, COUNT(*) AS c FROM upload_stage_results "
-        "WHERE import_id = ? GROUP BY stage, status",
-        (import_id,),
-    ).fetchall()
-    total = sum(int(r["c"]) for r in rows)
-    answered = sum(
-        int(r["c"])
-        for r in rows
-        if r["status"] == "succeeded" and r["stage"] not in ("extract", "classify")
-    )
-    failed = sum(int(r["c"]) for r in rows if r["status"] == "failed")
 
     # extract 阶段检查点保留的守恒计数（AC-019）；无则回退 0
     extract_row = conn.execute(
@@ -83,10 +71,12 @@ def _stage_counts(conn, import_id: str) -> dict:
         (import_id,),
     ).fetchone()
     extracted = retained = excluded = needs_review = 0
+    has_extract_count = False
     if extract_row and extract_row["result_json"]:
         try:
             payload = _json.loads(extract_row["result_json"])
             counts = (payload or {}).get("提取计数") or {}
+            has_extract_count = "extracted" in counts
             extracted = int(counts.get("extracted", 0))
             retained = int(counts.get("retained", 0))
             excluded = int(counts.get("excluded", 0))
@@ -95,16 +85,74 @@ def _stage_counts(conn, import_id: str) -> dict:
             pass
 
     # resolved：逐题当前 resolution 成功数（matched/created）
-    resolved = conn.execute(
-        "SELECT COUNT(*) AS c FROM question_resolutions qr "
-        "JOIN questions_detail qd ON qd.id = qr.detail_id "
-        "WHERE qd.import_id = ? AND qr.status IN ('matched','created') "
-        "AND qr.invalidated_at IS NULL",
+    resolution_rows = conn.execute(
+        "SELECT qd.id AS detail_id, qr.canonical_id, qr.status "
+        "FROM question_resolutions qr JOIN questions_detail qd ON qd.id = qr.detail_id "
+        "WHERE qd.import_id = ? AND qr.invalidated_at IS NULL",
         (import_id,),
-    ).fetchone()["c"]
+    ).fetchall()
+    resolved = sum(1 for row in resolution_rows if row["status"] in ("matched", "created"))
+
+    answer_rows = conn.execute(
+        "SELECT unit_key, status FROM upload_stage_results "
+        "WHERE import_id = ? AND stage = 'answer'",
+        (import_id,),
+    ).fetchall()
+    answered_units = {
+        str(row["unit_key"]).removeprefix("answer:")
+        for row in answer_rows
+        if row["status"] == "succeeded" and str(row["unit_key"]).startswith("answer:")
+    }
+    failed_units = {
+        str(row["unit_key"]).removeprefix("answer:")
+        for row in answer_rows
+        if row["status"] == "failed" and str(row["unit_key"]).startswith("answer:")
+    }
+    # Pre-v2 answer jobs did not create root-bound stage rows. Resolve their
+    # parent through the durable payload so old in-flight roots remain visible.
+    legacy_answer_rows = conn.execute(
+        "SELECT json_extract(answer_payload.payload, '$.question_id') AS question_id, "
+        "answer_job.status FROM jobs AS answer_job "
+        "JOIN job_payloads AS answer_payload ON answer_payload.job_id = answer_job.id "
+        "JOIN jobs AS parent_job "
+        "ON parent_job.id = json_extract(answer_payload.payload, '$.parent_job_id') "
+        "WHERE parent_job.root_import_id = ? AND answer_job.job_type = 'generate_answer' "
+        "AND answer_job.status IN ('completed','failed')",
+        (import_id,),
+    ).fetchall()
+    for row in legacy_answer_rows:
+        unit = str(row["question_id"])
+        if row["status"] == "completed":
+            answered_units.add(unit)
+            failed_units.discard(unit)
+        elif unit not in answered_units:
+            failed_units.add(unit)
+
+    failed_resolution_units = {
+        f"detail:{row['detail_id']}"
+        for row in resolution_rows
+        if row["status"] == "failed"
+    }
+    answered = len(answered_units)
+    failed = len(failed_units | failed_resolution_units)
+
+    answer_question_ids = answered_units | failed_units
+    resolved_without_answer = sum(
+        1
+        for row in resolution_rows
+        if row["status"] in ("matched", "created")
+        and row["canonical_id"] is not None
+        and str(row["canonical_id"]) not in answer_question_ids
+    )
+    completed = answered + failed + resolved_without_answer + excluded
+    if has_extract_count:
+        completed = min(completed, extracted)
+    else:
+        completed = 0
 
     return {
-        "total": total,
+        "total": extracted if has_extract_count else None,
+        "completed": completed,
         "answered": answered,
         "failed": failed,
         "extracted": extracted,
@@ -147,7 +195,8 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
             review_status = review_row["status"]
 
     count_values = counts or {
-        "total": 0,
+        "total": None,
+        "completed": 0,
         "answered": 0,
         "failed": 0,
         "extracted": 0,
@@ -156,8 +205,33 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
         "needs_review": 0,
         "resolved": 0,
     }
-    total_done = int(count_values["total"] or 0)
-    total_denominator = max(total_done, int(row["current_attempt_no"] or 0) + 1)
+    completed_questions = int(count_values.get("completed", 0) or 0)
+    total_questions = count_values.get("total")
+    current_stage = None
+    if conn is not None:
+        active_job = conn.execute(
+            "SELECT j.job_type, j.progress_phase FROM jobs j "
+            "LEFT JOIN upload_attempts a ON a.id = j.upload_attempt_id "
+            "WHERE j.root_import_id = ? AND (a.attempt_no = ? OR j.upload_attempt_id IS NULL) "
+            "AND j.status IN ('pending','queued','running') "
+            "ORDER BY CASE j.status WHEN 'running' THEN 0 ELSE 1 END, j.id DESC LIMIT 1",
+            (row["id"], int(row["current_attempt_no"] or 0)),
+        ).fetchone()
+        if active_job:
+            if active_job["job_type"] == "credential_preflight":
+                current_stage = "preflight"
+            elif active_job["job_type"] == "cluster_batch":
+                current_stage = "cluster"
+            elif active_job["job_type"] == "submit_import":
+                current_stage = active_job["progress_phase"] or "extract"
+        if current_stage is None:
+            stage_row = conn.execute(
+                "SELECT stage FROM upload_stage_results WHERE import_id = ? "
+                "ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 "
+                "WHEN 'needs_action' THEN 2 WHEN 'failed' THEN 3 ELSE 4 END, id DESC LIMIT 1",
+                (row["id"],),
+            ).fetchone()
+            current_stage = stage_row["stage"] if stage_row else None
     snapshot = snapshot_from_parts(
         import_id=row["id"],
         revision=int(row["revision"]),
@@ -165,11 +239,11 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
         review_status=review_status,
         target_intent=row["target_intent"],
         attempt_no=int(row["current_attempt_no"]),
-        stage=row["status"] if row["status"] != "queued" else "queued",
+        stage=current_stage,
         progress={
             "unit": "questions",
-            "completed": total_done,
-            "total": total_denominator,
+            "completed": completed_questions,
+            "total": total_questions,
         },
         counts={
             "extracted": int(count_values.get("extracted", 0)),
@@ -179,11 +253,14 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
             "resolved": int(count_values.get("resolved", 0)),
             "answered": int(count_values.get("answered", 0)),
             "failed": int(count_values.get("failed", 0)),
-            "total": int(count_values.get("total", 0)),
+            "total": total_questions,
         },
         result={
+            # contracts §4.2：result 只含 interview_id/position_id/question_ids，
+            # 多传字段会被 UploadResultDTO(extra="forbid") 拒绝，导致已完成任务
+            # 的列表/详情/by-key/SSE/retry 全部 500。
             "interview_id": row["interview_id"],
-            "mode": "partial" if row["status"] == "partial_failed" else "full",
+            "position_id": row["position_id"],
         }
         if row["interview_id"] is not None
         else None,
@@ -482,7 +559,10 @@ async def retry_upload_import(import_id: str, user: dict = Depends(get_current_u
                 raise
 
             snapshot = _snapshot(
-                row, conn=conn, actor_is_admin=bool(user.get("is_admin"))
+                row,
+                counts=_stage_counts(conn, import_id),
+                conn=conn,
+                actor_is_admin=bool(user.get("is_admin")),
             )
             snapshot.update(
                 {

@@ -385,6 +385,40 @@ def _restore_sources_for_url(cursor, url: str, owner_scope=None):
 LIST_SORTS = ("created_at_desc", "created_at_asc")
 
 
+def _resolve_position_filter(conn, position_value) -> str:
+    """岗位筛选契约（R09）：接受岗位 ID 或岗位名称，统一解析为名称。
+
+    前端按 ``users.current_position_id`` 传 ID（AuthenticatedLayout →
+    useMasterBankData.fetchInterviewPage），而 ``interview.job_position`` 是
+    TEXT 名称列；服务端必须在这里做 ID→名称转换，否则正常用户的面经库为空。
+    名称形式保持向后兼容（location 接口与旧客户端）。
+    """
+
+    raw = str(position_value).strip()
+    if not raw:
+        return raw
+    if raw.isdigit():
+        row = None
+        try:
+            row = conn.execute(
+                "SELECT name FROM job_positions WHERE id = ? AND "
+                "(is_deleted = 0 OR is_deleted IS NULL)",
+                (int(raw),),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row is None:
+            try:
+                row = conn.execute(
+                    "SELECT name FROM job_positions WHERE id = ?", (int(raw),)
+                ).fetchone()
+            except Exception:
+                row = None
+        if row is not None:
+            return str(row["name"])
+    return raw
+
+
 def _visibility_where_and_params(
     conn, table_name: str, user: dict, *, scope: str = "all", season: str | None = None,
     position_id: str | None = None,
@@ -410,9 +444,14 @@ def _visibility_where_and_params(
         clauses.append("season = ?")
         params.append(season)
 
+    if table_name == "interview":
+        # 发布门槛（AC-015/README §5.3）：公共面经必须已 published；
+        # 私人面经不受影响（private 行不参与公共处理）。
+        clauses.append("(owner_id IS NOT NULL OR publish_status = 'published')")
+
     if position_id is not None:
         clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
-        params.append(position_id)
+        params.append(_resolve_position_filter(conn, position_id))
     else:
         _, current_pos = get_user_job_position(user["id"])
         clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
@@ -483,7 +522,7 @@ async def get_data(
                         (*params, page_size, offset),
                     ).fetchall()
             else:  # questions_detail
-                join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
+                join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL AND (iv.owner_id IS NOT NULL OR iv.publish_status = 'published')"
                 params = (user["id"],)
                 total = conn.execute(
                     f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.interview_id = iv.id WHERE {join_where}",
@@ -1039,12 +1078,36 @@ async def get_interview_location(
                 (*params, target["created_at"], target["created_at"], int(record_id)),
             ).fetchone()[0]
             page_size = 20
+            # R09：position_id 必须是岗位 ID（前端 switchPositionById(Number(position))
+            # 需要数字），岗位名称另放 position_name 供展示。
+            position_name = target["job_position"] or ""
+            position_id_value = None
+            if position_name:
+                try:
+                    pos_row = conn.execute(
+                        "SELECT id FROM job_positions WHERE name = ? AND "
+                        "(is_deleted = 0 OR is_deleted IS NULL)",
+                        (position_name,),
+                    ).fetchone()
+                except Exception:
+                    pos_row = None
+                if pos_row is None:
+                    try:
+                        pos_row = conn.execute(
+                            "SELECT id FROM job_positions WHERE name = ?",
+                            (position_name,),
+                        ).fetchone()
+                    except Exception:
+                        pos_row = None
+                if pos_row is not None:
+                    position_id_value = int(pos_row["id"])
             return {
                 "interview_id": int(record_id),
                 "rank": int(rank),
                 "page_size": page_size,
                 "page": int(rank) // page_size + 1,
-                "position_id": target["job_position"],
+                "position_id": position_id_value,
+                "position_name": position_name,
             }
 
     result = await run_db(_query)

@@ -7,7 +7,7 @@
  * - 结果入口：按 location 接口定位页码与高亮，不打断当前浏览；
  * - 状态更新 aria-live=polite，键盘可操作；375px/1440px 均可查看。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   isTerminalStatus,
@@ -16,6 +16,7 @@ import {
 } from '@/composables/useSubmitJobs.js'
 import { getSSE } from '@/services/http.js'
 import { fetchInterviewLocation } from '@/services/dataApi.js'
+import { currentUser } from '@/composables/useAuth.js'
 
 const router = useRouter()
 const open = ref(false)
@@ -29,6 +30,7 @@ const announcement = ref('')
 
 const PAGE_SIZE = 20
 let pollTimer = null
+let activeUserId = null
 
 const statusLabel = {
   queued: '排队中',
@@ -68,9 +70,16 @@ const hasPendingWork = computed(() =>
 )
 
 async function refresh({ silent = true } = {}) {
+  const requestedUserId = currentUser.value?.id == null ? null : String(currentUser.value.id)
+  if (!requestedUserId) {
+    tasks.value = []
+    total.value = 0
+    return
+  }
   if (!silent) loading.value = true
   try {
     const data = await loadUploadTasks({ page: page.value, pageSize: PAGE_SIZE })
+    if (requestedUserId !== String(currentUser.value?.id ?? '')) return
     tasks.value = data.items || []
     total.value = data.total || 0
     error.value = ''
@@ -85,13 +94,13 @@ async function refresh({ silent = true } = {}) {
     error.value = err?.message || '任务列表加载失败，已保留本地状态'
   } finally {
     loading.value = false
-    subscribePendingTasks()
+    if (requestedUserId === String(currentUser.value?.id ?? '')) subscribePendingTasks()
   }
 }
 
 const sseControllers = new Map()
 
-/** 非终态任务订阅快照流；EOF 后由 getSSE 退避重连（AC-010） */
+/** 非终态任务订阅快照流；网络/HTTP失败与EOF均由 getSSE退避重连（AC-010） */
 function subscribePendingTasks() {
   for (const task of tasks.value) {
     if (isTerminalStatus(task.status) || sseControllers.has(task.import_id)) continue
@@ -101,6 +110,7 @@ function subscribePendingTasks() {
       `/api/upload-imports/${encodeURIComponent(task.import_id)}/stream`,
       (event) => {
         if (!event || typeof event !== 'object') return
+        if (activeUserId !== String(currentUser.value?.id ?? '')) return
         const index = tasks.value.findIndex((item) => item.import_id === event.import_id)
         if (index < 0) return
         // 乱序 revision 不回退（AC-010）
@@ -119,10 +129,38 @@ function subscribePendingTasks() {
         },
       },
     ).catch(() => {
-      error.value = '连接中断，后台任务继续'
+      if (activeUserId === String(currentUser.value?.id ?? '')) {
+        error.value = '连接中断，后台任务继续；稍后将自动重连'
+      }
+    }).finally(() => {
+      if (sseControllers.get(task.import_id) === controller) {
+        sseControllers.delete(task.import_id)
+      }
     })
   }
 }
+
+function stopTaskStreams() {
+  for (const controller of sseControllers.values()) {
+    try { controller.abort() } catch { /* ignored */ }
+  }
+  sseControllers.clear()
+}
+
+watch(
+  () => currentUser.value?.id == null ? null : String(currentUser.value.id),
+  (nextUserId) => {
+    stopTaskStreams()
+    activeUserId = nextUserId
+    tasks.value = []
+    total.value = 0
+    page.value = 1
+    error.value = ''
+    announcement.value = ''
+    if (nextUserId) refresh({ silent: true })
+  },
+  { immediate: true, flush: 'sync' },
+)
 
 function schedulePoll() {
   if (pollTimer) clearTimeout(pollTimer)
@@ -168,7 +206,8 @@ async function onAction(task, action) {
 }
 
 async function openResult(task) {
-  const interviewId = task.interview_id
+  // contracts §4.2：interview_id 在 result 内（快照顶层没有该字段）
+  const interviewId = task.result?.interview_id
   if (!interviewId) return
   try {
     const location = await fetchInterviewLocation(interviewId, { sort: 'created_at_desc' })
@@ -187,19 +226,13 @@ async function openResult(task) {
   }
 }
 
-onMounted(async () => {
-  await refresh({ silent: true })
+onMounted(() => {
   schedulePoll()
 })
 
 onUnmounted(() => {
   if (pollTimer) clearTimeout(pollTimer)
-  for (const controller of sseControllers.values()) {
-    try {
-      controller.abort()
-    } catch { /* 忽略 */ }
-  }
-  sseControllers.clear()
+  stopTaskStreams()
 })
 </script>
 
@@ -253,6 +286,29 @@ onUnmounted(() => {
             <p v-if="task.stage" class="mt-1 text-xs text-muted-foreground">
               当前阶段：{{ task.stage }}
             </p>
+            <div v-if="task.progress" class="mt-2 space-y-1">
+              <p v-if="task.progress.total != null" class="text-xs text-muted-foreground">
+                {{ task.progress.completed || 0 }}/{{ task.progress.total }} 题已处理
+              </p>
+              <p v-else class="text-xs text-muted-foreground">正在识别题目数量</p>
+              <div
+                v-if="task.progress.total != null && task.progress.total > 0"
+                class="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                :aria-label="`题目处理进度 ${task.progress.completed || 0}/${task.progress.total}`"
+                :aria-valuemin="0"
+                :aria-valuemax="task.progress.total"
+                :aria-valuenow="Math.min(task.progress.completed || 0, task.progress.total)"
+              >
+                <div
+                  class="h-full rounded-full bg-primary transition-[width]"
+                  :style="{ width: `${Math.min(100, Math.round((task.progress.completed || 0) * 100 / task.progress.total))}%` }"
+                />
+              </div>
+              <p v-if="task.counts" class="text-xs text-muted-foreground">
+                答案成功 {{ task.counts.answered || 0 }} · 失败 {{ task.counts.failed || 0 }}
+              </p>
+            </div>
             <p v-if="task.error" class="mt-1 text-xs text-destructive">
               {{ task.error.message || task.error.code }}
             </p>

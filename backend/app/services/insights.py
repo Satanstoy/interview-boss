@@ -87,12 +87,17 @@ def _action_for_item(item: dict) -> dict:
         "action": action,
     }
 
-def _scope_condition(alias: str, user_id: int) -> tuple[str, list]:
-    return (
+def _scope_condition(
+    alias: str, user_id: int, *, publish_gated: bool = False
+) -> tuple[str, list]:
+    condition = (
         f"(({alias}.owner_id IS NULL AND {alias}.status = 'approved') "
-        f"OR {alias}.owner_id = ?) AND {alias}.deleted_at IS NULL",
-        [user_id],
+        f"OR {alias}.owner_id = ?) AND {alias}.deleted_at IS NULL"
     )
+    if publish_gated:
+        # 发布门槛（AC-015/README §5.3）：未 published 的公共面经不进入统计
+        condition += f" AND ({alias}.owner_id IS NOT NULL OR {alias}.publish_status = 'published')"
+    return condition, [user_id]
 
 
 def build_insights_snapshot(user: dict) -> dict:
@@ -193,7 +198,7 @@ def build_insights_snapshot(user: dict) -> dict:
             [*jd_scope_params, position_name],
         ).fetchone()[0]
 
-        interview_scope, interview_scope_params = _scope_condition("i", user_id)
+        interview_scope, interview_scope_params = _scope_condition("i", user_id, publish_gated=True)
         interview_position = "(i.job_position = ? OR i.job_position = '' OR i.job_position IS NULL)"
         interview_count = conn.execute(
             f"SELECT COUNT(*) FROM interview i WHERE {interview_scope} AND {interview_position}",
@@ -237,7 +242,7 @@ def build_insights_snapshot(user: dict) -> dict:
         # 仅当前岗位 + 当前用户可见作用域（他人私有面经不得泄漏进聚合），
         # JOIN interview iv 并复用 _scope_condition 过滤 owner/公共 approved，排除已删，
         # 过滤「其他」/空分类等无意义主题。
-        high_scope, high_scope_params = _scope_condition("iv", user_id)
+        high_scope, high_scope_params = _scope_condition("iv", user_id, publish_gated=True)
         high_freq_rows = conn.execute(
             "SELECT qd.cat2 AS topic, COUNT(*) AS frequency "
             "FROM questions_detail qd JOIN interview iv ON qd.interview_id = iv.id "

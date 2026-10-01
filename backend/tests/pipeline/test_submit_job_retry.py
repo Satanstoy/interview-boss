@@ -37,6 +37,36 @@ def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
     test_db.commit()
     import_id = accepted["import_id"]
 
+    # AC-004：预检全部通过后才创建首个业务 job（旧 retry 只服务业务 job）
+    from app.services.credential_preflight import create_initial_submit_job_if_ready
+
+    preflight_rows = test_db.execute(
+        "SELECT j.id, json_extract(p.payload, '$.credential_scope') AS scope "
+        "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
+        "AND j.status IN ('pending', 'queued', 'running') ORDER BY j.id",
+        (import_id,),
+    ).fetchall()
+    for row in preflight_rows:
+        test_db.execute(
+            "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+            "pipeline_version, status, job_id) "
+            "VALUES (?, 'preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
+            (import_id, f"initial:{row['scope']}", row["id"]),
+        )
+        test_db.execute("UPDATE jobs SET status = 'completed' WHERE id = ?", (row["id"],))
+    test_db.commit()
+    attempt = test_db.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    submit_job_id = create_initial_submit_job_if_ready(
+        test_db, root_import_id=import_id, attempt_id=int(attempt["id"])
+    )
+    test_db.commit()
+    assert submit_job_id, "预检通过后必须存在业务 job"
+
     # 标记失败：在途 job 全部终态失败并释放 attempt 归属
     test_db.execute(
         "UPDATE jobs SET status = 'failed', worker_id = NULL, locked_until = NULL "
@@ -52,7 +82,7 @@ def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
             "app.worker.enqueue_submit_import_job",
             new=AsyncMock(return_value=arq_job),
         ):
-            retry_response = client.post(f"/api/submit-jobs/{accepted['job_id']}/retry", json={})
+            retry_response = client.post(f"/api/submit-jobs/{submit_job_id}/retry", json={})
 
         assert retry_response.status_code == 200, retry_response.text
         retry_id = retry_response.json()["job_id"]
@@ -61,12 +91,21 @@ def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
             "FROM jobs WHERE id = ?",
             (retry_id,),
         ).fetchone()
-        assert job["job_type"] == "submit_import"
+        # R03 + AC-004：旧 attempt 失败后恢复必须先重建可派发的预检工作，
+        # 业务 job 只在预检全部通过后创建（contracts §4/§5）。
+        assert job["job_type"] == "credential_preflight"
         assert job["root_import_id"] == import_id, "重试 job 必须绑定根任务"
         assert job["upload_attempt_id"] is not None, "重试 job 必须绑定 attempt"
         assert job["work_key"], "重试 job 必须带 work_key"
         assert job["status"] == "queued"
         assert job["arq_job_id"] == "arq-retry-root-1"
+        # 预检通过后同 root 上才出现业务 job
+        ready = test_db.execute(
+            "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? "
+            "AND job_type = 'submit_import' AND status IN ('pending', 'queued', 'running')",
+            (import_id,),
+        ).fetchone()[0]
+        assert ready == 0, "预检未通过前不得派发业务 job"
     finally:
         app.dependency_overrides.pop(dependency, None)
 

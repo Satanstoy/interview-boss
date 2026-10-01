@@ -157,6 +157,9 @@ def test_page_size_bounds_and_default(api, test_db):
 
 def test_location_endpoint_returns_page_under_same_ordering(api, test_db):
     _seed_interviews(test_db, count=121)
+    # R09：location 返回岗位 ID（前端 switchPositionById 需要数字）+ 名称供展示
+    test_db.execute("INSERT INTO job_positions (id, name) VALUES (1, 'P1')")
+    test_db.commit()
     target_id = 1000 + 60  # 排序后位于中间
     resp = api.get(
         f"/api/data/interview/{target_id}/location?sort=created_at_desc&position_id=P1"
@@ -165,7 +168,8 @@ def test_location_endpoint_returns_page_under_same_ordering(api, test_db):
     body = resp.json()
     assert body["interview_id"] == target_id
     assert body["page"] == (60 // 20) + 1
-    assert body["position_id"] == "P1"
+    assert body["position_id"] == 1, "必须返回岗位 ID 而不是名称"
+    assert body["position_name"] == "P1"
 
 
 def test_location_for_unauthorized_target_is_404(api, test_db):

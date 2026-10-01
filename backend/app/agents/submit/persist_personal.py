@@ -435,8 +435,12 @@ async def jd_persist_node(state: SubmitState) -> dict:
         target = state.get("target", "personal")
         job_position = state.get("job_position", "")
 
-        record_owner_id = user_id if target == "personal" else None
-        record_status = "approved" if (is_admin or target == "personal") else "pending"
+        # 与 graph.after_classify 同一判定：只有 target == "public" 走公共路径，
+        # 其余（personal/private）都是私人。worker 从 policy 派生的 write_scope
+        # 是 private/public，此处不能要求恰好等于 "personal"。
+        is_public_target = str(target) == "public"
+        record_owner_id = None if is_public_target else user_id
+        record_status = "approved" if (is_admin or not is_public_target) else "pending"
 
         tech_list = data.get("核心技术要求", [])
         tech_stack = (

@@ -779,7 +779,11 @@ async def submit_import_task(ctx, job_id: int):
                 resume_tagged = resume["tagged"]["tagged_rows"]
 
         # 从 root 派生的策略覆盖 payload 旧字段（R02）
-        target = policy.get("write_scope") or payload.get("target", "personal")
+        # graph 的 target 词表是 personal/public（after_classify/jd_persist 都按它
+        # 判定），policy.write_scope 是 private/public：在唯一边界做一次规范化，
+        # 避免两侧词表漂移导致私人 JD 被当成公共待审数据。
+        write_scope = policy.get("write_scope") or payload.get("target", "personal")
+        target = "public" if write_scope == "public" else "personal"
         target_intent = policy.get("target_intent") or payload.get("target_intent", "private")
         request_public_review = bool(
             policy.get("request_public_review", False)
@@ -1252,6 +1256,23 @@ async def _generate_answer_job(ctx, job_id: int):
 
     worker_id = default_worker_id()
 
+    def _sync_upload_root(conn, status, *, error_code=None, result_json=None):
+        from app.services.job_lifecycle import (
+            refresh_completed_upload_roots,
+            update_upload_answer_stage,
+        )
+
+        root_import_id = update_upload_answer_stage(
+            conn,
+            job_id,
+            status,
+            error_code=error_code,
+            result_json=result_json,
+        )
+        if root_import_id:
+            refresh_completed_upload_roots(conn, [root_import_id])
+        return root_import_id
+
     def _claim_and_load():
         with get_db_connection() as conn:
             task = claim_job(
@@ -1265,6 +1286,8 @@ async def _generate_answer_job(ctx, job_id: int):
             payload_row = conn.execute(
                 "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
             ).fetchone()
+            if payload_row:
+                _sync_upload_root(conn, "running")
             conn.commit()
             return dict(task), json.loads(payload_row["payload"]) if payload_row else None
 
@@ -1276,6 +1299,8 @@ async def _generate_answer_job(ctx, job_id: int):
     def _finish(result=None):
         with get_db_connection() as conn:
             completed = complete_job(conn, job_id, worker_id, result=result)
+            if completed:
+                _sync_upload_root(conn, "succeeded", result_json=result)
             conn.commit()
             return completed
 
@@ -1287,6 +1312,11 @@ async def _generate_answer_job(ctx, job_id: int):
                 worker_id,
                 error,
                 max_attempts=0 if terminal else 3,
+            )
+            _sync_upload_root(
+                conn,
+                "failed" if outcome["status"] == "failed" else "pending",
+                error_code="ANSWER_GENERATION_FAILED" if outcome["status"] == "failed" else None,
             )
             conn.commit()
             return outcome

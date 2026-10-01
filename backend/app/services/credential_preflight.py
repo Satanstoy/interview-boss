@@ -53,9 +53,10 @@ def create_credential_preflight_job(
     existing = conn.execute(
         "SELECT j.id FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
         "WHERE j.root_import_id = ? AND j.job_type = ? "
+        "AND j.upload_attempt_id IS ? "
         "AND j.status IN ('pending', 'queued', 'running') "
         "AND json_extract(p.payload, '$.credential_scope') = ? ORDER BY j.id LIMIT 1",
-        (root_import_id, PREFLIGHT_JOB_TYPE, credential_scope),
+        (root_import_id, PREFLIGHT_JOB_TYPE, attempt_id, credential_scope),
     ).fetchone()
     if existing:
         return int(existing["id"])
@@ -83,6 +84,80 @@ def create_credential_preflight_job(
     conn.execute(
         "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
         (job_id, _json_dumps(payload)),
+    )
+    return job_id
+
+
+def create_initial_submit_job_if_ready(
+    conn, *, root_import_id: str, attempt_id: int
+) -> int | None:
+    """Atomically create the first business job after all required probes pass."""
+
+    import json
+
+    from app.services.job_lifecycle import get_successful_upload_preflight
+    from app.services.upload_lifecycle import FIRST_WORK_KEY, SUBMIT_PHASES, UPLOAD_JOB_TYPE
+    from app.services.upload_policy import initial_preflight_scopes
+
+    root = conn.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (root_import_id,)
+    ).fetchone()
+    if root is None:
+        return None
+    attempt = conn.execute(
+        "SELECT id FROM upload_attempts WHERE id = ? AND import_id = ? AND status = 'active'",
+        (attempt_id, root_import_id),
+    ).fetchone()
+    if attempt is None:
+        return None
+
+    try:
+        policy = json.loads(root["policy_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        policy = {}
+    required_scopes = initial_preflight_scopes(policy)
+    for scope in required_scopes:
+        if get_successful_upload_preflight(
+            conn,
+            root_import_id=root_import_id,
+            attempt_id=attempt_id,
+            credential_scope=scope,
+        ) is None:
+            return None
+
+    existing = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+        "AND job_type = ? ORDER BY id LIMIT 1",
+        (root_import_id, attempt_id, UPLOAD_JOB_TYPE),
+    ).fetchone()
+    if existing:
+        return int(existing["id"])
+
+    payload = json.loads(root["payload_json"] or "{}")
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, progress_total, "
+        "root_import_id, upload_attempt_id, work_key, idempotency_key) "
+        "VALUES (?, 'pending', ?, ?, ?, ?, ?, ?)",
+        (
+            UPLOAD_JOB_TYPE,
+            int(root["requester_id"]),
+            len(SUBMIT_PHASES),
+            root_import_id,
+            attempt_id,
+            FIRST_WORK_KEY,
+            f"initial:{root_import_id}:{attempt_id}:{FIRST_WORK_KEY}",
+        ),
+    )
+    job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, json.dumps(payload, ensure_ascii=False)),
+    )
+    conn.execute(
+        "UPDATE upload_imports SET status = 'queued', error_code = NULL, "
+        "error_message = NULL, revision = revision + 1, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND current_attempt_no = ?",
+        (root_import_id, root["current_attempt_no"]),
     )
     return job_id
 
@@ -229,13 +304,21 @@ def run_credential_preflight(
                 "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (job_id,),
             )
-            # 预检通过：清除 needs_action 阻塞，恢复提取派发（配置修复后同 root 继续）
-            if root_import_id:
-                conn.execute(
-                    "UPDATE upload_imports SET status = 'queued', error_code = NULL, "
-                    "error_message = NULL, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND status = 'needs_action'",
-                    (root_import_id,),
+            if root_import_id and upload_attempt_id is not None:
+                # 只有本 attempt 的全部 policy scopes 通过后，才在同一事务
+                # 创建首个业务 job 并解除 needs_action。
+                create_initial_submit_job_if_ready(
+                    conn,
+                    root_import_id=root_import_id,
+                    attempt_id=int(upload_attempt_id),
+                )
+                # contracts §5：修复阻塞 scope 后从同一 root 恢复。初始阶段尚未
+                # 全通过时仍保留 needs_action；公共阶段（私人阶段已结束）只需该
+                # 阶段 scope 通过即可放行待派发的聚类工作。
+                release_root_after_preflight_success(
+                    conn,
+                    root_import_id=root_import_id,
+                    attempt_id=int(upload_attempt_id),
                 )
             return PreflightOutcome(
                 status="ok",
@@ -271,6 +354,90 @@ def run_credential_preflight(
         return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
 
 
+def release_root_after_preflight_success(
+    conn, *, root_import_id: str, attempt_id: int
+) -> bool:
+    """预检成功后解除 ``needs_action``（contracts §5：修复正确 scope 后从同一 root 恢复）。
+
+    释放门槛按**当前阶段**判定，而不是一律要求全部初始 scope：
+
+    - 该 attempt 仍有待派发的聚类工作 → 只要求这些 job payload 里的 scope 预检成功
+      （私人阶段已结束，重跑初始 scope 无意义）；
+    - 否则 → 要求 policy 的全部初始 scope 预检成功（AC-004：预检未全通过不得派发提取）。
+
+    额外安全条件：本 attempt 上**任何已登记的预检 scope 都必须成功**，避免某个
+    scope 仍失败时提前把 root 从 needs_action 放行。
+
+    返回是否解除了阻塞。
+    """
+
+    import json as _json
+
+    from app.services.job_lifecycle import get_successful_upload_preflight
+    from app.services.upload_policy import initial_preflight_scopes
+
+    root = conn.execute(
+        "SELECT status, policy_json FROM upload_imports WHERE id = ?",
+        (root_import_id,),
+    ).fetchone()
+    if root is None or root["status"] != "needs_action":
+        return False
+
+    registered_scopes = {
+        str(row["scope"])
+        for row in conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
+            "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+            "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
+            "AND j.upload_attempt_id IS ?",
+            (root_import_id, attempt_id),
+        ).fetchall()
+        if row["scope"]
+    }
+
+    pending_scopes = {
+        str(row["scope"])
+        for row in conn.execute(
+            "SELECT json_extract(p.payload, '$.credential_scope') AS scope "
+            "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+            "WHERE j.root_import_id = ? AND j.upload_attempt_id IS ? "
+            "AND j.job_type = 'cluster_batch' "
+            "AND j.status IN ('pending', 'queued', 'running')",
+            (root_import_id, attempt_id),
+        ).fetchall()
+        if row["scope"]
+    }
+
+    if pending_scopes:
+        required = set(pending_scopes)
+    else:
+        try:
+            policy = _json.loads(root["policy_json"] or "{}")
+        except (TypeError, ValueError):
+            policy = {}
+        required = set(initial_preflight_scopes(policy))
+    required |= registered_scopes
+
+    if not required:
+        return False
+    for scope in sorted(required):
+        if get_successful_upload_preflight(
+            conn,
+            root_import_id=root_import_id,
+            attempt_id=attempt_id,
+            credential_scope=scope,
+        ) is None:
+            return False
+
+    conn.execute(
+        "UPDATE upload_imports SET status = 'queued', error_code = NULL, "
+        "error_message = NULL, revision = revision + 1, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'needs_action'",
+        (root_import_id,),
+    )
+    return True
+
+
 def _mark_blocked(
     conn,
     root_import_id: str,
@@ -299,7 +466,8 @@ def _mark_blocked(
         )
         conn.execute(
             "UPDATE upload_imports SET status = 'needs_action', error_code = ?, "
-            "error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "error_message = ?, revision = revision + 1, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (error_code, message[:500], root_import_id),
         )
     conn.execute(

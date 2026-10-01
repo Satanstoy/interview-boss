@@ -64,8 +64,52 @@ def _accept(conn, *, key="k-1", target="private", extra=None):
     return accept_upload(conn, **params)
 
 
-def test_restore_creates_executable_job_for_failed_root():
-    """R03：恢复不止建 attempt，还要为同 root 写可派发 job（含 payload）。"""
+def _pass_preflight(conn, import_id: str) -> int | None:
+    """模拟 worker 预检全部通过：落 succeeded 阶段结果并创建首个业务 job。
+
+    contracts §5：所有必需 scope 通过后才原子创建首个业务 job。
+    """
+
+    from app.services.credential_preflight import create_initial_submit_job_if_ready
+
+    rows = conn.execute(
+        "SELECT j.id, j.upload_attempt_id, "
+        "json_extract(p.payload, '$.credential_scope') AS scope "
+        "FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.root_import_id = ? AND j.job_type = 'credential_preflight' "
+        "AND j.status IN ('pending', 'queued', 'running') ORDER BY j.id",
+        (import_id,),
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
+            "pipeline_version, status, job_id) "
+            "VALUES (?, 'preflight', ?, 1, 'upload-pipeline-v1', 'succeeded', ?)",
+            (import_id, f"initial:{row['scope']}", row["id"]),
+        )
+        conn.execute("UPDATE jobs SET status = 'completed' WHERE id = ?", (row["id"],))
+    conn.commit()
+    attempt = conn.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ? AND status = 'active' "
+        "ORDER BY attempt_no DESC LIMIT 1",
+        (import_id,),
+    ).fetchone()
+    if attempt is None:
+        return None
+    job_id = create_initial_submit_job_if_ready(
+        conn, root_import_id=import_id, attempt_id=int(attempt["id"])
+    )
+    conn.commit()
+    return job_id
+
+
+def test_restore_plans_dispatchable_preflight_and_withholds_business_job():
+    """R03 + AC-004：恢复必须规划可派发工作，且预检通过前不得派发业务 job。
+
+    contracts §4：接受/恢复只创建持久 ``credential_preflight`` job，
+    "此时不得派发提取/分类/聚类工作"；§5：``job_id`` 可以是尚待执行的预检 job。
+    预检全部通过后，首个业务 job 才出现并携带原稿。
+    """
 
     conn = _db()
     result = _accept(conn)
@@ -82,25 +126,39 @@ def test_restore_creates_executable_job_for_failed_root():
     conn.commit()
     assert restored["attempt_no"] >= 1
 
-    jobs = conn.execute(
+    pending = conn.execute(
         "SELECT * FROM jobs WHERE root_import_id = ? AND status = 'pending'",
         (import_id,),
     ).fetchall()
-    # 恢复后必须存在可派发的提取 job（preflight 之外的 submit_import）
-    submit_jobs = [j for j in jobs if j["job_type"] == "submit_import"]
-    assert len(submit_jobs) >= 1, "恢复后必须存在可派发的 submit job"
-    job = submit_jobs[0]
+    preflight = [j for j in pending if j["job_type"] == "credential_preflight"]
+    assert len(preflight) == 1, "恢复必须为本次 attempt 重建可派发的预检 job"
+    job = preflight[0]
     assert job["work_key"]
     assert job["upload_attempt_id"] == restored["attempt_id"]
-    # R01：预检 job 同时被规划
-    preflight = [j for j in jobs if j["job_type"] == "credential_preflight"]
-    assert len(preflight) == 1
     payload_row = conn.execute(
         "SELECT payload FROM job_payloads WHERE job_id = ?", (job["id"],)
     ).fetchone()
     assert payload_row is not None, "恢复的 job 必须有可执行 payload"
-    payload = json.loads(payload_row["payload"])
-    assert payload["raw_text"], "payload 必须携带原稿"
+    assert json.loads(payload_row["payload"])["credential_scope"] == "user"
+    # AC-004：预检未通过前不得派发任何业务处理 job
+    assert [j for j in pending if j["job_type"] == "submit_import"] == [], (
+        "预检未通过时不得派发提取/分类等业务 job"
+    )
+
+    submit_job_id = _pass_preflight(conn, import_id)
+    assert submit_job_id, "预检全部通过后必须创建首个业务 job"
+    submit_job = conn.execute(
+        "SELECT * FROM jobs WHERE id = ?", (submit_job_id,)
+    ).fetchone()
+    assert submit_job["status"] == "pending"
+    assert submit_job["upload_attempt_id"] == restored["attempt_id"]
+    assert submit_job["work_key"]
+    submit_payload = json.loads(
+        conn.execute(
+            "SELECT payload FROM job_payloads WHERE job_id = ?", (submit_job_id,)
+        ).fetchone()["payload"]
+    )
+    assert submit_payload["raw_text"], "业务 job 的 payload 必须携带原稿"
     conn.close()
 
 
@@ -380,8 +438,13 @@ def test_finalize_with_stale_generation_is_rejected_without_root_write():
     import_id = result["import_id"]
     conn.commit()
 
-    # 代次 1 的 worker 领取
-    claimed = claim_job_with_generation(conn, result["job_id"], worker_id="w1")
+    # AC-004：业务 job 只在预检全部通过后出现（contracts §5）
+    submit_job_id = _pass_preflight(conn, import_id)
+    assert submit_job_id, "预检通过后必须存在业务 job"
+    conn.commit()
+
+    # 代次 1 的 worker 领取业务 job
+    claimed = claim_job_with_generation(conn, submit_job_id, worker_id="w1")
     conn.commit()
     assert claimed is not None
     gen1 = int(claimed["lease_generation"])
@@ -391,19 +454,25 @@ def test_finalize_with_stale_generation_is_rejected_without_root_write():
 
     conn.execute(
         "UPDATE jobs SET locked_until = '2000-01-01 00:00:00' WHERE id = ?",
-        (result["job_id"],),
+        (submit_job_id,),
     )
     recovered = recover_expired_jobs(conn, job_type="submit_import")
     assert recovered >= 1
     conn.commit()
 
     claimed2 = claim_job_with_generation(
-        conn, result["job_id"], worker_id="w2", lease_seconds=3600
+        conn, submit_job_id, worker_id="w2", lease_seconds=3600
     )
     assert claimed2 is not None, "回收后新 worker 应可领取"
     conn.commit()
     gen2 = int(claimed2["lease_generation"])
     assert gen2 == gen1 + 1
+
+    revision_before = int(
+        conn.execute(
+            "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
+        ).fetchone()["revision"]
+    )
 
     # 旧代次 w1 聚合根任务 → 必须拒绝，且根任务不被写
     with pytest.raises(JobFenceError):
@@ -417,7 +486,7 @@ def test_finalize_with_stale_generation_is_rejected_without_root_write():
     root = conn.execute(
         "SELECT status, revision FROM upload_imports WHERE id = ?", (import_id,)
     ).fetchone()
-    assert int(root["revision"]) == 1, "被拒的旧代次不得推进 revision"
+    assert int(root["revision"]) == revision_before, "被拒的旧代次不得推进 revision"
 
     # 当前代次 w2 聚合成功
     snap = finalize_attempt_and_aggregate_root(
@@ -431,7 +500,7 @@ def test_finalize_with_stale_generation_is_rejected_without_root_write():
     root_after = conn.execute(
         "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
     ).fetchone()
-    assert int(root_after["revision"]) >= 2
+    assert int(root_after["revision"]) > revision_before
     conn.close()
 
 
@@ -445,6 +514,11 @@ def test_finalize_without_generation_rejects_v2_service_contract():
     import_id = result["import_id"]
     conn.commit()
 
+    revision_before = int(
+        conn.execute(
+            "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
+        ).fetchone()["revision"]
+    )
     with pytest.raises(TypeError):
         finalize_attempt_and_aggregate_root(
             conn, import_id=import_id, actor_id=101
@@ -453,5 +527,7 @@ def test_finalize_without_generation_rejects_v2_service_contract():
     root = conn.execute(
         "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
     ).fetchone()
-    assert int(root["revision"]) == 1
+    # accept 自身会推进 revision（contracts §5 返回 revision），
+    # 被拒的聚合不得再推进
+    assert int(root["revision"]) == revision_before
     conn.close()

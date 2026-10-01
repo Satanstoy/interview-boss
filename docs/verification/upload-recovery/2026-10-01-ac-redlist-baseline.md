@@ -120,3 +120,44 @@ docker compose --profile test run --rm test uv run pytest \
 2. 再修 5 条契约红：快照 DTO（`mode`）→ 结果定位字段 → 岗位 ID 契约 → JD 词表 → 发布门槛。
 3. 每条修复必须带**变异验证**（移除修复后该用例变红），并换人用真实链路复验。
 4. 之后按 S1→S4 顺序把 AC-006/028/029 从 skip/手工 seed 升级为真实链路用例。
+
+---
+
+## 7. Phase 2 结果（2026-10-01 收口）
+
+### 7.1 4 条现有失败 → 绿
+
+| 用例 | 处理 | 依据 |
+|---|---|---|
+| `test_upload_execution_plan.py` ×3 | 按 contracts §4/§5 重写为 spec 设计：接受/恢复只建可派发**预检** job，业务 job 在预检全部通过后创建；fencing 用例改为先让预检通过再领取业务 job；revision 断言改为"被拒写入不推进"而非硬编码 1 | contracts §4「此时不得派发提取/分类/聚类工作」、§5「job_id 可以是尚待执行的预检 job」；git 历史 `db89da3c`（R01/AC-004）已改变设计，测试未同步 |
+| `test_public_contribution_recovery.py::test_root_bound_public_retry_preflights_global_before_cluster_dispatch` | **生产修复**：新增 `release_root_after_preflight_success`，预检成功后按当前阶段解除 `needs_action`（待派发聚类工作只需该阶段 scope，否则要求全部初始 scope；本 attempt 已登记的预检 scope 必须全部成功） | contracts §5「修复正确 scope 后从同一 root 恢复」；此前 root 永远停在 `needs_action`，`claim_dispatch_batch` 的 `root_import.status != 'needs_action'` 门禁使公共聚类永不可派发 |
+
+### 7.2 5 条契约红 → 绿（均带变异验证）
+
+| 契约 | 生产修复 | 变异验证（移除修复后） |
+|---|---|---|
+| 已完成任务快照可序列化 | `_snapshot` 的 `result` 只发 contracts §4.2 定义的 `interview_id/position_id`，去掉 DTO 不存在的 `mode` | 加回 `mode` → 该用例红 ✅ |
+| 任务中心读取字段 | `UploadTaskCenter.openResult` 改读 `task.result?.interview_id`；两个 e2e mock 同步为真实快照形状 | —（前端断言 + 后端快照契约双向锁定） |
+| 岗位 ID/名称契约 | `data.py` 新增 `_resolve_position_filter`（ID→名称，兼容名称入参）；location 返回 `position_id`(ID) + `position_name` | 解析退回原样 → 该用例红 ✅ |
+| 私人 JD 归属 | `jd_persist_node` 与 `graph.after_classify` 同判定（仅 `target == "public"` 为公共）；worker 在唯一边界把 `write_scope` 规范化为 `personal/public` | 判定退回 `== "private"` → 该用例红 ✅ |
+| 发布门槛（AC-015） | migration 123 加 `interview.publish_status`；物化置 `pending`，`refresh_public_interview_projection` 在无在途子项时置 `published`；公开读取谓词（data/analytics/insights/source_health/interview_merge_service）加 `owner_id IS NOT NULL OR publish_status='published'` | 物化直接 `published` → 该用例红 ✅ |
+
+### 7.3 回归证据（实际运行）
+
+| 范围 | 结果 |
+|---|---|
+| upload 域（含 5 契约用例） | `5 failed → 0 failed`，**345 passed / 9 skipped**（此前 341 passed / 4 failed） |
+| 全量后端 | `21 failed / 3292 passed / 11 skipped`（18m07s） |
+| 前端 e2e（upload-task-center + upload-question-data-flow） | **14 passed**（修复第二个掩盖缺陷的 mock 前为 13 passed / 1 failed） |
+| 前端 build | 通过 |
+
+全量 21 条失败分类（逐条隔离复跑确认）：
+- **本次引入并已修复（3）**：`test_schema_docs_freshness` ×2（migration 123 使 schema.md 过期 → 已重新生成，并给 test 服务加 `./docs:/app/docs:ro` 挂载，否则容器只看到镜像内旧副本）、`test_interview_server_pagination::test_location_endpoint_returns_page_under_same_ordering`（改为断言岗位 ID + 名称）。
+- **上一轮在途改动遗留（1）**：`test_submit_job_retry::test_retry_binds_root_and_attempt_when_v2_root_exists`（旧 retry 现在先返回预检 job）→ 已按 spec 设计重写。
+- **与本次改动无关的既有失败（17）**：14 条 infra/部署契约测试（0.93s 内隔离复现，读取未被本次改动的部署文件）+ 3 条 `test_upload_credential_preflight` 顺序污染（隔离下 14 passed；同时暴露测试输出中打印**真实生产 API Key**，属独立安全问题）。
+
+### 7.4 仍未对齐（下一步）
+
+- AC-006 / AC-028 仍被 `UPLOAD_TEST_DB_PATH` 门禁整体 skip；AC-029 仍用手工 `_seed_private_pipeline` 写被验收产物 → 需升级为真实链路用例。
+- 上一轮审计的其余缺口（B5 调用记账仅覆盖预检、B6 管理员公共导入无独立审计实体、C7 enqueue root 首轮 NULL、C9 cluster/answer 无 generation fencing、E5 同 URL 复用覆盖清单、A3 管理端点无 owner 断言等）**尚未处理**。
+- `scripts/line_guard.sh` 仍 FAIL 4 个文件（`worker.py` 1623、`public_contributions.py` 1560 及两个测试文件）。

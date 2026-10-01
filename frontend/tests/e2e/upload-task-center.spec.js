@@ -28,7 +28,8 @@ const TASK = {
   stage: 'answer',
   position_id: 1,
   position_name: '后端开发工程师',
-  interview_id: 555,
+  // contracts §4.2：interview_id 在 result 内，快照顶层没有该字段
+  result: { interview_id: 555, position_id: 1 },
   error: { code: 'UPSTREAM_TIMEOUT', message: '答案生成超时', retryable: true },
   allowed_actions: ['open_result', 'retry_failed_steps'],
   created_at: '2026-09-29T10:00:00Z',
@@ -218,6 +219,97 @@ test('SSE 非终态 EOF 后客户端会重连', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '上传任务中心' }).click()
   await expect.poll(() => streamCalls, { timeout: 15_000 }).toBeGreaterThan(1)
+})
+
+test('SSE 首次返回 503 后自动重连并继续接收快照', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    stage: 'extract',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  await page.route('**/api/auth/**', (route) =>
+    route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } }),
+  )
+  await page.route('**/api/upload-imports?**', (route) =>
+    route.fulfill({ json: { items: [runningTask], total: 1, page: 1, page_size: 20 } }),
+  )
+
+  let streamCalls = 0
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) => {
+    streamCalls += 1
+    if (streamCalls === 1) {
+      return route.fulfill({ status: 503, json: { detail: '暂时不可用' } })
+    }
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: `event: snapshot\nid: 5\ndata: ${JSON.stringify({ ...runningTask, revision: 5 })}\n\n`,
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await expect.poll(() => streamCalls, { timeout: 10_000 }).toBeGreaterThan(1)
+})
+
+test('题目进度显示服务端真实分子分母和答案计数', async ({ page }) => {
+  const task = {
+    ...TASK,
+    progress: { unit: 'questions', completed: 10, total: 10 },
+    counts: { total: 10, answered: 8, failed: 2 },
+  }
+  await mockApi(page, { task })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText(/10\/10 题已处理/)).toBeVisible()
+  await expect(center.getByText(/答案成功 8 · 失败 2/)).toBeVisible()
+})
+
+test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({ page }) => {
+  let servedUserId = '101'
+  await page.route('**/api/auth/**', (route) =>
+    route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } }),
+  )
+  await page.route('**/api/upload-imports?**', (route) =>
+    route.fulfill({
+      json: {
+        items: servedUserId === '101' ? [TASK] : [],
+        total: servedUserId === '101' ? 1 : 0,
+        page: 1,
+        page_size: 20,
+      },
+    }),
+  )
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.locator('li', { hasText: 'imp-e2e-0001' })).toBeVisible()
+
+  await page.evaluate(() => {
+    localStorage.setItem('interviewboss-submit-jobs:101', '[77]')
+    localStorage.setItem('interviewboss-submit-draft:101:panel-default', 'old-user-key')
+  })
+  servedUserId = '102'
+  await page.evaluate(async () => {
+    const { useAuth } = await import('/src/composables/useAuth.js')
+    useAuth().handleLoginSuccess({
+      id: 102,
+      username: 'u102',
+      is_admin: 0,
+      bank_mode: 'public',
+      current_position_id: 1,
+      current_position: '后端开发工程师',
+    })
+  })
+
+  await expect(center.getByText('暂无上传任务')).toBeVisible()
+  await expect(center.locator('li', { hasText: 'imp-e2e-0001' })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('interviewboss-submit-jobs:101'))).toBeNull()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('interviewboss-submit-draft:101:panel-default'))).toBeNull()
 })
 
 test('375px 与 1440px 均可查看任务与恢复按钮', async ({ page }) => {

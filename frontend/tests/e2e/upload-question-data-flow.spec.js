@@ -92,7 +92,7 @@ test('失败任务可重试且完成后可查看结果', async ({ page }) => {
     revision: 7,
     attempt_no: 1,
     stage: 'answer',
-    interview_id: 555,
+    result: { interview_id: 555, position_id: 1 },
     error: { code: 'UPSTREAM_TIMEOUT', message: '答案生成超时', retryable: true },
     allowed_actions: ['open_result', 'retry_failed_steps'],
   })
@@ -122,13 +122,13 @@ test('失败任务可重试且完成后可查看结果', async ({ page }) => {
   // 完成态允许查看结果 → 按 location 定位并高亮
   await page.route('**/api/upload-imports/imp-ac029-1', (route) =>
     route.fulfill({
-      json: task({ status: 'completed', revision: 10, interview_id: 555, allowed_actions: ['open_result'] }),
+      json: task({ status: 'completed', revision: 10, result: { interview_id: 555, position_id: 1 }, allowed_actions: ['open_result'] }),
     }),
   )
   await page.route('**/api/upload-imports?**', (route) =>
     route.fulfill({
       json: {
-        items: [task({ status: 'completed', revision: 10, interview_id: 555, allowed_actions: ['open_result'] })],
+        items: [task({ status: 'completed', revision: 10, result: { interview_id: 555, position_id: 1 }, allowed_actions: ['open_result'] })],
         total: 1,
         page: 1,
         page_size: 20,
