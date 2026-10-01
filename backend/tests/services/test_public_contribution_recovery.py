@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from app.db.migrations import run_migrations
 from app.services.public_contributions import (
     publish_items_with_resolutions,
@@ -329,4 +331,168 @@ def test_invalidated_resolution_blocks_publish():
     report = publish_items_with_resolutions(conn, request_id=1)
     assert report["published_item_ids"] == []
     assert request_publish_status(conn, request_id=1) != "published"
+    conn.close()
+
+
+# ── AC-016 / contracts §3.3：同 URL 追加不得破坏既有公开投影 ──────────────
+
+
+def _projection(question: str) -> dict:
+    return {
+        "source": {
+            "source_url": "https://pub.example.com/1",
+            "season": "2026春招",
+            "job_position": "后端",
+        },
+        "items": [
+            {
+                "question": question,
+                "cat1": "数据库",
+                "cat2": "Redis",
+                "difficulty": "中等",
+            }
+        ],
+    }
+
+
+def _seed_second_request(conn, *, detail_id: int, question: str) -> None:
+    """同一 URL 的第二次贡献：request 2 + 一条 queued 子项 + 对应公共明细。"""
+
+    # 同 URL 的追加来自另一份私有面经（source_id 不同），
+    # UNIQUE(source_type, source_id, requester_id) 不允许同源重复申请
+    conn.execute(
+        "INSERT INTO interview (id, url, company, round, questions_list, owner_id, "
+        "status, job_position) "
+        "VALUES (2, 'https://pub.example.com/1', 'S2', '二面', '1.b', 101, 'approved', '后端')"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(id, source_type, source_id, requester_id, public_interview_id, status, "
+        "snapshot_json, revision) "
+        "VALUES (2, 'interview', 2, 101, 500, 'approved_for_processing', '{}', 1)"
+    )
+    # 先建公共明细，再建引用它的 item（FK：items.public_detail_id → questions_detail.id）
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2, job_position) "
+        "VALUES (?, 500, ?, '数据库', 'Redis', '后端')",
+        (detail_id, question),
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(id, request_id, source_item_type, source_item_id, ordinal, status, "
+        "snapshot_json, public_detail_id) "
+        "VALUES (21, 2, 'question', 12, 1, 'queued', '{}', ?)",
+        (detail_id,),
+    )
+    conn.commit()
+
+
+def _seed_published_baseline(conn) -> None:
+    """让 request 1 的 item 11 成为「已发布」：清单必须由它重建而来。"""
+
+    record_resolution(
+        conn,
+        detail_id=511,
+        occurrence_scope="public",
+        occurrence_owner_id=None,
+        canonical_id=600,
+        canonical_scope="public",
+        status="matched",
+        pipeline_version="v1",
+    )
+    conn.execute("UPDATE public_contribution_items SET status = 'published' WHERE id = 11")
+    conn.execute("UPDATE interview SET questions_list = '1. TCP 三次握手' WHERE id = 500")
+    conn.commit()
+
+
+def test_same_url_reuse_keeps_previously_published_questions():
+    """同 URL 追加贡献时，公共面经清单不得丢掉已发布的既有题目。"""
+
+    from app.services.public_contributions import (
+        materialize_public_interview_from_projection,
+    )
+
+    conn = _db()
+    _seed_published_baseline(conn)
+    _seed_second_request(conn, detail_id=521, question="Redis 持久化")
+
+    materialize_public_interview_from_projection(
+        conn,
+        _projection("Redis 持久化"),
+        source_id=1,
+        requester_id=101,
+        job_position="后端",
+    )
+    conn.commit()
+
+    questions_list = conn.execute(
+        "SELECT questions_list FROM interview WHERE id = 500"
+    ).fetchone()["questions_list"]
+    assert "TCP 三次握手" in questions_list, (
+        "同 URL 复用分支用本次投影覆盖了清单，已发布的既有题目被丢弃（AC-016）"
+    )
+    conn.close()
+
+
+def test_same_url_reuse_does_not_expose_unpublished_questions():
+    """清单只能包含已发布明细：本次追加的子项仍是 queued，不得提前出现。"""
+
+    from app.services.public_contributions import (
+        materialize_public_interview_from_projection,
+    )
+
+    conn = _db()
+    _seed_published_baseline(conn)
+    _seed_second_request(conn, detail_id=521, question="Redis 持久化")
+
+    materialize_public_interview_from_projection(
+        conn,
+        _projection("Redis 持久化"),
+        source_id=1,
+        requester_id=101,
+        job_position="后端",
+    )
+    conn.commit()
+
+    questions_list = conn.execute(
+        "SELECT questions_list FROM interview WHERE id = 500"
+    ).fetchone()["questions_list"]
+    assert "TCP 三次握手" in questions_list, "已发布题目必须仍在清单里"
+    assert "Redis 持久化" not in questions_list, (
+        "尚未 published 的子项不得出现在公开清单里（contracts §3.3）"
+    )
+    conn.close()
+
+
+def test_failed_request_cannot_be_reapproved():
+    """contracts §3.2：failed 技术状态不得重新 approve，只能走公共 retry 入口。"""
+
+    from app.models.upload_contracts import build_review_projection_request
+    from app.services.public_contributions import (
+        StateConflict,
+        approve_public_contribution_v2,
+    )
+
+    conn = _db()
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'failed' WHERE id = 1"
+    )
+    conn.commit()
+    details_before = conn.execute(
+        "SELECT COUNT(*) FROM questions_detail WHERE interview_id = 500"
+    ).fetchone()[0]
+
+    review_request = build_review_projection_request(
+        {"expected_revision": 1, "excluded_item_ids": [], "review_fields": {}},
+        source_type="interview",
+    )
+    with pytest.raises(StateConflict):
+        approve_public_contribution_v2(
+            conn, request_id=1, admin_id=101, review_request=review_request
+        )
+    conn.rollback()
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM questions_detail WHERE interview_id = 500"
+    ).fetchone()[0] == details_before, "被拒的 approve 不得重复物化明细"
     conn.close()

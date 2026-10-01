@@ -527,11 +527,10 @@ def materialize_public_interview_from_projection(
         ).fetchone()
         if existing is not None:
             interview_id = int(existing["id"])
-            conn.execute(
-                "UPDATE interview SET questions_list = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (questions_list, interview_id),
-            )
+            # contracts §3.3 / AC-016：清单只能由「已发布明细」投影决定。
+            # 这里不能用本次投影覆盖 questions_list——那会丢掉既有已发布题目，
+            # 并让尚未 published 的子项提前出现在公开清单里。
+            # 复用分支只追加明细，清单交给 refresh_public_interview_projection 重建。
             detail_ids = []
             for item in items:
                 detail_ids.append(
@@ -553,6 +552,9 @@ def materialize_public_interview_from_projection(
                         },
                     )
                 )
+            # 用「已发布明细」重建清单：既保留既有已发布题目，也不会提前暴露
+            # 本次尚未 published 的子项（此时 approve 还没把 items 关联到新明细）。
+            refresh_public_interview_projection(conn, public_interview_id=interview_id)
             return interview_id, detail_ids
     interview_id = _insert_dynamic(conn, "interview", interview_values)
 
@@ -586,7 +588,9 @@ class StateConflict(Exception):
     code = "STATE_CONFLICT"
 
 
-APPROVABLE_STATES = ("pending_review", "changes_requested", "approved_for_processing", "failed")
+# contracts §3.2：允许 pending_review/changes_requested → approved_for_processing；
+# failed 是技术状态，必须走公共处理 retry 入口，不得重新 approve（否则会重复物化明细）。
+APPROVABLE_STATES = ("pending_review", "changes_requested", "approved_for_processing")
 WITHDRAWABLE_STATES = ("pending_review", "changes_requested")
 
 
@@ -689,7 +693,7 @@ def approve_public_contribution_v2(
             "revision = revision + 1, review_json = ?, review_projection_json = ?, "
             "projection_hash = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, "
             "updated_at = CURRENT_TIMESTAMP, error_message = NULL "
-            "WHERE id = ? AND revision = ? AND status IN ('pending_review','changes_requested','failed')",
+            "WHERE id = ? AND revision = ? AND status IN ('pending_review','changes_requested')",
             (
                 _json({"excluded_item_ids": sorted(excluded), "fields": projection["source"]}),
                 _json(projection),

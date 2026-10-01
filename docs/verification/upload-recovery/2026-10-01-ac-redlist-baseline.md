@@ -229,3 +229,31 @@ AC-029 六项要求的覆盖映射：
 ### 8.4 本轮顺带修掉的测试隔离缺陷
 
 `test_upload_recovery_stack.py` 的 fixture 原先逐模块 patch `get_db_connection`：**测试期间才被导入的模块会永久绑定那个闭包**（monkeypatch 没记录过它，teardown 无法还原），导致后续测试拿到已关闭的连接。现改为只 patch `DB_PATH` + ContextVar（原始实现本来就按这两者解析连接）。修复前「stack 文件 + AC-006 文件」同跑会红，修复后 7 passed。
+
+---
+
+## 9. Phase 3-2：AC-016（同 URL 追加 / approve 状态门）
+
+### 9.1 三处 spec 违反 → 已修（均带变异验证）
+
+| 违反 | spec 依据 | 修复 |
+|---|---|---|
+| 同 URL 复用分支用**本次投影**覆盖 `interview.questions_list` | contracts §3.3「清单只含 published 且未删除明细」 | 删掉该 UPDATE，改为复用分支末尾调用 `refresh_public_interview_projection` 按已发布明细权威重建 |
+| 尚未 published 的子项提前出现在公开清单 | 同上 | 同上（重建只看 `status='published'` + 有效 resolution） |
+| `failed` 请求可被重新 approve，重复物化明细 | contracts §3.2「failed 技术状态不重新 approve，使用公共处理 retry 入口」 | `APPROVABLE_STATES` 去掉 `failed`，approve 的 CAS `status IN (...)` 同步去掉 |
+
+新增用例（`backend/tests/services/test_public_contribution_recovery.py`）：
+`test_same_url_reuse_keeps_previously_published_questions`、`test_same_url_reuse_does_not_expose_unpublished_questions`、`test_failed_request_cannot_be_reapproved`。
+
+**变异验证（关键教训）**：这三处修复里，`APPROVABLE_STATES` 与 CAS 是**两道互相独立的门**——单独回退任一处，另一处仍会抛 `StateConflict`，用例依旧绿（会误判成"空转断言"）。必须**同时**回退两处才复现修复前行为 → 用例红（`DID NOT RAISE`）✅。同 URL 清单修复同理：删掉覆盖但保留重建仍绿，必须回到「覆盖 + 无重建」的完整修复前状态才红（2 failed）✅。
+
+### 9.2 证据
+
+```
+docker compose --profile test run --rm test uv run pytest \
+  backend/tests/services/test_public_contribution_recovery.py \
+  backend/tests/services/test_public_contributions_materialize.py \
+  backend/tests/services/test_public_contribution_transitions.py \
+  backend/tests/services/test_admin_public_contribution_retry.py -q
+→ 36 passed
+```
