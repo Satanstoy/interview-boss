@@ -278,3 +278,45 @@ assert DISTINCT root_import_id == [import_id]
 ```
 
 变异验证：同时禁用两条回填分支 → 该用例变红（`assert None is not None`，链路更早断）✅。恢复后 1 passed。
+
+---
+
+## 11. Phase 3-3：测试隔离缺陷（本轮最重要的隐性发现）
+
+### 11.1 症状
+
+AC-006 用例（原被整体 skip，本轮改为默认可运行）在**全量顺序**下变红：`sqlite3.ProgrammingError: Cannot operate on a closed database`；单独跑或只跑 upload 域则全绿。这正是"默认 skip 的测试从未真正验收"的代价——一旦真的运行，立刻暴露既有基础设施缺陷。
+
+### 11.2 根因（探针实测，非推测）
+
+临时探针在 `chat/` 之后打印仍持有测试闭包的模块，得到：
+
+```
+PROBE LEAK app.db.operations -> <function app_db_isolation.<locals>._test_get_db_connection>
+PROBE LEAK app.services.chat_service -> <function client.<locals>._test_get_db_connection>
+PROBE LEAK ... (18 个模块)
+```
+
+`client` / `app_db_isolation` 的 teardown 用**「当时的当前值」**当还原目标。一旦某模块残留上一次 fixture 的闭包（闭包捕获了已关闭的内存连接），该闭包就被当成 original 保存、并在下次 teardown 再装回去 —— **泄漏自我延续**。后续不使用 TestClient 的测试（如 AC-006）拿到已关闭连接即报错。
+
+### 11.3 修复
+
+`conftest.py` 在**任何补丁之前**捕获真实实现 `_TRUE_GET_DB_CONNECTION`，所有 teardown（含 `_sweep_modules_imported_while_patched` 对"测试期间新导入模块"的兜底）一律还原到它，不再还原「当前值」。
+
+**回归保护**：`backend/tests/infra/test_db_isolation_leak.py` 在**收集期**捕获真实实现（若现场取 `app.db.connection.get_db_connection` 会被泄漏本身污染 → 断言空转，这正是第一版断言测不出问题的原因），断言 teardown 后所有 `app.*` 模块共用它；另有一条自检确保断言不会空转。变异验证：回到完整修复前语义（teardown + sweep + client 三处）→ 变红 ✅。
+
+### 11.4 连带修复：被泄漏掩盖的脆弱测试
+
+修掉泄漏后 `backend/tests/interview/test_quiz_bank_mode.py` 的 4 条立即变红：其自造 `auth_client` 只 patch `app.db.connection`，而 routers 在 import 时就按值拷贝了 `get_db_connection`，一直靠泄漏"碰巧"指向别的测试的内存库才通过。已改用标准 `client`/`test_db` fixture（conftest 会 patch 全部 `app.*` 模块并正确还原）→ 4 passed。
+
+### 11.5 最终全量回归（三轮对比）
+
+| 时点 | 结果 |
+|---|---|
+| Phase 2 结束 | `13 failed / 3300 passed / 10 skipped` |
+| Phase 3 中途（未修隔离） | `15 failed / 3303 passed`（新增 2 条 AC-006 顺序污染） |
+| **Phase 3 结束（当前）** | **`10 failed / 3312 passed / 10 skipped`（17m53s）** |
+
+- 3 条 `test_upload_credential_preflight` 顺序污染 **消失**（同一泄漏根因）。
+- 剩余 10 条全部是既有 infra/部署契约失败，与上传链路无关：`test_public_ip_exposure` ×4、`test_oauth_dependency_lock_contract` ×3、`test_admin_defaults_contract` ×1、`test_docker_config` ×1、`test_real_stack_smoke_contract` ×1（读取本环境缺失/未改动的部署文件，隔离复现）。
+- **本轮改动引入的失败：0。**
