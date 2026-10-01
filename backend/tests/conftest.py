@@ -19,6 +19,14 @@ import pytest
 # explicitly to the plaintext fallback because they do not provision JWT keys.
 os.environ.setdefault("HARNESS_ALLOW_PLAINTEXT_ARTIFACTS", "1")
 
+# 真实原始实现（在任何 fixture 打补丁之前捕获）。teardown **必须**还原到它，
+# 不能还原「当时的当前值」：一旦某个模块残留了上一次 fixture 的测试闭包，
+# 那个闭包就会被当成 original 保存并在下次 teardown 再装回去，泄漏自我延续，
+# 后续测试会拿到已关闭的连接（Cannot operate on a closed database）。
+import app.db.connection as _db_connection_module  # noqa: E402
+
+_TRUE_GET_DB_CONNECTION = _db_connection_module.get_db_connection
+
 
 # ── 代理清理（防止 socks5h 代理导致 httpx 初始化失败）────────────
 
@@ -201,7 +209,7 @@ def _sweep_modules_imported_while_patched(db_module, test_get_db_connection, syn
         if not mod_name.startswith("app.") or mod is None:
             continue
         if getattr(mod, "get_db_connection", None) is test_get_db_connection:
-            mod.get_db_connection = db_module.get_db_connection
+            mod.get_db_connection = _TRUE_GET_DB_CONNECTION
         if getattr(mod, "run_db", None) is sync_run_db:
             mod.run_db = db_module.run_db
 
@@ -221,6 +229,7 @@ def app_db_isolation(test_db):
         return func()
 
     restores = []
+    patched_conn_modules = []
 
     def _test_get_db_connection():
         return test_db
@@ -232,7 +241,7 @@ def app_db_isolation(test_db):
             restores.append((mod, "run_db", mod.run_db))
             mod.run_db = _sync_run_db
         if hasattr(mod, "get_db_connection"):
-            restores.append((mod, "get_db_connection", mod.get_db_connection))
+            patched_conn_modules.append(mod)
             mod.get_db_connection = _test_get_db_connection
 
     token = db_module._db_conn_var.set(test_db)
@@ -240,6 +249,9 @@ def app_db_isolation(test_db):
     db_module._db_conn_var.reset(token)
     for mod, attr, original in restores:
         setattr(mod, attr, original)
+    # get_db_connection 一律还原到真实实现（不是「当时的当前值」，见文件顶部注释）
+    for mod in patched_conn_modules:
+        mod.get_db_connection = _TRUE_GET_DB_CONNECTION
     _sweep_modules_imported_while_patched(db_module, _test_get_db_connection, _sync_run_db)
 
 
@@ -315,7 +327,10 @@ def client(test_db):
 
     # 恢复原始函数引用
     for _, (mod, attr, orig) in _patches.items():
-        setattr(mod, attr, orig)
-    for mod, orig in _module_patches:
-        mod.get_db_connection = orig
+        if attr == "get_db_connection":
+            mod.get_db_connection = _TRUE_GET_DB_CONNECTION
+        else:
+            setattr(mod, attr, orig)
+    for mod, _orig in _module_patches:
+        mod.get_db_connection = _TRUE_GET_DB_CONNECTION
     _sweep_modules_imported_while_patched(db_module, _test_get_db_connection, _sync_run_db)

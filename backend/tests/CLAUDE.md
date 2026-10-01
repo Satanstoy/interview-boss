@@ -36,6 +36,12 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 
 **回归保护**：`backend/tests/chat/test_chat.py::test_api_does_not_write_production_db` 断言 API 测试前后生产库 `chat_conversations` 行数不变。修改 conftest 的 patch 范围时必须跑该测试。
 
+### DB 隔离 fixture 的还原契约（重要）
+
+`client` / `app_db_isolation` 的 teardown **必须**把 `get_db_connection` 还原到 conftest 在打补丁前捕获的真实实现（`_TRUE_GET_DB_CONNECTION`），**不能**还原「当时的当前值」：一旦某个模块残留了上一次 fixture 的测试闭包（捕获了已关闭的内存连接），该闭包会被当成 original 保存并在下次 teardown 再装回去，泄漏自我延续，后续不使用 TestClient 的测试会报 `Cannot operate on a closed database`（2026-10-01 实测：`chat/` 跑完后 `app.db.operations` 持有 `app_db_isolation` 闭包）。
+
+**回归保护**：`backend/tests/infra/test_db_isolation_leak.py` 在收集期捕获真实实现，断言 teardown 后所有 `app.*` 模块共用它（含一条自检，防止断言空转）。修改 conftest 的 patch/还原逻辑时必须跑该文件。
+
 ## 目录结构
 
 | 目录 | 测试内容 |
