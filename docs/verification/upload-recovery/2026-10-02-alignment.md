@@ -6,9 +6,9 @@
 
 ## 结论
 
-个人题库写入、普通用户申请公共化、审核后公共投影、按题关联与恢复、scope 预检/账本、旧 worker 写 fencing 已有代码和回归覆盖；stage 记录也统一为 spec 中的阶段名。AC-029 有 HTTP、worker 函数和逐题 ID trace 验证。
+个人题库写入、普通用户申请公共化、审核后公共投影、按题关联与恢复、scope 预检/账本、旧 worker 写 fencing 已有代码和回归覆盖；stage 记录也统一为 spec 中的阶段名。AC-029 有 HTTP、worker 函数和逐题 ID trace 验证，但仍缺既有公共 canonical 命中分支与真实 Redis/ARQ/browser 分享审核流程。
 
-**核心个人/公共题库流程与 AC-029 有回归覆盖；AC-028 的真实浏览器活体栈验收仍为 `not-run`。** 已加入 browser + API/Redis/worker harness，但修复 handoff 后重试时主机根分区已满，OAuth SQLite 启动报告 `database or disk is full`，浏览器断言没有执行。AC-029 中提取/分类由 provider stub 驱动并核对物理调用账本；聚类决策用确定性结果 stub。管理员公共直导的审批审计验证从 `persist_public_node` 边界执行；普通用户分享、管理员审核 HTTP 和 worker 路径由 AC-029 覆盖。
+**全量结论：未完全对齐。AC-028 的个人上传/worker 停启/浏览器精确结果腿已在隔离 disposable Compose 栈通过 1 项；AC-028 整项仍为 partial。AC-029 也为 partial。** 详见[全量 spec 审计](2026-10-02-spec-audit.md)：它同时记录了四个违背 ADR-0048 的管理员旧入口，以及本次活体测试和完整 runner 的差别。历史记录中的“not-run”是当时事实，现已由本次隔离栈实测更新；后续浏览器断言没有执行的旧运行仍保留作历史记录。
 
 ## 本轮修复与 TDD 证据
 
@@ -55,6 +55,6 @@ docker compose --profile test run --rm \
 
 ## 未运行与边界
 
-- AC-028 活体浏览器腿、独立 worker 进程强制终止/重启后的浏览器验收：**not-run**。harness 已在仓库中，但本机根分区满导致 OAuth SQLite 初始化失败，浏览器断言没有执行。可用空间恢复后运行 `TMPDIR=/dev/shm REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh` 重试；此命令使用隔离的 disposable Compose 项目。
+- AC-028 完整浏览器验收：**partial**。个人上传→queued→同一 worker 停/启→浏览器打开正确结果已在隔离 disposable Compose 栈通过 1 项；公共申请/审核的浏览器流程仍未覆盖。完整 `real_stack_smoke.sh` 本轮在 AC-028 前置 smoke 的 Playwright response body 读取处失败，细节见[全量 spec 审计](2026-10-02-spec-audit.md)。此前因磁盘满启动失败的尝试仍作为历史记录保留。
 - 没有调用真实模型供应商；provider 相关测试使用确定性 stub，不验证供应商可用性、模型质量或真实费用。
 - 管理员公共直导的审计测试覆盖持久化节点边界，没有单独从管理员直导 HTTP 入口跑完整公共导入链路。

@@ -2,7 +2,7 @@
 
 **目标：** 以 `docs/superpowers/specs/2026-09-29-upload-recovery/` 为验收源，对最新上传实现补齐仍未闭环的行为。按每一项红→绿→重构推进；不把 service 单测或 mock API 结果记作真实链路验收。
 
-**本轮结论：** 上传个人题库、普通用户申请公共化、审核投影、逐题发布/恢复、scope 计费和旧 worker 写栅栏已有后端回归支持。stage 旧名已迁移到合同词汇。AC-028 的真实浏览器+活体 API/worker 腿仍为 `not-run`；见[验证记录](../../verification/upload-recovery/2026-10-02-alignment.md)。
+**本轮结论：** 上传个人题库、普通用户申请公共化、审核投影、逐题发布/恢复、scope 计费和旧 worker 写栅栏已有后端回归支持。stage 旧名已迁移到合同词汇。AC-028 的个人上传/worker 停启/浏览器结果腿已在 disposable Compose 栈实跑 1 项通过；公共分享审核腿未覆盖，故整项仍是 partial。另有管理员遗留读写路径违背已接受 ADR-0048。见[验证记录](../../verification/upload-recovery/2026-10-02-alignment.md)与[全量对账](../../verification/upload-recovery/2026-10-02-spec-audit.md)。
 
 ## Task 1：锁定上传模型调用的账本契约
 
@@ -72,5 +72,6 @@
 - [x] 核对隔离 API/SQLite/Redis/worker 结果，确认现有栈仍缺真实浏览器消费和独立 worker 进程重启。
 - [x] 增加活体栈 Playwright harness：浏览器提交私有面经、观察 queued root、runner 重启同一个 worker、浏览器打开精确结果；mock API E2E 不代替此验收。
 - [x] 按 AC-004 给预检 worker 的业务 job handoff 增加真实隔离 Redis 测试；先红（job 创建但无 `arq_job_id`），再绿（worker 立即投递）。
-- [ ] 活体浏览器腿：`not-run`。修复 handoff 后重试时，主机根分区已满，隔离栈在 OAuth SQLite 启动时报告 `database or disk is full`；浏览器断言没有执行。
+- [x] 活体个人上传腿：在隔离 disposable Compose 栈中实跑浏览器提交、观察 queued、runner 停/启同一 worker、等待完成并打开准确结果；1 passed in 26.9s。旧的磁盘满尝试仍是历史失败记录，不再代表当前状态。
+- [ ] 完整 AC-028：需要把公共申请/管理员审核纳入真实浏览器+API/Redis/ARQ worker 停启恢复链路；单独个人上传腿不满足整项 AC。
 - [x] 跑 361 项上传/公共贡献相关 pytest（另 2 项跳过）、14 项前端 mock Playwright、前端 build、`git diff --check` 和 Python AST 解析；结果见验证记录。
