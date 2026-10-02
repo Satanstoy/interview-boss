@@ -2,7 +2,7 @@
 
 **目标：** 以 `docs/superpowers/specs/2026-09-29-upload-recovery/` 为验收源，对最新上传实现补齐仍未闭环的行为。按每一项红→绿→重构推进；不把 service 单测或 mock API 结果记作真实链路验收。
 
-**本轮结论：** 上传个人题库、普通用户申请公共化、审核投影、逐题发布/恢复、scope 计费和旧 worker 写栅栏已有后端回归支持。stage 旧名已迁移到合同词汇。AC-028 的个人上传/worker 停启/浏览器结果腿已在 disposable Compose 栈实跑 1 项通过；公共分享审核腿未覆盖，故整项仍是 partial。另有管理员遗留读写路径违背已接受 ADR-0048。见[验证记录](../../verification/upload-recovery/2026-10-02-alignment.md)与[全量对账](../../verification/upload-recovery/2026-10-02-spec-audit.md)。
+**本轮结论：** 上传个人题库、普通用户申请公共化、审核投影、逐题发布/恢复、scope 计费和旧 worker 写栅栏已有后端回归支持。提交 `3a2020b6` 修复了管理员遗留读写 scope，并增加 AC-029 既有公共 canonical 命中与逐题 resolve checkpoint。该提交已部署且 worker 已重启；部署镜像上的 disposable runner 两项通过。AC-028/029 仍 partial，因为真实浏览器公共分享审核/恢复腿还未覆盖。见[验证记录](../../verification/upload-recovery/2026-10-02-alignment.md)与[全量对账](../../verification/upload-recovery/2026-10-02-spec-audit.md)。
 
 ## Task 1：锁定上传模型调用的账本契约
 
@@ -72,6 +72,17 @@
 - [x] 核对隔离 API/SQLite/Redis/worker 结果，确认现有栈仍缺真实浏览器消费和独立 worker 进程重启。
 - [x] 增加活体栈 Playwright harness：浏览器提交私有面经、观察 queued root、runner 重启同一个 worker、浏览器打开精确结果；mock API E2E 不代替此验收。
 - [x] 按 AC-004 给预检 worker 的业务 job handoff 增加真实隔离 Redis 测试；先红（job 创建但无 `arq_job_id`），再绿（worker 立即投递）。
-- [x] 活体个人上传腿：在隔离 disposable Compose 栈中实跑浏览器提交、观察 queued、runner 停/启同一 worker、等待完成并打开准确结果；1 passed in 26.9s。旧的磁盘满尝试仍是历史失败记录，不再代表当前状态。
+- [x] 活体个人上传腿：在隔离 disposable Compose 栈中实跑浏览器提交、观察 queued、runner 停/启同一 worker、等待完成并打开准确结果；部署镜像复跑 1 passed in 26.7s。旧的磁盘满尝试仍是历史记录。
+- [x] 修复 real-stack 前置 smoke 在导航结束后读取 CDP response body 的测试脚本问题；完整 `scripts/real_stack_smoke.sh` 现退出码 0。
 - [ ] 完整 AC-028：需要把公共申请/管理员审核纳入真实浏览器+API/Redis/ARQ worker 停启恢复链路；单独个人上传腿不满足整项 AC。
-- [x] 跑 361 项上传/公共贡献相关 pytest（另 2 项跳过）、14 项前端 mock Playwright、前端 build、`git diff --check` 和 Python AST 解析；结果见验证记录。
+- [x] 已有 361 项 spec 后端 pytest（另 2 项跳过）与 14 项前端 mock Playwright 记录；本轮重跑 86 项权限/上传后端回归和 16 项上传/审核 Playwright mock；结果见验证记录。
+
+## Task 6：修复管理员旧入口对个人/公共 scope 的越界
+
+**修复提交：** `3a2020b6`。
+
+- [x] 管理员 reprocess/SSE 只处理允许的公共已发布面经；回收站与 tagged detail 按来源实体 scope 过滤；分析状态不扫描其他用户私人元数据。
+- [x] 管理员个人题库 rebuild 不发布私人 canonical；legacy retry 不允许管理员跨 owner 代用户重放，actor 绑定当前认证用户。
+- [x] 先让新反例红（7 failed / 1 pass），修复后组合权限与上传链路回归 86 passed。
+- [x] 部署 backend，并单独重启已有 worker，确认两者使用同一镜像 ID。
+- [ ] 完整 AC-029：把既有公共 canonical hit、审核投影、公共 worker 失败/重试和 U2/Admin 隔离放进 live Redis/ARQ/browser 分享审核流程。

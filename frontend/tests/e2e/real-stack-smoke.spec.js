@@ -27,7 +27,10 @@ test.describe('disposable real stack', () => {
     await page.goto('/jd')
     const interviewListResponse = await interviewListResponsePromise
     expect(new URL(interviewListResponse.url()).searchParams.get('sort')).toBe('created_at_desc')
-    expect(interviewListResponse.status(), await interviewListResponse.text()).toBe(200)
+    // This response belongs to a page navigation. Reading its body after the
+    // navigation has completed can lose the CDP response id; the smoke only
+    // needs to verify the routed request and status here.
+    expect(interviewListResponse.status()).toBe(200)
 
     await page.goto('/import')
     await expect(page.getByText('文本内容')).toBeVisible()
@@ -42,7 +45,7 @@ test.describe('disposable real stack', () => {
     })
     await page.getByRole('button', { name: '提交解析' }).click()
     const accepted = await acceptedResponse
-    expect(accepted.status(), await accepted.text()).toBe(202)
+    expect(accepted.status()).toBe(202)
     const acceptedBody = await accepted.json()
     const authorization = accepted.request().headers().authorization
     expect(authorization).toMatch(/^Bearer /)
