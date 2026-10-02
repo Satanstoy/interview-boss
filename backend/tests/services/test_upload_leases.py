@@ -446,6 +446,121 @@ async def test_cluster_canonical_write_is_fenced_after_model_work(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_withdrawn_public_contribution_is_not_written_after_model_work(monkeypatch):
+    """A worker already inside its model call must recheck withdrawal before DB writes."""
+
+    import app.db.connection as db_connection
+    import app.db.operations as db_operations
+    import app.services.pipeline.batch as batch_module
+
+    conn = _db()
+    conn.execute("INSERT INTO job_positions (name) VALUES ('后端')")
+    interview_cursor = conn.execute(
+        "INSERT INTO interview (url, company, round, owner_id, status, job_position) "
+        "VALUES ('', '', '', NULL, 'approved', '后端')"
+    )
+    interview_id = int(interview_cursor.lastrowid)
+    detail_cursor = conn.execute(
+        "INSERT INTO questions_detail (interview_id, question, cat1, cat2, tags, job_position) "
+        "VALUES (?, '撤回中的公共题', '数据库', 'Redis', 'persistence', '后端')",
+        (interview_id,),
+    )
+    detail_id = int(detail_cursor.lastrowid)
+    request_cursor = conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(source_type, source_id, requester_id, status, snapshot_json) "
+        "VALUES ('interview', 1, 101, 'processing', '{}')"
+    )
+    request_id = int(request_cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(request_id, source_item_type, source_item_id, ordinal, status, snapshot_json, public_detail_id) "
+        "VALUES (?, 'question', 1, 1, 'processing', '{}', ?)",
+        (request_id, detail_id),
+    )
+    conn.commit()
+    monkeypatch.setattr(batch_module, "get_db_connection", lambda: conn)
+    monkeypatch.setattr(db_operations, "get_db_connection", lambda: conn)
+
+    async def run_db(function):
+        return function()
+
+    monkeypatch.setattr(db_connection, "run_db", run_db)
+    monkeypatch.setattr(batch_module, "sanitize_batch", lambda rows: (rows, []))
+    monkeypatch.setattr(batch_module, "_load_existing_clusters_by_cat2", AsyncMock(return_value={}))
+    monkeypatch.setattr(batch_module, "get_index_manager", lambda: MagicMock())
+    monkeypatch.setattr(db_operations, "cleanup_interview_question_bank_sources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.services.embedding_service.encode_texts",
+        lambda *_args, **_kwargs: __import__("numpy").zeros((1, 3), dtype="float32"),
+    )
+
+    async def withdraw_during_model_call(*_args, **_kwargs):
+        conn.execute(
+            "UPDATE public_contribution_requests SET status = 'withdrawn' WHERE id = ?",
+            (request_id,),
+        )
+        conn.execute(
+            "UPDATE public_contribution_items SET status = 'rejected' WHERE request_id = ?",
+            (request_id,),
+        )
+        conn.execute(
+            "UPDATE analysis_queue SET status = 'cancelled' WHERE contribution_request_id = ?",
+            (request_id,),
+        )
+        conn.commit()
+        return {
+            "matched_to_existing": [],
+            "new_clusters": [
+                {
+                    "ids": [str(detail_id)],
+                    "representative": "撤回中的公共题",
+                    "items": [{"id": detail_id, "question": "撤回中的公共题"}],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        batch_module,
+        "process_incremental_batch",
+        AsyncMock(side_effect=withdraw_during_model_call),
+    )
+    await batch_module.cluster_batch(
+        [
+            {
+                "queue_id": 1,
+                "qd_id": detail_id,
+                "question": "撤回中的公共题",
+                "cat1": "数据库",
+                "cat2": "Redis",
+                "tags": "persistence",
+                "url": "",
+                "company": "",
+                "round": "",
+                "job_position": "后端",
+                "owner_id": None,
+                "interview_id": interview_id,
+                "contribution_request_id": request_id,
+            }
+        ],
+        return_new_ids=True,
+    )
+
+    assert conn.execute(
+        "SELECT COUNT(*) FROM question_bank WHERE question = '撤回中的公共题'"
+    ).fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM question_resolutions WHERE detail_id = ? AND invalidated_at IS NULL",
+        (detail_id,),
+    ).fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE request_id = ?",
+        (request_id,),
+    ).fetchone()["status"] == "rejected"
+    conn.close()
+
+
+@pytest.mark.asyncio
 async def test_cluster_scope_write_is_fenced_after_model_work(monkeypatch):
     import app.db.connection as db_connection
     import app.db.operations as db_operations

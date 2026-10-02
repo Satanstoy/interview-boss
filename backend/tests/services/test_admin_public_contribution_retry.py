@@ -311,8 +311,8 @@ def test_withdraw_http_uses_v2_and_409_on_stale(client, test_db):
         assert resp.json()["status"] == "withdrawn"
 
 
-def test_withdraw_http_conflicts_after_approve(client, test_db):
-    """已批准（approved_for_processing）再撤回 → 409，不能假装撤回。"""
+def test_withdraw_http_after_approve_cancels_unfinished_work(client, test_db):
+    """申请已进入公共处理后仍可撤回，并取消未完成队列项。"""
 
     from app.asgi import app
     from app.core.auth import get_admin_user, get_current_user
@@ -342,4 +342,9 @@ def test_withdraw_http_conflicts_after_approve(client, test_db):
         assert approved.status_code == 200, approved.text
     for _ in _as_user():
         resp = client.post("/api/public-contributions/1/withdraw", json={})
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "withdrawn"
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM analysis_queue WHERE contribution_request_id = 1 "
+        "AND status IN ('pending', 'processing')"
+    ).fetchone()[0] == 0

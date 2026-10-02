@@ -21,6 +21,7 @@ class UploadLLMContext:
     credential_scope: str
     user_id: int | None
     credential: object | None = None
+    api_format: str | None = None
 
 
 _current_upload_llm_context: contextvars.ContextVar[UploadLLMContext | None] = (
@@ -166,6 +167,7 @@ async def call_provider_with_upload_ledger(
                     payer_user_id=credential.payer_user_id,
                     provider=effective_provider,
                     model=effective_model,
+                    api_format=context.api_format or credential.api_format,
                     config_fingerprint=credential.config_fingerprint,
                 )
                 conn.commit()

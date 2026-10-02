@@ -304,7 +304,7 @@ def test_question_resolutions_allow_one_current_per_detail():
 def test_upload_llm_calls_unique_call_key():
     conn = _fresh()
     cols = _columns(conn, "upload_llm_calls")
-    assert {"call_key", "credential_scope", "payer_type", "payer_user_id"} <= cols
+    assert {"call_key", "credential_scope", "payer_type", "payer_user_id", "api_format"} <= cols
     conn.close()
 
 

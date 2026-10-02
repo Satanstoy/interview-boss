@@ -75,6 +75,18 @@ def record_resolution(
                 ).fetchone()
                 if row is None or row["owner_id"] != occurrence_owner_id:
                     raise ResolutionConflict("私人原题只能关联本人的私人规范题")
+            else:
+                row = conn.execute(
+                    "SELECT owner_id, status, deleted_at FROM question_bank WHERE id = ?",
+                    (canonical_id,),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["owner_id"] is not None
+                    or row["status"] != "approved"
+                    or row["deleted_at"] is not None
+                ):
+                    raise ResolutionConflict("私人原题只能关联有效的公共规范题")
         else:
             if canonical_scope != "public":
                 raise ResolutionConflict("公共原题只能关联公共规范题")

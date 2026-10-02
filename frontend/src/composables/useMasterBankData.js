@@ -35,6 +35,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const hasMore = ref(true)
   const isLoadingMore = ref(false)
   const requestVersion = ref(0)
+  const interviewPageRequestVersion = ref(0)
 
   // ── Filters ──
   const bankFilter = ref('all')  // all/public/mine（题库过滤口径）
@@ -74,7 +75,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     hasMore.value = true
     filteredTagCountsFromServer.value = []
     try {
-      const [jdResp, intResp, masterResp] = await Promise.all([
+      const [jdResp, , masterResp] = await Promise.all([
         api.fetchJdData(), loadInterviewPage(1, 100), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
       ])
       if (currentRequestVersion !== requestVersion.value) return
@@ -83,9 +84,6 @@ export function useMasterBankData({ onAfterFetch } = {}) {
           .then(source => { interviewSeasonSource.value = source })
           .catch(() => {})
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
-      // 面经：服务端分页数据（seasons 从独立全集源推断）
-      interviewData.value = interviewPageData.value
-      interviewTotal.value = intResp.total ?? interviewData.value.length
       const items = (masterResp.items || masterResp).map(decorateQuestion)
       masterBank.value = items
       // 检查是否还有更多数据
@@ -111,7 +109,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
       page_size: pageSize,
       season: filterSeason.value || undefined,
       position_id: interviewPositionId.value || undefined,
-      sort: interviewSortOrder.value === 'asc' ? 'created_asc' : 'created_desc',
+      sort: interviewSortOrder.value === 'asc' ? 'created_at_asc' : 'created_at_desc',
       scope: 'all',
     })
     return { items: resp.items || resp, total: resp.total ?? (resp.items || resp).length }
@@ -129,7 +127,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
       page_size: 500,
       season: filterSeason.value || undefined,
       position_id: interviewPositionId.value || undefined,
-      sort: 'created_desc',
+      sort: 'created_at_desc',
       scope: 'all',
     })
     return resp.items || resp
@@ -137,9 +135,13 @@ export function useMasterBankData({ onAfterFetch } = {}) {
 
   /** 面经列表换页：向服务端拉取目标页并刷新当前页数据（合约 §4.5 server 模式） */
   const loadInterviewPage = async (page = 1, pageSize = 20) => {
+    const currentRequestVersion = ++interviewPageRequestVersion.value
     const { items, total } = await fetchInterviewPage(page, pageSize)
-    interviewPageData.value = items.map(item => ({ ...item }))
-    interviewTotal.value = total
+    if (currentRequestVersion === interviewPageRequestVersion.value) {
+      interviewPageData.value = items.map(item => ({ ...item }))
+      interviewData.value = interviewPageData.value
+      interviewTotal.value = total
+    }
     return { items, total }
   }
 

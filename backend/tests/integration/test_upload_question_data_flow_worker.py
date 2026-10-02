@@ -27,12 +27,14 @@ USER_CONFIG = {
     "base_url": "https://user-stub.invalid/v1",
     "model": "user-test-model",
     "timeout": 5,
+    "api_format": "chat",
 }
 GLOBAL_CONFIG = {
     "api_key": "test-system-key",
     "base_url": "https://system-stub.invalid/v1",
     "model": "system-test-model",
     "timeout": 5,
+    "api_format": "chat",
 }
 
 
@@ -57,14 +59,20 @@ async def test_http_upload_to_personal_and_public_question_trace(
             (user_id, f"u{user_id}", is_admin),
         )
     test_db.execute(
-        "INSERT OR REPLACE INTO user_llm_config (user_id, api_key, base_url, model) "
-        "VALUES (101, ?, ?, ?)",
-        (USER_CONFIG["api_key"], USER_CONFIG["base_url"], USER_CONFIG["model"]),
+        "INSERT OR REPLACE INTO user_llm_config (user_id, api_key, base_url, model, api_format) "
+        "VALUES (101, ?, ?, ?, ?)",
+        (
+            USER_CONFIG["api_key"],
+            USER_CONFIG["base_url"],
+            USER_CONFIG["model"],
+            USER_CONFIG["api_format"],
+        ),
     )
     for key, value in (
         ("llm_api_key", GLOBAL_CONFIG["api_key"]),
         ("llm_base_url", GLOBAL_CONFIG["base_url"]),
         ("llm_model", GLOBAL_CONFIG["model"]),
+        ("llm_api_format", GLOBAL_CONFIG["api_format"]),
     ):
         test_db.execute(
             "INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)",
@@ -189,9 +197,6 @@ async def test_http_upload_to_personal_and_public_question_trace(
     with patch(
         "app.services.llm._make_client", return_value=fake_llm_client
     ), patch(
-        "app.services.llm.resolve_api_format_async",
-        new=AsyncMock(return_value="chat"),
-    ), patch(
         "app.services.llm._should_use_response_format", return_value=False
     ), patch(
         "app.db.connection.get_taxonomy_for_position",
@@ -208,7 +213,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
     test_db.commit()
 
     extract_calls = test_db.execute(
-        "SELECT credential_scope, payer_type, payer_user_id, provider, model, "
+        "SELECT credential_scope, payer_type, payer_user_id, provider, model, api_format, "
         "config_fingerprint, status, input_tokens, output_tokens FROM upload_llm_calls "
         "WHERE root_import_id = ? AND stage = 'extract'",
         (import_id,),
@@ -221,6 +226,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
         101,
         "openai",
         USER_CONFIG["model"],
+        "chat",
         extract_call["config_fingerprint"],
         "succeeded",
         37,
@@ -229,7 +235,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
     assert extract_call["config_fingerprint"]
 
     classify_calls = test_db.execute(
-        "SELECT credential_scope, payer_type, payer_user_id, provider, model, "
+        "SELECT credential_scope, payer_type, payer_user_id, provider, model, api_format, "
         "config_fingerprint, status "
         "FROM upload_llm_calls WHERE root_import_id = ? AND stage = 'classify'",
         (import_id,),
@@ -241,6 +247,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
         101,
         "openai",
         USER_CONFIG["model"],
+        "chat",
         classify_calls[0]["config_fingerprint"],
         "succeeded",
     )
@@ -316,6 +323,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
 
     private_resolution_rows = test_db.execute(
         "SELECT d.source_ordinal, d.cat1, d.cat2, d.tags, r.status, r.canonical_scope, "
+        "qb.id AS canonical_id, "
         "qb.owner_id, qb.cat1 AS canonical_cat1, qb.cat2 AS canonical_cat2, qb.tags AS canonical_tags "
         "FROM questions_detail d JOIN question_resolutions r ON r.detail_id = d.id "
         "AND r.invalidated_at IS NULL JOIN question_bank qb ON qb.id = r.canonical_id "
@@ -328,6 +336,18 @@ async def test_http_upload_to_personal_and_public_question_trace(
     assert [row["canonical_cat1"] for row in private_resolution_rows] == [q[2] for q in QUESTIONS]
     assert [row["canonical_cat2"] for row in private_resolution_rows] == [q[3] for q in QUESTIONS]
     assert all(q[4] in row["canonical_tags"] for row, q in zip(private_resolution_rows, QUESTIONS))
+
+    preserved_private_canonical_id = int(private_resolution_rows[0]["canonical_id"])
+    test_db.execute(
+        "INSERT INTO user_practice_history (user_id, question_bank_id, user_answer, score) "
+        "VALUES (101, ?, '保留的个人练习答案', 88)",
+        (preserved_private_canonical_id,),
+    )
+    test_db.execute(
+        "INSERT INTO user_question_review (user_id, question_bank_id, state, proficiency) "
+        "VALUES (101, ?, 'review', 4)",
+        (preserved_private_canonical_id,),
+    )
 
     contribution = test_db.execute(
         "SELECT id, status FROM public_contribution_requests WHERE requester_id = 101 "
@@ -527,6 +547,39 @@ async def test_http_upload_to_personal_and_public_question_trace(
     assert [row["source_ordinal"] for row in final_public_rows] == [10, 20, 30, 40]
     assert final_public_rows[0]["question"].startswith("已审核编辑：")
     assert "分布式锁如何避免误释放" not in "\n".join(row["question"] for row in final_public_rows)
+
+    promoted_occurrences = test_db.execute(
+        "SELECT source.source_ordinal, current_resolution.canonical_scope, "
+        "current_resolution.status, current_resolution.canonical_id, "
+        "public_resolution.canonical_id AS public_canonical_id, private_canonical.deleted_at "
+        "FROM public_contribution_items item "
+        "JOIN questions_detail source ON source.id = item.source_item_id "
+        "JOIN question_resolutions current_resolution ON current_resolution.detail_id = source.id "
+        "AND current_resolution.invalidated_at IS NULL "
+        "JOIN question_resolutions public_resolution ON public_resolution.detail_id = item.public_detail_id "
+        "AND public_resolution.invalidated_at IS NULL "
+        "JOIN question_bank private_canonical ON private_canonical.id = ("
+        "  SELECT old_resolution.canonical_id FROM question_resolutions old_resolution "
+        "  WHERE old_resolution.detail_id = source.id AND old_resolution.canonical_scope = 'private' "
+        "  ORDER BY old_resolution.id DESC LIMIT 1) "
+        "WHERE item.request_id = ? AND item.status = 'published' ORDER BY source.source_ordinal",
+        (contribution["id"],),
+    ).fetchall()
+    assert len(promoted_occurrences) == 4
+    assert all(row["canonical_scope"] == "public" for row in promoted_occurrences)
+    assert all(row["status"] == "matched" for row in promoted_occurrences)
+    assert all(row["canonical_id"] == row["public_canonical_id"] for row in promoted_occurrences)
+    assert all(row["deleted_at"] is not None for row in promoted_occurrences)
+    assert tuple(test_db.execute(
+        "SELECT user_answer, score FROM user_practice_history "
+        "WHERE user_id = 101 AND question_bank_id = ?",
+        (preserved_private_canonical_id,),
+    ).fetchone()) == ("保留的个人练习答案", 88)
+    assert tuple(test_db.execute(
+        "SELECT state, proficiency FROM user_question_review "
+        "WHERE user_id = 101 AND question_bank_id = ?",
+        (preserved_private_canonical_id,),
+    ).fetchone()) == ("review", 4)
     public_scope_lease = test_db.execute(
         "SELECT scope_key, generation, holder_token FROM upload_scope_leases "
         "WHERE scope_key LIKE '%:public' ORDER BY scope_key LIMIT 1"
@@ -557,7 +610,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
         ).fetchall()
     }]
     assert len(public_questions) == 4
-    assert len([item for item in personal_bank["items"] if item["owner_id"] == 101]) == 5
+    assert len([item for item in personal_bank["items"] if item["owner_id"] == 101]) == 1
     assert any(item["id"] == public_interview_id and item["question_count"] == 4 for item in experiences)
 
     as_user({"id": 102, "is_admin": 0, "username": "u102"})

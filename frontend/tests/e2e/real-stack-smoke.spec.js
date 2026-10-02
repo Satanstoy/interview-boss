@@ -20,8 +20,19 @@ test.describe('disposable real stack', () => {
     await expect(page).toHaveURL(/\/master-bank/, { timeout: 30000 })
     await configureDisposableUserModel(page)
 
+    const interviewListResponsePromise = page.waitForResponse((response) => {
+      const requestUrl = new URL(response.url())
+      return requestUrl.pathname === '/api/data/interview' && response.request().method() === 'GET'
+    })
+    await page.goto('/jd')
+    const interviewListResponse = await interviewListResponsePromise
+    expect(new URL(interviewListResponse.url()).searchParams.get('sort')).toBe('created_at_desc')
+    expect(interviewListResponse.status(), await interviewListResponse.text()).toBe(200)
+
     await page.goto('/import')
     await expect(page.getByText('文本内容')).toBeVisible()
+    await page.getByText('自动识别', { exact: true }).click()
+    await page.getByRole('option', { name: 'JD', exact: true }).click()
     await page.getByPlaceholder('粘贴面经或 JD 内容...').fill(
       '职位描述\n公司：InterviewBoss Stub\n岗位：后端工程师\n职位要求：Python、SQLite。',
     )
@@ -32,7 +43,15 @@ test.describe('disposable real stack', () => {
     await page.getByRole('button', { name: '提交解析' }).click()
     const accepted = await acceptedResponse
     expect(accepted.status(), await accepted.text()).toBe(202)
-    const { import_id: importId } = await accepted.json()
+    const acceptedBody = await accepted.json()
+    const authorization = accepted.request().headers().authorization
+    expect(authorization).toMatch(/^Bearer /)
+    const statusResponse = await page.request.get(new URL(acceptedBody.status_url, accepted.url()).href, {
+      headers: { authorization },
+    })
+    expect(statusResponse.status()).toBe(200)
+    expect((await statusResponse.json()).resolved_type).toBe('jd')
+    const { import_id: importId } = acceptedBody
 
     await page.getByRole('button', { name: '上传任务中心' }).click()
     const task = page.locator('li').filter({ hasText: importId })

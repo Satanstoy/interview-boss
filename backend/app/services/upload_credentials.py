@@ -220,6 +220,7 @@ def reserve_llm_call(
     payer_user_id: int | None = None,
     provider: str | None = None,
     model: str | None = None,
+    api_format: str | None = None,
     config_fingerprint: str | None = None,
     daily_limit: int | None = None,
     system_daily_limit: int | None = None,
@@ -304,8 +305,8 @@ def reserve_llm_call(
         cursor = conn.execute(
             "INSERT INTO upload_llm_calls ("
             "  root_import_id, stage, unit_key, call_key, credential_scope, "
-            "  payer_type, payer_user_id, provider, model, config_fingerprint, status"
-            ") VALUES (?,?,?,?,?,?,?,?,?,?,'reserved')",
+            "  payer_type, payer_user_id, provider, model, api_format, config_fingerprint, status"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,'reserved')",
             (
                 root_import_id,
                 stage,
@@ -316,6 +317,7 @@ def reserve_llm_call(
                 payer_user_id,
                 provider,
                 model,
+                api_format,
                 config_fingerprint,
             ),
         )

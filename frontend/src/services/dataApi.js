@@ -13,7 +13,7 @@ export const fetchInterviewData = (params = {}) => {
   const query = new URLSearchParams({
     page: params.page || 1,
     page_size: params.page_size || 100,
-    sort: params.sort || 'created_desc',
+    sort: params.sort || 'created_at_desc',
     scope: params.scope || 'all',
     ...cleanParams,
   })

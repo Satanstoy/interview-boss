@@ -521,15 +521,60 @@ async def cluster_batch(
         new_qb_ids = []
         try:
             _assert_upload_write_fences(conn, job_fence, scope_fence)
-            apply_matched(conn, matched_rows, job_position, answer_cache)
+            contribution_ids = sorted(
+                {
+                    int(item["contribution_request_id"])
+                    for item in batch
+                    if item.get("contribution_request_id") is not None
+                }
+            )
+            withdrawn_ids = set()
+            if contribution_ids:
+                placeholders = ",".join("?" * len(contribution_ids))
+                withdrawn_ids = {
+                    int(row["id"])
+                    for row in conn.execute(
+                        "SELECT id FROM public_contribution_requests "
+                        f"WHERE id IN ({placeholders}) AND status = 'withdrawn'",
+                        contribution_ids,
+                    ).fetchall()
+                }
+            write_batch = [
+                item
+                for item in batch
+                if item.get("contribution_request_id") is None
+                or int(item["contribution_request_id"]) not in withdrawn_ids
+            ]
+            write_detail_ids = {int(item["qd_id"]) for item in write_batch}
+            write_matches = [
+                row
+                for row in matched_rows
+                if int(row.get("qd_id", -1)) in write_detail_ids
+            ]
+            write_clusters = []
+            for cluster in new_cluster_rows:
+                cluster_ids = []
+                for detail_id in cluster.get("ids") or []:
+                    try:
+                        cluster_ids.append(int(detail_id))
+                    except (TypeError, ValueError):
+                        continue
+                if not cluster_ids or all(detail_id in write_detail_ids for detail_id in cluster_ids):
+                    write_clusters.append(cluster)
+
+            if not write_batch:
+                conn.execute("COMMIT")
+                return {"ids": [], "resolutions": []}
+
+            apply_matched(conn, write_matches, job_position, answer_cache)
             new_qb_ids = insert_new_clusters(
-                conn, new_cluster_rows, job_position, answer_cache, owner_id=owner_id
+                conn, write_clusters, job_position, answer_cache, owner_id=owner_id
             )
             resolutions = _record_queue_resolutions(
                 conn,
-                batch,
-                matched_rows=matched_rows,
-                new_cluster_rows=new_cluster_rows,
+                write_batch,
+                matched_rows=write_matches,
+                new_cluster_rows=write_clusters,
                 new_qb_ids=new_qb_ids,
             )
             conn.execute("COMMIT")

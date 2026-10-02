@@ -421,7 +421,7 @@ def mark_batch_done(
         conn.execute(
             f"UPDATE analysis_queue SET status = 'done', processed_at = CURRENT_TIMESTAMP, "
             f"locked_until = NULL "
-            f"WHERE id IN ({placeholders})",
+            f"WHERE id IN ({placeholders}) AND status != 'cancelled'",
             queue_ids,
         )
         conn.commit()
@@ -460,7 +460,7 @@ def mark_batch_failed(
         )
         conn.execute(
             f"UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
-            f"WHERE id IN ({placeholders})",
+            f"WHERE id IN ({placeholders}) AND status != 'cancelled'",
             queue_ids,
         )
         for row in roots:

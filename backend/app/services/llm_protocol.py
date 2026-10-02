@@ -382,6 +382,7 @@ async def resolve_api_format_async(
         if credential is not None:
             api_key = credential.api_key
             if credential.api_format:
+                upload_context.api_format = credential.api_format
                 return (
                     (credential.api_format, None, False)
                     if _return_probe_error
@@ -389,6 +390,8 @@ async def resolve_api_format_async(
                 )
 
     def result(api_format: str, probe_error: Exception | None = None, probed: bool = False):
+        if upload_context is not None:
+            upload_context.api_format = api_format
         if _return_probe_error:
             return api_format, probe_error, probed
         return api_format

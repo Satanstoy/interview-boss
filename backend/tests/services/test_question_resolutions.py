@@ -198,6 +198,38 @@ def test_scope_rules_reject_cross_owner_and_cross_scope():
     conn.close()
 
 
+def test_private_occurrence_can_only_reference_an_active_public_canonical():
+    conn = _db()
+    conn.execute(
+        "INSERT INTO question_bank (id, question, owner_id, status) "
+        "VALUES (902, '私人题', 101, 'approved')"
+    )
+    with pytest.raises(ResolutionConflict):
+        record_resolution(
+            conn,
+            detail_id=1,
+            occurrence_scope="private",
+            occurrence_owner_id=101,
+            canonical_id=902,
+            canonical_scope="public",
+            status="matched",
+            pipeline_version="v1",
+        )
+    conn.execute("UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP WHERE id = 900")
+    with pytest.raises(ResolutionConflict):
+        record_resolution(
+            conn,
+            detail_id=1,
+            occurrence_scope="private",
+            occurrence_owner_id=101,
+            canonical_id=900,
+            canonical_scope="public",
+            status="matched",
+            pipeline_version="v1",
+        )
+    conn.close()
+
+
 def test_matched_requires_canonical_but_failed_does_not():
     conn = _db()
     with pytest.raises(ValueError):

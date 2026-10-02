@@ -57,8 +57,16 @@ def _seed_user_models(test_db, uids=(101, 201)):
     test_db.commit()
 
 
-def _post(client, *, text="面经：解释 TCP 三次握手", target="private", key="k-1", files=None):
-    data = {"text": text, "target": target, "url": "", "season": "2026春招"}
+def _post(
+    client,
+    *,
+    text="面经：解释 TCP 三次握手",
+    target="private",
+    key="k-1",
+    url="",
+    files=None,
+):
+    data = {"text": text, "target": target, "url": url, "season": "2026春招"}
     if files:
         data["url"] = ""
     return client.post(
@@ -120,6 +128,34 @@ def test_submit_jobs_v2_conflict_on_same_key_different_content(
         conflict = _post(client, text="完全不同的第二篇面经", key="same")
         assert conflict.status_code == 409
         assert conflict.json()["detail"]
+
+
+def test_upload_import_stream_emits_only_the_snapshot_contract(
+    client, monkeypatch, _no_dispatch, test_db
+):
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
+    )
+    _seed_user_models(test_db, uids=(101,))
+    _v2_on(monkeypatch)
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        accepted = _post(client, key="stream-snapshot")
+        assert accepted.status_code == 202, accepted.text
+        import_id = accepted.json()["import_id"]
+        test_db.execute(
+            "UPDATE upload_imports SET status = 'completed' WHERE id = ?",
+            (import_id,),
+        )
+        test_db.commit()
+
+        response = client.get(f"/api/upload-imports/{import_id}/stream")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    event = next(line[6:] for line in response.text.splitlines() if line.startswith("data: "))
+    snapshot = json.loads(event)
+    assert snapshot["import_id"] == import_id
+    assert snapshot["status"] == "completed"
 
 
 def test_by_key_returns_only_own_import(client, monkeypatch, _no_dispatch, test_db):
@@ -273,3 +309,51 @@ def test_submit_jobs_default_config_uses_unified_accept_service(
         "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
         (root["id"],),
     ).fetchone()[0] == 0
+
+
+def test_share_duplicate_check_ignores_personal_source_urls(
+    client, _no_dispatch, test_db
+):
+    """公共重复检查只看公共源；另一用户的个人 URL 不应阻塞公共申请。"""
+
+    for uid in (101, 102):
+        test_db.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
+            (uid, f"u{uid}"),
+        )
+    _seed_user_models(test_db, uids=(101,))
+    url = "https://example.com/jobs/private-source-1"
+    test_db.execute(
+        "INSERT INTO interview (url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (?, 'private', '一面', '1.题目', 102, 'approved', '后端')",
+        (url,),
+    )
+    test_db.commit()
+
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        response = _post(client, target="share", key="scope-share", url=url)
+
+    assert response.status_code == 202, response.text
+
+
+def test_share_duplicate_check_still_rejects_public_source_urls(
+    client, _no_dispatch, test_db
+):
+    for uid in (101,):
+        test_db.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
+            (uid, f"u{uid}"),
+        )
+    _seed_user_models(test_db, uids=(101,))
+    url = "https://example.com/jobs/public-source-1"
+    test_db.execute(
+        "INSERT INTO interview (url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (?, 'public', '一面', '1.题目', NULL, 'approved', '后端')",
+        (url,),
+    )
+    test_db.commit()
+
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        response = _post(client, target="share", key="same-scope-share", url=url)
+
+    assert response.status_code == 409

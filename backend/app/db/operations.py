@@ -122,7 +122,7 @@ def _purge_soft_deleted(url: str, owner_id=None):
 def _check_duplicate_url_sync(url: str, owner_id=None) -> bool:
     """检查 URL 是否已存在活跃记录。
 
-    owner_id=None（公共上传）：检查所有活跃记录（全局唯一）。
+    owner_id=None（公共上传）：只检查公共活跃记录。
     owner_id=int（个人上传）：只检查该用户自己的活跃记录。
     """
     if not url:
@@ -158,26 +158,28 @@ def _check_duplicate_url_sync(url: str, owner_id=None) -> bool:
                 if cursor.fetchone():
                     return True
         else:
-            # 公共上传：检查所有活跃记录（URL 全局唯一，不管 owner）
+            # 公共上传只在公共作用域内去重，不读取或暴露个人记录。
             cursor.execute(
-                "SELECT 1 FROM jd WHERE url = ? AND deleted_at IS NULL", (url,)
+                "SELECT 1 FROM jd WHERE url = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                (url,),
             )
             if cursor.fetchone():
                 return True
             cursor.execute(
-                "SELECT 1 FROM interview WHERE url = ? AND deleted_at IS NULL", (url,)
+                "SELECT 1 FROM interview WHERE url = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                (url,),
             )
             if cursor.fetchone():
                 return True
             if sig:
                 cursor.execute(
-                    "SELECT 1 FROM jd WHERE url_signature = ? AND deleted_at IS NULL",
+                    "SELECT 1 FROM jd WHERE url_signature = ? AND owner_id IS NULL AND deleted_at IS NULL",
                     (sig,),
                 )
                 if cursor.fetchone():
                     return True
                 cursor.execute(
-                    "SELECT 1 FROM interview WHERE url_signature = ? AND deleted_at IS NULL",
+                    "SELECT 1 FROM interview WHERE url_signature = ? AND owner_id IS NULL AND deleted_at IS NULL",
                     (sig,),
                 )
                 if cursor.fetchone():

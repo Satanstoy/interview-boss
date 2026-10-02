@@ -74,7 +74,10 @@ from app.db.migrations.admin_audit import _migration_119_admin_audit_log
 from app.db.migrations.clear_db_confirmation import (
     _migration_120_clear_db_confirmations,
 )
-from app.db.migrations.upload_recovery import _migration_121_upload_recovery_core
+from app.db.migrations.upload_recovery import (
+    _migration_121_upload_recovery_core,
+    _migration_125_upload_llm_api_format,
+)
 from app.db.migrations.upload_resolution import (
     _migration_122_upload_resolution,
     _migration_123_public_publish_gate,
@@ -360,6 +363,7 @@ _MIGRATIONS = [
     (122, "upload_resolution", _migration_122_upload_resolution),
     (123, "public_publish_gate", _migration_123_public_publish_gate),
     (124, "upload_spec_stage_names", _migration_124_upload_spec_stage_names),
+    (125, "upload_llm_api_format", _migration_125_upload_llm_api_format),
 ]
 
 

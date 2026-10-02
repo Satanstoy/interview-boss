@@ -503,7 +503,12 @@ async def stream_upload_import(import_id: str, user: dict = Depends(get_current_
             revision = int(snap_data["revision"])
             if revision > last_revision:
                 last_revision = revision
-                snapshot_obj = UploadSnapshot(**snap_data)
+                snapshot_payload = {
+                    field: snap_data[field]
+                    for field in UploadSnapshot.model_fields
+                    if field in snap_data
+                }
+                snapshot_obj = UploadSnapshot(**snapshot_payload)
                 event = build_snapshot_event(snapshot_obj)
                 yield (
                     f"event: snapshot\nid: {event['id']}\n"

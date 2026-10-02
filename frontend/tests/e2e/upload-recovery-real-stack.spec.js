@@ -12,7 +12,7 @@ test.describe('upload recovery against the disposable real stack', () => {
 
     const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`
     const username = `ac028_${suffix}`
-    const question = `AC028 恢复后结果题 ${suffix}`
+    const question = 'AC028 恢复后结果题'
 
     await page.goto('/login')
     await page.getByRole('button', { name: '立即注册' }).click()

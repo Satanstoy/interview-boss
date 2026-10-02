@@ -110,25 +110,218 @@ def test_withdraw_removes_public_work_created_by_request(tmp_path):
     conn.close()
 
 
-def test_withdraw_after_approve_conflicts(tmp_path):
+def test_withdraw_during_processing_cancels_unfinished_work_and_keeps_published_output(
+    tmp_path,
+):
+    conn = _connect(str(tmp_path / "processing-withdraw.db"))
+    _seed(conn)
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'processing', revision = 2 WHERE id = 1"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (2, '', 'PUBLIC', '一面', '1.已发布题', NULL, 'approved', '后端')"
+    )
+    conn.execute(
+        "INSERT INTO question_bank (id, question, owner_id, status) "
+        "VALUES (31, '处理中题', NULL, 'approved'), (32, '已发布题', NULL, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2) "
+        "VALUES (21, 2, '处理中题', '网络', 'TCP'), (22, 2, '已发布题', '网络', 'TCP')"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(id, request_id, source_item_type, source_item_id, ordinal, status, snapshot_json, public_detail_id) "
+        "VALUES (12, 1, 'question', 11, 2, 'published', '{}', 22)"
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'processing', public_detail_id = 21 "
+        "WHERE id = 11"
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue (interview_id, question_detail_id, owner_id, status, contribution_request_id) "
+        "VALUES (2, 21, NULL, 'processing', 1), (2, 22, NULL, 'pending', 1)"
+    )
+    conn.commit()
+
+    withdrawn = withdraw_public_contribution_v2(
+        conn, request_id=1, requester_id=101, expected_revision=2
+    )
+
+    assert withdrawn["status"] == "withdrawn"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM analysis_queue WHERE contribution_request_id = 1 "
+        "AND status IN ('pending', 'processing')"
+    ).fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 11"
+    ).fetchone()["status"] == "rejected"
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 12"
+    ).fetchone()["status"] == "published"
+    assert conn.execute(
+        "SELECT deleted_at FROM question_bank WHERE id = 32"
+    ).fetchone()["deleted_at"] is None
+    conn.close()
+
+
+def test_withdraw_preserves_published_public_output_and_restores_private_source(tmp_path):
+    conn = _connect(str(tmp_path / "partial-published-withdraw.db"))
+    _seed(conn)
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'partially_published', revision = 2 WHERE id = 1"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (2, '', 'PUBLIC', '一面', '1.已发布题', NULL, 'approved', '后端')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2) "
+        "VALUES (21, 2, '已发布题', '网络', 'TCP')"
+    )
+    conn.execute(
+        "INSERT INTO question_bank (id, question, owner_id, status, deleted_at) "
+        "VALUES (31, '个人原题', 101, 'approved', CURRENT_TIMESTAMP), "
+        "(32, '公共规范题', NULL, 'approved', NULL)"
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published', public_detail_id = 21 WHERE id = 11"
+    )
+    conn.execute(
+        "INSERT INTO question_resolutions "
+        "(detail_id, occurrence_scope, occurrence_owner_id, canonical_id, canonical_scope, status, "
+        "pipeline_version, reason, invalidated_at) "
+        "VALUES (11, 'private', 101, 31, 'private', 'created', 'v1', 'old-private', CURRENT_TIMESTAMP)"
+    )
+    conn.execute(
+        "INSERT INTO question_resolutions "
+        "(detail_id, occurrence_scope, occurrence_owner_id, canonical_id, canonical_scope, status, "
+        "pipeline_version, reason) "
+        "VALUES (11, 'private', 101, 32, 'public', 'matched', 'v1', 'public_promotion')"
+    )
+    conn.commit()
+
+    withdrawn = withdraw_public_contribution_v2(
+        conn, request_id=1, requester_id=101, expected_revision=2
+    )
+
+    assert withdrawn["status"] == "withdrawn"
+    current = conn.execute(
+        "SELECT canonical_id, canonical_scope FROM question_resolutions "
+        "WHERE detail_id = 11 AND invalidated_at IS NULL"
+    ).fetchone()
+    assert tuple(current) == (31, "private")
+    assert conn.execute("SELECT deleted_at FROM question_bank WHERE id = 31").fetchone()[0] is None
+    assert conn.execute("SELECT deleted_at FROM question_bank WHERE id = 32").fetchone()[0] is None
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 11"
+    ).fetchone()[0] == "published"
+    conn.close()
+
+
+def test_withdraw_restores_request_sources_without_cross_request_changes(tmp_path):
+    conn = _connect(str(tmp_path / "sibling-promotion-withdraw.db"))
+    _seed(conn)
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'published', revision = 2 WHERE id = 1"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(id, source_type, source_id, requester_id, status, snapshot_json, revision) "
+        "VALUES (2, 'interview', 1, 101, 'partially_published', '{}', 2)"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2) "
+        "VALUES (12, 1, 'B 已发布题', '网络', 'TCP'), (13, 1, 'B 未完成题', '网络', 'TCP')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (2, '', 'PUBLIC', '一面', '', NULL, 'approved', '后端')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, cat1, cat2) "
+        "VALUES (22, 2, 'B 已发布题', '网络', 'TCP'), (23, 2, 'B 未完成题', '网络', 'TCP')"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(id, request_id, source_item_type, source_item_id, ordinal, status, snapshot_json, public_detail_id) "
+        "VALUES (12, 2, 'question', 12, 1, 'published', '{}', 22), "
+        "(13, 2, 'question', 13, 2, 'processing', '{}', 23)"
+    )
+    conn.execute(
+        "INSERT INTO question_bank (id, question, owner_id, status, deleted_at) "
+        "VALUES (31, '个人原题', 101, 'approved', CURRENT_TIMESTAMP), "
+        "(32, '公共规范题', NULL, 'approved', NULL)"
+    )
+    # A's published item already promoted every occurrence in the private cluster.
+    for detail_id in (11, 12, 13):
+        conn.execute(
+            "INSERT INTO question_resolutions "
+            "(detail_id, occurrence_scope, occurrence_owner_id, canonical_id, canonical_scope, status, "
+            "pipeline_version, reason, invalidated_at) "
+            "VALUES (?, 'private', 101, 31, 'private', 'created', 'v1', 'old-private', CURRENT_TIMESTAMP)",
+            (detail_id,),
+        )
+        conn.execute(
+            "INSERT INTO question_resolutions "
+            "(detail_id, occurrence_scope, occurrence_owner_id, canonical_id, canonical_scope, status, "
+            "pipeline_version, reason) "
+            "VALUES (?, 'private', 101, 32, 'public', 'matched', 'v1', 'public_promotion')",
+            (detail_id,),
+        )
+    conn.commit()
+
+    withdrawn = withdraw_public_contribution_v2(
+        conn, request_id=2, requester_id=101, expected_revision=2
+    )
+
+    assert withdrawn["status"] == "withdrawn"
+    current = conn.execute(
+        "SELECT canonical_id, canonical_scope FROM question_resolutions "
+        "WHERE detail_id = 11 AND invalidated_at IS NULL"
+    ).fetchone()
+    assert tuple(current) == (32, "public")
+    for detail_id in (12, 13):
+        current = conn.execute(
+            "SELECT canonical_id, canonical_scope FROM question_resolutions "
+            "WHERE detail_id = ? AND invalidated_at IS NULL",
+            (detail_id,),
+        ).fetchone()
+        assert tuple(current) == (31, "private")
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 12"
+    ).fetchone()[0] == "published"
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 13"
+    ).fetchone()[0] == "rejected"
+    assert conn.execute("SELECT deleted_at FROM question_bank WHERE id = 31").fetchone()[0] is None
+    conn.close()
+
+
+def test_withdraw_after_approve_cancels_queued_public_work(tmp_path):
     conn = _connect(str(tmp_path / "wa.db"))
     _seed(conn)
     approved = approve_public_contribution_v2(
         conn, request_id=1, admin_id=201, review_request=_request()
     )
-    with pytest.raises(StateConflict):
-        withdraw_public_contribution_v2(
-            conn,
-            request_id=1,
-            requester_id=101,
-            expected_revision=approved["revision"],
-        )
+    withdrawn = withdraw_public_contribution_v2(
+        conn,
+        request_id=1,
+        requester_id=101,
+        expected_revision=approved["revision"],
+    )
+    assert withdrawn["status"] == "withdrawn"
     assert (
         conn.execute("SELECT status FROM public_contribution_requests WHERE id = 1").fetchone()[
             "status"
         ]
-        == "approved_for_processing"
+        == "withdrawn"
     )
+    assert conn.execute(
+        "SELECT COUNT(*) FROM analysis_queue WHERE contribution_request_id = 1 "
+        "AND status IN ('pending', 'processing')"
+    ).fetchone()[0] == 0
     conn.close()
 
 

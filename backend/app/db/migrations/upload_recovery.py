@@ -167,3 +167,13 @@ def _migration_121_upload_recovery_core(conn):
     )
 
     logger.info("migration_121: upload recovery core tables are ready")
+
+
+def _migration_125_upload_llm_api_format(conn):
+    """Record the protocol actually used for each durable provider attempt."""
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('upload_llm_calls')").fetchall()
+    }
+    if "api_format" not in columns:
+        conn.execute("ALTER TABLE upload_llm_calls ADD COLUMN api_format TEXT")
