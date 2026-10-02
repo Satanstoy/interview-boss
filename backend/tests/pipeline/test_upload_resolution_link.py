@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
-
 from app.db.migrations import run_migrations
 from app.services.upload_resolution_link import link_details_to_import
 
@@ -114,6 +112,12 @@ def test_link_records_matched_resolution_without_touching_public_source():
     assert res["status"] == "matched"
     assert res["canonical_id"] == 900
     assert res["canonical_scope"] == "public"
+    checkpoint = conn.execute(
+        "SELECT status, result_json FROM upload_stage_results "
+        "WHERE import_id = 'imp-1' AND stage = 'resolve' AND unit_key = 'detail:11'"
+    ).fetchone()
+    assert checkpoint["status"] == "succeeded"
+    assert '"canonical_id": 900' in checkpoint["result_json"]
     # 公共 sources 不被私人命中改动
     sources = conn.execute(
         "SELECT COUNT(*) AS c FROM question_sources WHERE question_bank_id = 900"

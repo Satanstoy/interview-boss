@@ -831,29 +831,55 @@ async def get_trash(
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
     offset = (page - 1) * page_size
+    viewer_id = int(user["id"])
 
     def _query():
-        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
-            where = "deleted_at IS NOT NULL"
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM {safe_name} WHERE {where}"
-            ).fetchone()[0]
             if table_name == "jd":
+                where = (
+                    "deleted_at IS NOT NULL AND (owner_id = ? OR "
+                    "(owner_id IS NULL AND status = 'approved'))"
+                )
+                params = (viewer_id,)
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM jd WHERE {where}", params
+                ).fetchone()[0]
                 rows = conn.execute(
-                    f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, deleted_at "
+                    f"FROM jd WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
             elif table_name == "interview":
+                where = (
+                    "deleted_at IS NOT NULL AND (owner_id = ? OR "
+                    "(owner_id IS NULL AND status = 'approved' AND publish_status = 'published'))"
+                )
+                params = (viewer_id,)
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM interview WHERE {where}", params
+                ).fetchone()[0]
                 rows = conn.execute(
-                    f"SELECT id, url, company, round, focus, questions_list, difficulty, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT id, url, company, round, focus, questions_list, difficulty, season, deleted_at "
+                    f"FROM interview WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
             else:
+                from_clause = "questions_detail qd JOIN interview iv ON iv.id = qd.interview_id"
+                where = (
+                    "qd.deleted_at IS NOT NULL AND (iv.owner_id = ? OR "
+                    "(iv.owner_id IS NULL AND iv.status = 'approved' "
+                    "AND iv.publish_status = 'published'))"
+                )
+                params = (viewer_id,)
                 rows = conn.execute(
-                    f"SELECT id, url, company, round, question, cat1, cat2, tags, diff_tag, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT qd.id, qd.url, qd.company, qd.round, qd.question, qd.cat1, qd.cat2, "
+                    f"qd.tags, qd.diff_tag, qd.deleted_at FROM {from_clause} WHERE {where} "
+                    "ORDER BY qd.deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM {from_clause} WHERE {where}", params
+                ).fetchone()[0]
             return total, rows
 
     total, rows = await run_db(_query)

@@ -13,6 +13,7 @@ root 上下文存在时调用；事务由调用方持有，本模块不 commit�
 
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger("interview-boss")
@@ -32,6 +33,15 @@ def link_details_to_import(
     """为逐题明细写 import_id/source_ordinal 与 resolution（幂等）。"""
 
     from app.services.question_resolution import record_resolution
+
+    upload = conn.execute(
+        "SELECT input_version, pipeline_version FROM upload_imports WHERE id = ?",
+        (import_id,),
+    ).fetchone()
+    input_version = int(upload["input_version"] or 1) if upload else 1
+    pipeline_version = (
+        (upload["pipeline_version"] if upload else None) or "upload-pipeline-v1"
+    )
 
     linked = 0
     for detail_id in detail_ids:
@@ -72,6 +82,36 @@ def link_details_to_import(
                 status=match.get("status", "matched"),
                 pipeline_version="upload-pipeline-v1",
             )
+            # A direct match is intentionally omitted from the clustering
+            # queue. Complete its per-detail resolve checkpoint here so the
+            # upload trace has the same durable identity as queued matches.
+            if match.get("status", "matched") == "matched":
+                result_json = json.dumps(
+                    {
+                        "detail_id": detail_id,
+                        "canonical_id": int(match["canonical_id"]),
+                        "canonical_scope": match.get("canonical_scope", "public"),
+                        "status": "matched",
+                    },
+                    ensure_ascii=False,
+                )
+                conn.execute(
+                    "INSERT INTO upload_stage_results "
+                    "(import_id, stage, unit_key, input_version, pipeline_version, "
+                    "status, result_json, retryable) "
+                    "VALUES (?, 'resolve', ?, ?, ?, 'succeeded', ?, 0) "
+                    "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+                    "pipeline_version = excluded.pipeline_version, status = excluded.status, "
+                    "result_json = excluded.result_json, error_code = NULL, retryable = 0, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (
+                        import_id,
+                        f"detail:{detail_id}",
+                        input_version,
+                        pipeline_version,
+                        result_json,
+                    ),
+                )
         elif not write_unmatched:
             # 匹配失败：持久化为可恢复失败，不落 phantom canonical（R05）
             record_resolution(

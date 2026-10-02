@@ -8,7 +8,6 @@ from app.db.connection import get_db_connection, run_db, get_current_job_positio
 from app.services.clustering.matcher import match_new_questions
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
-    claim_public_original_questions,
     sync_question_bank_projections,
 )
 
@@ -300,7 +299,6 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
             def _merge():
                 nonlocal merged_count
                 with get_db_connection() as conn:
-                    is_admin = bool(user.get("is_admin", 0))
                     for m in matched:
                         new_id = m["new_id"]
                         qb_id = m["question_bank_id"]
@@ -354,63 +352,29 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                             sources, orig_qs, orig_qs_src = canonicalize_question_bank_payload(
                                 sources, orig_qs, orig_qs_src
                             )
-                            if is_admin:
-                                # 管理员：个人题并入公共题（现有行为）
-                                conn.execute(
-                                    "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (
-                                        len(orig_qs),
-                                        json.dumps(sources, ensure_ascii=False),
-                                        json.dumps(orig_qs, ensure_ascii=False),
-                                        json.dumps(orig_qs_src, ensure_ascii=False),
-                                        qb_id,
-                                    ),
-                                )
-                                claim_public_original_questions(
-                                    conn,
-                                    qb_id,
-                                    existing["owner_id"],
-                                    existing["status"],
-                                    orig_qs,
-                                )
-                                sync_question_bank_projections(
-                                    conn.cursor(), qb_id, sources, orig_qs, orig_qs_src
-                                )
-                                from app.services.cluster_review_lifecycle import (
-                                    mark_cluster_review_pending,
-                                )
-
-                                mark_cluster_review_pending(conn, qb_id, "private_question_merged")
-                                # 删除已合并的个人题目
-                                conn.execute(
-                                    "DELETE FROM question_bank WHERE id = ?",
-                                    (personal_row["id"],),
-                                )
-                            else:
-                                # 非管理员：合并只落个人题，公共题数据绝不改动
-                                # 个人题吸收公共题来源（去重后），公共题保持原样，个人题保留
-                                conn.execute(
-                                    "UPDATE question_bank SET sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (
-                                        json.dumps(sources, ensure_ascii=False),
-                                        personal_row["id"],
-                                    ),
-                                )
-                                personal_oqs = personal_row.get("original_questions") or []
-                                personal_oqs_src = (
-                                    personal_row.get("original_question_sources") or []
-                                )
-                                if isinstance(personal_oqs, str):
-                                    personal_oqs = json.loads(personal_oqs or "[]")
-                                if isinstance(personal_oqs_src, str):
-                                    personal_oqs_src = json.loads(personal_oqs_src or "[]")
-                                sync_question_bank_projections(
-                                    conn.cursor(),
+                            # 重建始终写回当前用户个人题；公共题库只作为匹配候选。
+                            conn.execute(
+                                "UPDATE question_bank SET sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (
+                                    json.dumps(sources, ensure_ascii=False),
                                     personal_row["id"],
-                                    sources,
-                                    personal_oqs,
-                                    personal_oqs_src,
-                                )
+                                ),
+                            )
+                            personal_oqs = personal_row.get("original_questions") or []
+                            personal_oqs_src = (
+                                personal_row.get("original_question_sources") or []
+                            )
+                            if isinstance(personal_oqs, str):
+                                personal_oqs = json.loads(personal_oqs or "[]")
+                            if isinstance(personal_oqs_src, str):
+                                personal_oqs_src = json.loads(personal_oqs_src or "[]")
+                            sync_question_bank_projections(
+                                conn.cursor(),
+                                personal_row["id"],
+                                sources,
+                                personal_oqs,
+                                personal_oqs_src,
+                            )
                         merged_count += 1
                     conn.commit()
 

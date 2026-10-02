@@ -17,17 +17,28 @@ router = APIRouter(prefix="/api/master-bank")
 async def analysis_status(user: dict = Depends(get_admin_user)):
     """检查面经分析完整性：返回已分析和未分析的面经数量及详情。"""
 
+    visible_scope = (
+        "(i.owner_id = ? OR (i.owner_id IS NULL AND i.status = 'approved' "
+        "AND i.publish_status = 'published'))"
+    )
+
     def _check():
         with get_db_connection() as conn:
             # 已分析：有 detail 记录的面经
             analyzed = conn.execute(
                 "SELECT i.id, i.company, i.round FROM interview i "
-                "WHERE i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
+                f"WHERE i.deleted_at IS NULL AND {visible_scope} "
+                "AND EXISTS (SELECT 1 FROM questions_detail qd "
+                "WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)",
+                (user["id"],),
             ).fetchall()
             # 未分析：没有 detail 记录的面经
             unanalyzed = conn.execute(
                 "SELECT i.id, i.company, i.round, LENGTH(i.questions_list) as ql_len FROM interview i "
-                "WHERE i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
+                f"WHERE i.deleted_at IS NULL AND {visible_scope} "
+                "AND NOT EXISTS (SELECT 1 FROM questions_detail qd "
+                "WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)",
+                (user["id"],),
             ).fetchall()
             return {
                 "analyzed_count": len(analyzed),

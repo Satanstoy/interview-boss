@@ -47,6 +47,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
     import numpy as np
     import app.asgi as asgi_module
     from app.core.auth import get_current_user
+    from app.db.queries import get_user_job_position
     from app.services.credential_preflight import run_credential_preflight
     from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
     from app.worker import submit_import_task
@@ -77,6 +78,39 @@ async def test_http_upload_to_personal_and_public_question_trace(
         test_db.execute(
             "INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)",
             (key, value),
+        )
+    position_id, position_name = get_user_job_position(101)
+    existing_public_question = QUESTIONS[1][1]
+    existing_public_sources = [{
+        "url": "https://public.example/existing",
+        "company": "Existing Public Company",
+        "round": "一面",
+    }]
+    test_db.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, tags, frequency, sources, "
+        "original_questions, original_question_sources, owner_id, status, job_position) "
+        "VALUES (?, ?, ?, ?, 1, ?, ?, ?, NULL, 'approved', ?)",
+        (
+            existing_public_question,
+            QUESTIONS[1][2],
+            QUESTIONS[1][3],
+            QUESTIONS[1][4],
+            json.dumps(existing_public_sources, ensure_ascii=False),
+            json.dumps([existing_public_question], ensure_ascii=False),
+            json.dumps(
+                [{"question": existing_public_question, "sources": existing_public_sources}],
+                ensure_ascii=False,
+            ),
+            position_name,
+        ),
+    )
+    existing_public_canonical_id = int(
+        test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    )
+    if position_id:
+        test_db.execute(
+            "INSERT OR IGNORE INTO question_position (question_id, position_id) VALUES (?, ?)",
+            (existing_public_canonical_id, position_id),
         )
     test_db.commit()
 
@@ -183,8 +217,15 @@ async def test_http_upload_to_personal_and_public_question_trace(
         },
         ensure_ascii=False,
     )
+    match_response = json.dumps(
+        {
+            "matches": [{"new_id": 1, "cluster_id": existing_public_canonical_id}],
+            "unmatched": [],
+        },
+        ensure_ascii=False,
+    )
     provider_responses = []
-    for content in (extract_response, tag_response):
+    for content in (extract_response, tag_response, match_response):
         provider_response = MagicMock()
         provider_response.choices = [MagicMock(message=MagicMock(content=content))]
         provider_response.usage = MagicMock(prompt_tokens=37, completion_tokens=29)
@@ -270,19 +311,41 @@ async def test_http_upload_to_personal_and_public_question_trace(
         assert tuple(row[key] for key in ("source_ordinal", "question", "cat1", "cat2")) == expected[:4]
         assert expected[4] in row["tags"]
 
-    # Run the real private clustering task so every private detail has a
-    # canonical private question and a successful one-to-one resolution.
+    # Run the real private clustering task. One detail has already matched the
+    # public canonical during private preprocessing and must not be copied or
+    # mutate public source/count fields before the user approves the share.
     public_failure_detail_id = {"value": None}
     public_attempt = {"number": 0}
 
     async def deterministic_cluster(new_rows, _existing_by_cat2, *, user_id=None, **_kwargs):
         rows = list(new_rows)
+        matched = []
         if user_id is None:
             public_attempt["number"] += 1
             if public_attempt["number"] == 1:
                 rows = [row for row in rows if int(row["id"]) != public_failure_detail_id["value"]]
+            matched_rows = [
+                row for row in rows if row["question"] == existing_public_question
+            ]
+            for row in matched_rows:
+                matched.append(
+                    {
+                        "qd_id": int(row["id"]),
+                        "cluster_id": existing_public_canonical_id,
+                        "question": row["question"],
+                        "cat1": row["cat1"],
+                        "cat2": row["cat2"],
+                        "tags": row["tags"],
+                        "diff_tag": row["diff_tag"],
+                        "url": row["url"],
+                        "company": row["company"],
+                        "round": row["round"],
+                    }
+                )
+            matched_ids = {int(row["id"]) for row in matched_rows}
+            rows = [row for row in rows if int(row["id"]) not in matched_ids]
         return {
-            "matched_to_existing": [],
+            "matched_to_existing": matched,
             "new_clusters": [
                 {
                     "ids": [str(row["id"])],
@@ -322,20 +385,40 @@ async def test_http_upload_to_personal_and_public_question_trace(
     assert private_scope_lease["holder_token"] is None, "聚类结束后必须释放scope lease"
 
     private_resolution_rows = test_db.execute(
-        "SELECT d.source_ordinal, d.cat1, d.cat2, d.tags, r.status, r.canonical_scope, "
+        "SELECT d.source_ordinal, d.cat1, d.cat2, d.tags, r.status, r.reason, r.canonical_scope, "
         "qb.id AS canonical_id, "
         "qb.owner_id, qb.cat1 AS canonical_cat1, qb.cat2 AS canonical_cat2, qb.tags AS canonical_tags "
-        "FROM questions_detail d JOIN question_resolutions r ON r.detail_id = d.id "
-        "AND r.invalidated_at IS NULL JOIN question_bank qb ON qb.id = r.canonical_id "
+        "FROM questions_detail d LEFT JOIN question_resolutions r ON r.detail_id = d.id "
+        "AND r.invalidated_at IS NULL LEFT JOIN question_bank qb ON qb.id = r.canonical_id "
         "WHERE d.import_id = ? ORDER BY d.source_ordinal",
         (import_id,),
     ).fetchall()
     assert len(private_resolution_rows) == len(QUESTIONS)
-    assert all(row["status"] == "created" for row in private_resolution_rows)
-    assert all(row["canonical_scope"] == "private" and row["owner_id"] == 101 for row in private_resolution_rows)
+    public_hit = private_resolution_rows[1]
+    assert public_hit["status"] == "matched", public_hit["reason"]
+    assert public_hit["canonical_scope"] == "public"
+    assert public_hit["canonical_id"] == existing_public_canonical_id
+    assert public_hit["owner_id"] is None
+    private_created = [row for row in private_resolution_rows if row["source_ordinal"] != 20]
+    assert all(row["status"] == "created" for row in private_created)
+    assert all(row["canonical_scope"] == "private" and row["owner_id"] == 101 for row in private_created)
     assert [row["canonical_cat1"] for row in private_resolution_rows] == [q[2] for q in QUESTIONS]
     assert [row["canonical_cat2"] for row in private_resolution_rows] == [q[3] for q in QUESTIONS]
     assert all(q[4] in row["canonical_tags"] for row, q in zip(private_resolution_rows, QUESTIONS))
+    unchanged_public = test_db.execute(
+        "SELECT frequency, sources, original_questions, original_question_sources "
+        "FROM question_bank WHERE id = ?",
+        (existing_public_canonical_id,),
+    ).fetchone()
+    assert tuple(unchanged_public) == (
+        1,
+        json.dumps(existing_public_sources, ensure_ascii=False),
+        json.dumps([existing_public_question], ensure_ascii=False),
+        json.dumps(
+            [{"question": existing_public_question, "sources": existing_public_sources}],
+            ensure_ascii=False,
+        ),
+    )
 
     preserved_private_canonical_id = int(private_resolution_rows[0]["canonical_id"])
     test_db.execute(
@@ -558,7 +641,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
         "AND current_resolution.invalidated_at IS NULL "
         "JOIN question_resolutions public_resolution ON public_resolution.detail_id = item.public_detail_id "
         "AND public_resolution.invalidated_at IS NULL "
-        "JOIN question_bank private_canonical ON private_canonical.id = ("
+        "LEFT JOIN question_bank private_canonical ON private_canonical.id = ("
         "  SELECT old_resolution.canonical_id FROM question_resolutions old_resolution "
         "  WHERE old_resolution.detail_id = source.id AND old_resolution.canonical_scope = 'private' "
         "  ORDER BY old_resolution.id DESC LIMIT 1) "
@@ -569,7 +652,12 @@ async def test_http_upload_to_personal_and_public_question_trace(
     assert all(row["canonical_scope"] == "public" for row in promoted_occurrences)
     assert all(row["status"] == "matched" for row in promoted_occurrences)
     assert all(row["canonical_id"] == row["public_canonical_id"] for row in promoted_occurrences)
-    assert all(row["deleted_at"] is not None for row in promoted_occurrences)
+    assert next(row for row in promoted_occurrences if row["source_ordinal"] == 20)["deleted_at"] is None
+    assert all(
+        row["deleted_at"] is not None
+        for row in promoted_occurrences
+        if row["source_ordinal"] != 20
+    )
     assert tuple(test_db.execute(
         "SELECT user_answer, score FROM user_practice_history "
         "WHERE user_id = 101 AND question_bank_id = ?",
@@ -626,7 +714,8 @@ async def test_http_upload_to_personal_and_public_question_trace(
     trace_rows = test_db.execute(
         "SELECT source.source_ordinal, source.id AS private_detail_id, "
         "private_resolution.id AS private_resolution_id, "
-        "private_resolution.canonical_id AS private_canonical_id, "
+        "private_resolution.canonical_id AS private_stage_canonical_id, "
+        "private_resolution.canonical_scope AS private_stage_canonical_scope, "
         "item.id AS contribution_item_id, item.status AS contribution_status, "
         "item.public_detail_id, public_detail.id AS materialized_public_detail_id, "
         "public_resolution.id AS public_resolution_id, "
@@ -694,7 +783,8 @@ async def test_http_upload_to_personal_and_public_question_trace(
                 "stages": item_stages,
                 "private_detail_id": int(row["private_detail_id"]),
                 "private_resolution_id": int(row["private_resolution_id"]),
-                "private_canonical_id": int(row["private_canonical_id"]),
+                "private_stage_canonical_id": int(row["private_stage_canonical_id"]),
+                "private_stage_canonical_scope": row["private_stage_canonical_scope"],
                 "contribution_item_id": int(row["contribution_item_id"]),
                 "contribution_status": row["contribution_status"],
                 "review_projection": {

@@ -53,16 +53,28 @@ def _has_column(conn, table: str, column: str) -> bool:
     return any(row["name"] == column for row in rows)
 
 
-@router.post("/api/interview/{interview_id}/re-process")
-async def reprocess_interview(interview_id: int, user: dict = Depends(get_admin_user)):
-    """创建单条面经重分析任务，由 ARQ worker 执行耗时 AI 处理。"""
+async def _load_reprocessable_public_interview(interview_id: int):
+    """管理员遗留重分析入口只接受已发布公共面经。"""
+
     def _load():
         with get_db_connection() as conn:
-            return conn.execute("SELECT * FROM interview WHERE id = ?", (interview_id,)).fetchone()
+            return conn.execute(
+                "SELECT * FROM interview WHERE id = ? AND owner_id IS NULL "
+                "AND status = 'approved' AND publish_status = 'published' "
+                "AND deleted_at IS NULL",
+                (interview_id,),
+            ).fetchone()
 
     row = await run_db(_load)
     if not row:
         raise HTTPException(status_code=404, detail="未找到该面经记录")
+    return row
+
+
+@router.post("/api/interview/{interview_id}/re-process")
+async def reprocess_interview(interview_id: int, user: dict = Depends(get_admin_user)):
+    """创建单条面经重分析任务，由 ARQ worker 执行耗时 AI 处理。"""
+    row = await _load_reprocessable_public_interview(interview_id)
 
     questions_str = row['questions_list']
     if not questions_str or not questions_str.strip():
@@ -82,14 +94,7 @@ async def reprocess_interview(interview_id: int, user: dict = Depends(get_admin_
 @router.post("/api/interview/{interview_id}/re-process-stream")
 async def reprocess_interview_stream(interview_id: int, user: dict = Depends(get_admin_user)):
     """SSE 版重新分析单条面经；SSE 只订阅 durable job 状态。"""
-
-    def _load():
-        with get_db_connection() as conn:
-            return conn.execute("SELECT * FROM interview WHERE id = ?", (interview_id,)).fetchone()
-
-    row = await run_db(_load)
-    if not row:
-        raise HTTPException(status_code=404, detail="未找到该面经记录")
+    row = await _load_reprocessable_public_interview(interview_id)
 
     questions_str = row['questions_list']
     if not questions_str or not questions_str.strip():

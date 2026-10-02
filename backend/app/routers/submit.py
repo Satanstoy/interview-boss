@@ -513,10 +513,7 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                     "FROM jobs WHERE id = ?",
                     (job_id,),
                 ).fetchone()
-                if not original or (
-                    original["created_by"] != user["id"]
-                    and not user.get("is_admin", False)
-                ):
+                if not original or original["created_by"] != user["id"]:
                     raise HTTPException(status_code=404, detail="任务不存在")
                 if original["job_type"] != "submit_import":
                     raise HTTPException(status_code=400, detail="该任务不支持重新处理")
@@ -533,7 +530,7 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                 try:
                     restored = restore_upload(
                         conn,
-                        actor_id=int(original["created_by"]),
+                        actor_id=int(user["id"]),
                         job_id=int(job_id),
                     )
                     new_root_id = restored.get("planned_job_id")

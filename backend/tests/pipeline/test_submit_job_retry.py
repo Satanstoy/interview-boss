@@ -165,3 +165,47 @@ def test_failed_submit_job_is_visible_and_retry_creates_new_attempt(
         assert [item["id"] for item in visible] == [retry_id]
     finally:
         app.dependency_overrides.pop(dependency, None)
+
+
+def test_admin_cannot_retry_another_users_legacy_submit_job(client, test_db):
+    from app.asgi import app
+    from app.core.auth import get_current_user
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (101, 'u101', 'x', 0)"
+    )
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (201, 'admin', 'x', 1)"
+    )
+    cursor = test_db.execute(
+        "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+        "available_at, last_error) VALUES ('submit_import', 'failed', 6, 101, "
+        "CURRENT_TIMESTAMP, '模拟失败')"
+    )
+    failed_id = cursor.lastrowid
+    test_db.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (failed_id, '{"raw_text":"PRIVATE_RETRY_MARKER","target":"personal","user_id":101}'),
+    )
+    test_db.commit()
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 201, "is_admin": True, "username": "admin"
+    }
+    try:
+        arq_job = MagicMock(job_id="arq-should-not-exist")
+        with patch(
+            "app.worker.enqueue_submit_import_job",
+            new=AsyncMock(return_value=arq_job),
+        ) as enqueue:
+            response = client.post(f"/api/submit-jobs/{failed_id}/retry", json={})
+
+        assert response.status_code == 404
+        enqueue.assert_not_awaited()
+        child_count = test_db.execute(
+            "SELECT COUNT(*) FROM jobs WHERE parent_job_id = ?", (failed_id,)
+        ).fetchone()[0]
+        assert child_count == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

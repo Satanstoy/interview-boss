@@ -334,7 +334,7 @@ class TestBuildPersonalMerge:
         assert personal_exists is not None  # 个人题未被删除
 
     @pytest.mark.asyncio
-    async def test_admin_merge_still_merges_into_public(self, client, test_db):
+    async def test_admin_personal_rebuild_does_not_promote_into_public(self, client, test_db):
         from app.routers.bank_build import build_personal_bank
 
         pub_id, personal_id = self._seed(client, test_db)
@@ -355,13 +355,157 @@ class TestBuildPersonalMerge:
             await _consume(response)
 
         row = test_db.execute(
-            "SELECT frequency FROM question_bank WHERE id = ?", (pub_id,)
+            "SELECT frequency, sources FROM question_bank WHERE id = ?", (pub_id,)
         ).fetchone()
-        assert row["frequency"] == 1  # 合并后 frequency = 1（original_questions 长度）
+        assert row["frequency"] == 5
+        assert row["sources"] == "[]"
         personal_exists = test_db.execute(
             "SELECT 1 FROM question_bank WHERE id = ?", (personal_id,)
         ).fetchone()
-        assert personal_exists is None  # 个人题已并入公共题并删除
+        assert personal_exists is not None
+
+
+class TestAdminInterviewScope:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler_name", ["reprocess_interview", "reprocess_interview_stream"])
+    async def test_admin_cannot_reprocess_another_users_private_interview(
+        self, client, test_db, monkeypatch, handler_name
+    ):
+        import app.routers.interview as interview_router
+
+        _ensure_user(test_db, 101)
+        test_db.execute(
+            "INSERT INTO interview (id, url, questions_list, owner_id, status) "
+            "VALUES (701, 'private://u101', 'PRIVATE_INTERVIEW_MARKER', 101, 'approved')"
+        )
+        test_db.commit()
+        submit = AsyncMock(return_value={"job_id": "job-private", "status": "queued"})
+        monkeypatch.setattr(
+            "app.services.interview_reprocess.submit_interview_reprocess_job", submit
+        )
+
+        handler = getattr(interview_router, handler_name)
+        with pytest.raises(HTTPException) as exc_info:
+            await handler(701, _mock_user(user_id=201, is_admin=True))
+
+        assert exc_info.value.status_code == 404
+        submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_admin_can_reprocess_published_public_interview(
+        self, client, test_db, monkeypatch
+    ):
+        from app.routers.interview import reprocess_interview_stream
+
+        test_db.execute(
+            "INSERT INTO interview (id, url, questions_list, owner_id, status, publish_status) "
+            "VALUES (702, 'public://approved', 'PUBLIC_QUESTION', NULL, 'approved', 'published')"
+        )
+        test_db.commit()
+        submit = AsyncMock(return_value={"job_id": "job-public", "status": "queued"})
+        monkeypatch.setattr(
+            "app.services.interview_reprocess.submit_interview_reprocess_job", submit
+        )
+
+        response = await reprocess_interview_stream(
+            702, _mock_user(user_id=201, is_admin=True)
+        )
+
+        assert response.media_type == "text/event-stream"
+        submit.assert_awaited_once_with(702, user_id=201)
+
+
+class TestGenericTrashScope:
+    @pytest.mark.asyncio
+    async def test_admin_generic_interview_trash_excludes_other_users_private_rows(
+        self, client, test_db
+    ):
+        from app.routers.data import get_trash
+
+        _ensure_user(test_db, 101)
+        test_db.execute(
+            "INSERT INTO interview (url, company, questions_list, owner_id, status, deleted_at) "
+            "VALUES ('private://trash', 'PRIVATE_COMPANY_MARKER', 'PRIVATE_TRASH_MARKER', "
+            "101, 'approved', CURRENT_TIMESTAMP)"
+        )
+        test_db.execute(
+            "INSERT INTO interview (url, company, questions_list, owner_id, status, "
+            "publish_status, deleted_at) VALUES ('public://trash', 'Public Co', "
+            "'PUBLIC_TRASH_MARKER', NULL, 'approved', 'published', CURRENT_TIMESTAMP)"
+        )
+        test_db.commit()
+
+        result = await get_trash(
+            "interview", page=1, page_size=100,
+            user=_mock_user(user_id=201, is_admin=True),
+        )
+
+        serialized = json.dumps(result, ensure_ascii=False)
+        assert "PRIVATE_COMPANY_MARKER" not in serialized
+        assert "PRIVATE_TRASH_MARKER" not in serialized
+        assert "PUBLIC_TRASH_MARKER" in serialized
+        assert result["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_admin_generic_tagged_trash_uses_parent_interview_scope(
+        self, client, test_db
+    ):
+        from app.routers.data import get_trash
+
+        _ensure_user(test_db, 101)
+        test_db.execute(
+            "INSERT INTO interview (id, url, owner_id, status, publish_status) "
+            "VALUES (711, 'private://detail', 101, 'approved', 'published')"
+        )
+        test_db.execute(
+            "INSERT INTO interview (id, url, owner_id, status, publish_status) "
+            "VALUES (712, 'public://detail', NULL, 'approved', 'published')"
+        )
+        test_db.execute(
+            "INSERT INTO questions_detail (interview_id, url, question, owner_id, status, deleted_at) "
+            "VALUES (711, 'private://detail', 'PRIVATE_DETAIL_MARKER', 101, 'approved', CURRENT_TIMESTAMP)"
+        )
+        test_db.execute(
+            "INSERT INTO questions_detail (interview_id, url, question, owner_id, status, deleted_at) "
+            "VALUES (712, 'public://detail', 'PUBLIC_DETAIL_MARKER', NULL, 'approved', CURRENT_TIMESTAMP)"
+        )
+        test_db.commit()
+
+        result = await get_trash(
+            "tagged", page=1, page_size=100,
+            user=_mock_user(user_id=201, is_admin=True),
+        )
+
+        serialized = json.dumps(result, ensure_ascii=False)
+        assert "PRIVATE_DETAIL_MARKER" not in serialized
+        assert "PUBLIC_DETAIL_MARKER" in serialized
+        assert result["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_admin_analysis_status_excludes_other_users_private_metadata(
+        self, client, test_db
+    ):
+        from app.routers.admin_review import analysis_status
+
+        _ensure_user(test_db, 101)
+        test_db.execute(
+            "INSERT INTO interview (id, url, company, round, questions_list, owner_id, status) "
+            "VALUES (721, 'private://metadata', 'PRIVATE_COMPANY_MARKER', 'PRIVATE_ROUND', "
+            "'private questions', 101, 'approved')"
+        )
+        test_db.execute(
+            "INSERT INTO interview (id, url, company, round, questions_list, owner_id, status, publish_status) "
+            "VALUES (722, 'public://metadata', 'Public Co', '一面', 'public questions', NULL, 'approved', 'published')"
+        )
+        test_db.commit()
+
+        result = await analysis_status(_mock_user(user_id=201, is_admin=True))
+
+        serialized = json.dumps(result, ensure_ascii=False)
+        assert "PRIVATE_COMPANY_MARKER" not in serialized
+        assert "PRIVATE_ROUND" not in serialized
+        assert [row["id"] for row in result["unanalyzed"]] == [722]
+        assert result["unanalyzed_count"] == 1
 
 
 class TestTrashScope:
