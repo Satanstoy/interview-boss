@@ -232,6 +232,30 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
                 (row["id"],),
             ).fetchone()
             current_stage = stage_row["stage"] if stage_row else None
+
+    try:
+        recovery_payload = json.loads(row["payload_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        recovery_payload = None
+    recovery_available = isinstance(recovery_payload, dict) and bool(recovery_payload)
+    if recovery_available and row["payload_expires_at"] and conn is not None:
+        recovery_available = not bool(
+            conn.execute(
+                "SELECT datetime(?) <= datetime('now')", (row["payload_expires_at"],)
+            ).fetchone()[0]
+        )
+    recovery_message = None if recovery_available else (
+        "原稿已过期，无法从原稿重新处理；请重新提交材料。"
+    )
+    snapshot_actions = allowed_actions(
+        row["status"],
+        error_code=row["error_code"],
+        has_result=row["interview_id"] is not None,
+        credential_scope=action_scope,
+        is_admin=bool(actor_is_admin),
+    )
+    if not recovery_available and "resubmit_source" not in snapshot_actions:
+        snapshot_actions.append("resubmit_source")
     snapshot = snapshot_from_parts(
         import_id=row["id"],
         revision=int(row["revision"]),
@@ -274,13 +298,9 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
             if row["error_code"]
             else None
         ),
-        allowed_actions=allowed_actions(
-            row["status"],
-            error_code=row["error_code"],
-            has_result=row["interview_id"] is not None,
-            credential_scope=action_scope,
-            is_admin=bool(actor_is_admin),
-        ),
+        allowed_actions=snapshot_actions,
+        recovery_available=recovery_available,
+        recovery_message=recovery_message,
         updated_at=row["updated_at"],
     )
     data = snapshot.model_dump(mode="json")
@@ -553,7 +573,17 @@ async def retry_upload_import(import_id: str, user: dict = Depends(get_current_u
             except UploadRestoreError as exc:
                 conn.rollback()
                 status_code = (
-                    409 if exc.code in ("SOURCE_DELETED", "LEGACY_MAPPING_AMBIGUOUS") else 404
+                    409
+                    if exc.code
+                    in (
+                        "SOURCE_DELETED",
+                        "SOURCE_EXPIRED",
+                        "POSITION_RETIRED",
+                        "TAXONOMY_CHANGED",
+                        "PIPELINE_VERSION_UNSUPPORTED",
+                        "LEGACY_MAPPING_AMBIGUOUS",
+                    )
+                    else 404
                 )
                 raise HTTPException(
                     status_code=status_code,

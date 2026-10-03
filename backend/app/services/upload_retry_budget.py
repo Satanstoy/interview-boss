@@ -49,6 +49,24 @@ ERROR_POLICY: dict[str, dict] = {
         "root_status": "needs_action",
         "scope": "user",
     },
+    "POSITION_RETIRED": {
+        "retryable": False,
+        "action": "resubmit_source",
+        "root_status": "needs_action",
+        "scope": "user",
+    },
+    "TAXONOMY_CHANGED": {
+        "retryable": False,
+        "action": "resubmit_source",
+        "root_status": "needs_action",
+        "scope": "user",
+    },
+    "PIPELINE_VERSION_UNSUPPORTED": {
+        "retryable": False,
+        "action": "resubmit_source",
+        "root_status": "needs_action",
+        "scope": "user",
+    },
     "QUOTA_EXCEEDED": {
         "retryable": False,
         "action": "wait_for_daily_reset",
@@ -179,6 +197,8 @@ def snapshot_from_parts(
     result=None,
     error=None,
     allowed_actions=None,
+    recovery_available: bool = True,
+    recovery_message: str | None = None,
     updated_at: str | None = None,
 ) -> UploadSnapshot:
     """所有状态共用的 snapshot 构造（AC-013：协议一致）。"""
@@ -196,6 +216,8 @@ def snapshot_from_parts(
         result=UploadResultDTO(**result) if isinstance(result, dict) else result,
         error=UploadErrorDTO(**error) if isinstance(error, dict) else error,
         allowed_actions=list(allowed_actions or []),
+        recovery_available=bool(recovery_available),
+        recovery_message=recovery_message,
         updated_at=updated_at,
     )
 

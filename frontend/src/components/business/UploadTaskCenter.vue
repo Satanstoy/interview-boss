@@ -7,7 +7,7 @@
  * - 结果入口：按 location 接口定位页码与高亮，不打断当前浏览；
  * - 状态更新 aria-live=polite，键盘可操作；375px/1440px 均可查看。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   isTerminalStatus,
@@ -27,6 +27,8 @@ const page = ref(1)
 const total = ref(0)
 const busyIds = ref(new Set())
 const announcement = ref('')
+const triggerButton = ref(null)
+const closeButton = ref(null)
 
 const PAGE_SIZE = 20
 let pollTimer = null
@@ -63,6 +65,7 @@ const actionLabel = {
   view_review_status: '查看审核状态',
   view_budget: '查看额度',
   view_summary: '查看摘要',
+  resubmit_source: '重新提交原文',
 }
 
 const hasPendingWork = computed(() =>
@@ -147,6 +150,19 @@ function stopTaskStreams() {
   sseControllers.clear()
 }
 
+async function toggleTaskCenter() {
+  open.value = !open.value
+  await nextTick()
+  if (open.value) closeButton.value?.focus()
+  else triggerButton.value?.focus()
+}
+
+async function closeTaskCenter() {
+  open.value = false
+  await nextTick()
+  triggerButton.value?.focus()
+}
+
 watch(
   () => currentUser.value?.id == null ? null : String(currentUser.value.id),
   (nextUserId) => {
@@ -185,6 +201,10 @@ async function onAction(task, action) {
       name: 'settings',
       query: { section: 'admin', adminTab: 'model' },
     })
+    return
+  }
+  if (action === 'resubmit_source') {
+    router.push('/import')
     return
   }
   if (action === 'retry' || action === 'retry_failed_steps' || action === 'retry_after_configuration') {
@@ -254,10 +274,11 @@ onUnmounted(() => {
         <header class="flex items-center justify-between border-b px-4 py-3">
           <h2 class="text-sm font-semibold">上传任务</h2>
           <button
+            ref="closeButton"
             type="button"
             class="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
             aria-label="关闭任务中心"
-            @click="open = false"
+            @click="closeTaskCenter"
           >
             关闭
           </button>
@@ -278,6 +299,8 @@ onUnmounted(() => {
                 {{ task.position_name || '未指定岗位' }} · {{ task.import_id }}
               </span>
               <span
+                role="status"
+                aria-live="polite"
                 class="rounded-full px-2 py-0.5 text-[11px]"
                 :class="statusClass[task.status] || 'bg-muted text-muted-foreground'"
               >
@@ -313,6 +336,13 @@ onUnmounted(() => {
             </div>
             <p v-if="task.error" class="mt-1 text-xs text-destructive">
               {{ task.error.message || task.error.code }}
+            </p>
+            <p
+              v-if="task.recovery_available === false && task.recovery_message"
+              class="mt-1 text-xs text-amber-700 dark:text-amber-400"
+              role="status"
+            >
+              {{ task.recovery_message }}
             </p>
 
             <div class="mt-2 flex flex-wrap gap-2">
@@ -352,11 +382,12 @@ onUnmounted(() => {
     </transition>
 
     <button
+      ref="triggerButton"
       type="button"
       class="pointer-events-auto flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm shadow-md hover:bg-muted"
       :aria-expanded="open"
       aria-label="上传任务中心"
-      @click="open = !open"
+      @click="toggleTaskCenter"
     >
       上传任务
       <span

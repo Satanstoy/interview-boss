@@ -96,7 +96,15 @@ def allowed_actions(
     if has_result:
         actions.append("open_result")
     if status == "needs_action":
-        if error_code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
+        if error_code in (
+            "SOURCE_DELETED",
+            "SOURCE_EXPIRED",
+            "POSITION_RETIRED",
+            "TAXONOMY_CHANGED",
+            "PIPELINE_VERSION_UNSUPPORTED",
+        ):
+            actions.append("resubmit_source")
+        elif error_code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
             if credential_scope == "global":
                 actions.append(
                     "configure_system_model" if is_admin else "wait_for_global_model"
@@ -105,7 +113,14 @@ def allowed_actions(
                 actions.append("configure_user_model")
         if error_code == "QUOTA_EXCEEDED":
             actions.append("view_budget")
-        actions.append("retry_after_configuration")
+        if error_code not in (
+            "SOURCE_DELETED",
+            "SOURCE_EXPIRED",
+            "POSITION_RETIRED",
+            "TAXONOMY_CHANGED",
+            "PIPELINE_VERSION_UNSUPPORTED",
+        ):
+            actions.append("retry_after_configuration")
     elif status == "partial_failed":
         actions.append("retry_failed_steps")
     elif status == "failed":

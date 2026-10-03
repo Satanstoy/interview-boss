@@ -171,7 +171,7 @@ test('恢复请求复用已有 attempt 时说明任务正在继续', async ({ pa
   await page.getByRole('button', { name: '重试失败步骤' }).click()
 
   const center = page.getByRole('region', { name: '上传任务中心' })
-  await expect(center.locator('[aria-live="polite"]')).toHaveText(
+  await expect(center.locator('.sr-only[aria-live="polite"]')).toHaveText(
     '已有恢复任务正在继续处理未完成步骤',
   )
 })
@@ -186,7 +186,129 @@ test('任务卡片可用键盘操作且状态对读屏可见', async ({ page }) 
   const actionButton = center.getByRole('button', { name: '查看结果' })
   await actionButton.focus()
   await expect(actionButton).toBeFocused()
-  await expect(center.locator('[aria-live="polite"]')).toHaveCount(1)
+  await expect(center.locator('.sr-only[aria-live="polite"]')).toHaveCount(1)
+  await expect(center.getByText('部分失败', { exact: true })).toHaveAttribute('role', 'status')
+  await expect(center.getByText('部分失败', { exact: true })).toHaveAttribute('aria-live', 'polite')
+})
+
+test('键盘可完整打开任务中心、执行操作并关闭后回到触发按钮', async ({ page }) => {
+  await mockApi(page)
+  let retryCalled = false
+  await page.route('**/api/upload-imports/imp-e2e-0001/retry', (route) => {
+    retryCalled = true
+    return route.fulfill({ json: { ...TASK, created_attempt: false } })
+  })
+
+  await page.goto('/')
+  const trigger = page.getByRole('button', { name: '上传任务中心' })
+  await trigger.focus()
+  await page.keyboard.press('Enter')
+
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  const closeButton = center.getByRole('button', { name: '关闭任务中心' })
+  await expect(closeButton).toBeFocused()
+
+  const retryButton = center.getByRole('button', { name: '重试失败步骤' })
+  await retryButton.focus()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => retryCalled).toBe(true)
+
+  await closeButton.focus()
+  await page.keyboard.press('Enter')
+  await expect(center).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+})
+
+test('375px 与 1440px 下任务状态和操作都可见且不横向溢出', async ({ page }) => {
+  await mockApi(page)
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/')
+    await page.getByRole('button', { name: '上传任务中心' }).click()
+
+    const center = page.getByRole('region', { name: '上传任务中心' })
+    const card = center.locator('li', { hasText: TASK.import_id })
+    await expect(card.getByText('部分失败', { exact: true })).toBeVisible()
+    await expect(card.getByRole('button', { name: '重试失败步骤' })).toBeVisible()
+    const dimensions = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }))
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth)
+
+    const cardBox = await card.boundingBox()
+    expect(cardBox.x).toBeGreaterThanOrEqual(0)
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width)
+  }
+})
+
+test('375px 与 1440px 下排队、审核、配置和失败状态都能读取并触达合法动作', async ({ page }) => {
+  const scenarios = [
+    {
+      status: 'queued',
+      label: '排队中',
+      action: 'view_progress',
+      actionLabel: '查看进度',
+      allowed_actions: ['view_progress'],
+    },
+    {
+      status: 'waiting_review',
+      label: '待审核',
+      action: 'view_review_status',
+      actionLabel: '查看审核状态',
+      allowed_actions: ['view_review_status'],
+    },
+    {
+      status: 'needs_action',
+      label: '需要配置',
+      action: 'configure_user_model',
+      actionLabel: '去配置模型',
+      allowed_actions: ['configure_user_model', 'retry_after_configuration'],
+      error: { code: 'MODEL_CONFIG_MISSING', message: '请配置个人模型' },
+    },
+    {
+      status: 'partial_failed',
+      label: '部分失败',
+      action: 'retry_failed_steps',
+      actionLabel: '重试失败步骤',
+      allowed_actions: ['open_result', 'retry_failed_steps'],
+      error: { code: 'UPSTREAM_TIMEOUT', message: '答案生成超时', retryable: true },
+    },
+  ]
+  let currentTask = { ...TASK }
+  await mockApi(page)
+  await page.unroute('**/api/upload-imports?**')
+  await page.route('**/api/upload-imports?**', (route) =>
+    route.fulfill({ json: { items: [currentTask], total: 1, page: 1, page_size: 20 } }),
+  )
+
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const scenario of scenarios) {
+      currentTask = { ...TASK, ...scenario }
+      await page.goto(`/?ac027=${scenario.status}-${width}`)
+      await page.getByRole('button', { name: '上传任务中心' }).click()
+
+      const center = page.getByRole('region', { name: '上传任务中心' })
+      const card = center.locator('li', { hasText: TASK.import_id })
+      const status = card.getByText(scenario.label, { exact: true })
+      await expect(status).toHaveAttribute('role', 'status')
+      await expect(status).toHaveAttribute('aria-live', 'polite')
+      const action = card.getByRole('button', { name: scenario.actionLabel })
+      await expect(action).toBeVisible()
+      await action.focus()
+      await expect(action).toBeFocused()
+
+      const dimensions = await page.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }))
+      expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth)
+      const cardBox = await card.boundingBox()
+      expect(cardBox.x).toBeGreaterThanOrEqual(0)
+      expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(width)
+    }
+  }
 })
 
 test('普通用户遇到公共模型阻塞时只看到等待提示', async ({ page }) => {
@@ -436,6 +558,27 @@ test('题目进度显示服务端真实分子分母和答案计数', async ({ pa
   const center = page.getByRole('region', { name: '上传任务中心' })
   await expect(center.getByText(/10\/10 题已处理/)).toBeVisible()
   await expect(center.getByText(/答案成功 8 · 失败 2/)).toBeVisible()
+})
+
+test('已完成历史任务原稿过期时明确提示且不显示恢复动作', async ({ page }) => {
+  const expiredTask = {
+    ...TASK,
+    status: 'completed',
+    error: null,
+    allowed_actions: ['open_result', 'resubmit_source'],
+    recovery_available: false,
+    recovery_message: '原稿已过期，无法从原稿重新处理；请重新提交材料。',
+  }
+  await mockApi(page, { task: expiredTask })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  const taskCard = center.locator('li', { hasText: expiredTask.import_id })
+  await expect(taskCard.getByText(expiredTask.recovery_message)).toBeVisible()
+  await expect(taskCard.getByRole('button', { name: '查看结果' })).toBeVisible()
+  await expect(taskCard.getByRole('button', { name: '重新提交原文' })).toBeVisible()
+  await expect(taskCard.getByRole('button', { name: /重试|重新处理|配置后继续/ })).toHaveCount(0)
 })
 
 test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({ page }) => {

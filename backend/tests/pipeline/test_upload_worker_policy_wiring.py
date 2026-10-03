@@ -302,3 +302,159 @@ async def test_worker_match_failed_drives_partial_failed(
         "WHERE import_id = 'imp-1' AND stage = 'resolve'"
     ).fetchone()
     assert failed_stage["status"] == "failed", "match 阶段必须标记 failed"
+
+
+async def test_worker_blocks_source_deleted_after_enqueue(
+    client, monkeypatch, test_db, _fake_graph
+):
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+    test_db.execute(
+        "INSERT INTO interview (id, url, company, questions_list, owner_id, status, "
+        "deleted_at, job_position) VALUES "
+        "(701, 'https://source.example/701', 'S', '1.题', 101, 'approved', "
+        "CURRENT_TIMESTAMP, '后端')"
+    )
+    test_db.execute(
+        "UPDATE upload_imports SET interview_id = 701 WHERE id = 'imp-1'"
+    )
+    test_db.commit()
+
+    await submit_import_task({}, job_id)
+
+    assert _fake_graph.last_input is None, "源已删除时不能启动 graph"
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert (root["status"], root["error_code"]) == ("needs_action", "SOURCE_DELETED")
+    blocked = test_db.execute(
+        "SELECT status FROM upload_stage_results WHERE import_id = 'imp-1' "
+        "AND error_code = 'SOURCE_DELETED'"
+    ).fetchone()
+    assert blocked and blocked["status"] == "needs_action"
+
+
+async def test_worker_blocks_position_retired_after_enqueue(
+    client, monkeypatch, test_db, _fake_graph
+):
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+    position_id = test_db.execute(
+        "INSERT INTO job_positions (name, is_deleted) VALUES ('后端', 1) RETURNING id"
+    ).fetchone()["id"]
+    test_db.execute(
+        "UPDATE upload_imports SET position_id = ?, position_name = '后端' "
+        "WHERE id = 'imp-1'",
+        (position_id,),
+    )
+    test_db.commit()
+
+    await submit_import_task({}, job_id)
+
+    assert _fake_graph.last_input is None, "已退休岗位不能启动 graph"
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert (root["status"], root["error_code"]) == ("needs_action", "POSITION_RETIRED")
+
+
+async def test_worker_blocks_unsupported_pipeline_after_enqueue(
+    client, monkeypatch, test_db, _fake_graph
+):
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+    test_db.execute(
+        "UPDATE upload_imports SET pipeline_version = 'upload-pipeline-v999' "
+        "WHERE id = 'imp-1'"
+    )
+    test_db.commit()
+
+    await submit_import_task({}, job_id)
+
+    assert _fake_graph.last_input is None, "worker 不支持该流水线版本，不能启动 graph"
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert (root["status"], root["error_code"]) == (
+        "needs_action",
+        "PIPELINE_VERSION_UNSUPPORTED",
+    )
+
+
+async def test_worker_blocks_taxonomy_changed_after_enqueue(
+    client, monkeypatch, test_db, _fake_graph
+):
+    from app.services.upload_lifecycle import _system_taxonomy_fingerprint
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+    position_id = test_db.execute(
+        "INSERT INTO job_positions (name, is_deleted) VALUES ('后端', 0) RETURNING id"
+    ).fetchone()["id"]
+    test_db.execute(
+        "INSERT INTO taxonomy (position_name, categories_json, tags_json, source, owner_id) "
+        "VALUES ('后端', '[{\"name\":\"网络\"}]', '[\"TCP\"]', 'system', NULL)"
+    )
+    fingerprint = _system_taxonomy_fingerprint(test_db, "后端")
+    policy = json.loads(
+        test_db.execute(
+            "SELECT policy_json FROM upload_imports WHERE id = 'imp-1'"
+        ).fetchone()["policy_json"]
+    )
+    policy["taxonomy_fingerprint"] = fingerprint
+    test_db.execute(
+        "UPDATE upload_imports SET position_id = ?, position_name = '后端', policy_json = ? "
+        "WHERE id = 'imp-1'",
+        (position_id, json.dumps(policy)),
+    )
+    test_db.execute(
+        "UPDATE taxonomy SET categories_json = '[{\"name\":\"分布式系统\"}]' "
+        "WHERE position_name = '后端' AND source = 'system' AND owner_id IS NULL"
+    )
+    test_db.commit()
+
+    await submit_import_task({}, job_id)
+
+    assert _fake_graph.last_input is None, "分类体系已变化，不能复用旧分析任务"
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert (root["status"], root["error_code"]) == ("needs_action", "TAXONOMY_CHANGED")
+
+
+def test_accept_upload_persists_taxonomy_fingerprint(test_db):
+    from app.services.upload_lifecycle import (
+        _system_taxonomy_fingerprint,
+        accept_upload,
+    )
+
+    test_db.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    position_id = test_db.execute(
+        "INSERT INTO job_positions (name, is_deleted) VALUES ('后端', 0) RETURNING id"
+    ).fetchone()["id"]
+    test_db.execute(
+        "INSERT INTO taxonomy (position_name, categories_json, tags_json, source, owner_id) "
+        "VALUES ('后端', '[{\"name\":\"网络\"}]', '[\"TCP\"]', 'system', NULL)"
+    )
+    test_db.commit()
+
+    accept_upload(
+        test_db,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="taxonomy-snapshot",
+        target_intent="private",
+        text="请解释 TCP 三次握手。",
+        position_id=position_id,
+        position_name="后端",
+    )
+    root = test_db.execute(
+        "SELECT policy_json FROM upload_imports WHERE idempotency_key = 'taxonomy-snapshot'"
+    ).fetchone()
+    policy = json.loads(root["policy_json"])
+    assert policy["taxonomy_fingerprint"] == _system_taxonomy_fingerprint(test_db, "后端")

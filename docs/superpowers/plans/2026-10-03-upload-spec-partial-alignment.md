@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；Task 1–5 已完成本地验证，Task 6 已完成后端与浏览器回归；Task 5 的部署镜像 real-stack 丢响应验收待执行；Task 7–9 待实施。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮尚未部署。
+**状态：** 实施中；Task 1–8 已完成本地验证；Task 5 的部署镜像 real-stack 丢响应验收与 Task 9 公共分享审核真实栈旅程待执行。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；AC-024/025/026 已补旧任务、源变更和90天边界；AC-027 已补多状态双视口键盘/读屏回归；本轮尚未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -280,11 +280,11 @@ cd frontend
 - Test: `frontend/tests/e2e/upload-task-center.spec.js`
 - Possible implementation, only if a new test is red: `backend/app/services/upload_lifecycle.py`、`backend/app/worker.py`、`backend/app/routers/upload_imports.py`、前端任务历史/结果显示组件
 
-- [ ] 从未带 v2 元数据的旧 JD、旧 approved 公共面经和 legacy job 起跑，断言 JD 不进入聚类；重复兼容读取/恢复不生成第二次业务成果。
-- [ ] job 排队后分别删除原文、退休岗位、改变分类/流水线版本，再执行 worker：断言提交前重新验证，任务按契约阻塞/要求显式重分析，不复活原文、不覆盖已有成功版本。
-- [ ] 用可控时钟越过 90 天边界运行 retention：active/failed 的恢复 payload 保留；completed 的 payload 可按契约清理，但摘要、任务历史和结果入口保留。
-- [ ] 浏览器打开已完成老任务；payload 已清时显示明确“不可从零恢复”信息，不呈现可误点的恢复动作。
-- [ ] 保留迁移与回填第二次运行幂等的既有测试；遇到歧义只报告、不猜测重放。
+- [x] 从未带 v2 元数据的旧 JD、旧 approved 公共面经和 legacy job 起跑，断言 JD 不进入聚类；重复兼容读取/恢复不生成第二次业务成果。
+- [x] job 排队后分别删除原文、退休岗位、改变分类/流水线版本，再执行 worker：断言提交前重新验证，任务按契约阻塞/要求显式重分析，不复活原文、不覆盖已有成功版本。
+- [x] 用可控时钟越过 90 天边界运行 retention：active/failed 的恢复 payload 保留；completed 的 payload 可按契约清理，但摘要、任务历史和结果入口保留。
+- [x] 浏览器打开已完成老任务；payload 已清时显示明确“不可从零恢复”信息，不呈现可误点的恢复动作。
+- [x] 保留迁移与回填第二次运行幂等的既有测试；遇到歧义只报告、不猜测重放。
 
 **运行：**
 
@@ -302,6 +302,8 @@ cd frontend
   tests/e2e/upload-task-center.spec.js
 ```
 
+**本轮红绿证据：** 新增 worker 入队后源状态检查先以 3 个反例红灯（源已删除、岗位已退休、流水线版本不支持），随后补了分类指纹变化反例；接受时保存系统分类指纹、执行前校验后，四类反例均阻止进入 graph 并保留已成功检查点。旧成功历史 payload 清理与 SOURCE_DELETED 原因优先级、JD/旧公共数据/legacy job 兼容，以及严格 90 天边界均由后端测试覆盖。后端目标集合 **49 passed, 1 warning in 19.43s**。过期历史任务 Playwright 新断言先因 mock 缺少 `resubmit_source` 红灯，补全后通过；AC-027 键盘初始断言先因打开后焦点没有进入关闭按钮红灯，加入打开/关闭焦点交接。任务中心完整 mock Playwright 当前 **21 passed in 55.0s**，包含 375/1440 下排队、待审核、需配置、部分失败状态矩阵和键盘操作。以上为本地 SQLite/mock UI 证据；real-stack/部署证据仍待 Task 10。
+
 ### Task 8：按 AC-027 验收任务中心的窄屏、键盘和读屏状态
 
 **Files:**
@@ -309,11 +311,11 @@ cd frontend
 - Test: `frontend/tests/e2e/upload-task-center.spec.js`
 - Possible implementation, only if a new accessibility assertion is red: `frontend/src/components/business/UploadTaskCenter.vue`、`frontend/src/views/InterviewView.vue`、相关 CSS
 
-- [ ] 在 375px 与 1440px 两个 viewport 分别运行相同任务卡片、审核态、needs_action、partial_failed 场景。
-- [ ] 全流程仅用键盘打开中心、聚焦任务、触发合法 action、关闭中心；焦点不丢到页面顶端。
-- [ ] 断言按钮可访问名称、状态使用 `aria-live="polite"`/`role="status"`，心跳不持续抢焦点。
-- [ ] 断言窄屏下任务状态与允许动作仍可见和可操作，无横向溢出遮住关键按钮。
-- [ ] 只修复被具体断言证明的布局/语义问题。
+- [x] 在 375px 与 1440px 两个 viewport 分别运行相同任务卡片、审核态、needs_action、partial_failed 场景。
+- [x] 全流程仅用键盘打开中心、聚焦任务、触发合法 action、关闭中心；焦点不丢到页面顶端。
+- [x] 断言按钮可访问名称、状态使用 `aria-live="polite"`/`role="status"`，心跳不持续抢焦点。
+- [x] 断言窄屏下任务状态与允许动作仍可见和可操作，无横向溢出遮住关键按钮。
+- [x] 只修复被具体断言证明的布局/语义问题。
 
 **运行：**
 
@@ -322,6 +324,8 @@ cd frontend
 ./node_modules/.bin/playwright test --config tests/playwright.config.js \
   tests/e2e/upload-task-center.spec.js
 ```
+
+**本轮红绿证据：** 原始键盘用例先复现“按 Enter 打开后焦点停留在触发按钮”，任务中心现在打开时聚焦关闭按钮，关闭时焦点归还触发按钮；页面状态使用 `role=status`/`aria-live=polite`。在两种宽度下对排队、审核、需配置、部分失败四种服务端状态逐项检查状态语义、允许动作、键盘焦点及文档横向尺寸，均通过。完整 mock Playwright **21 passed in 55.0s**。测试期间 Vite 对非目标初始化接口打印本地后端未启动的 `ECONNREFUSED`；本组 API 均由 Playwright mock，不能作为 real-stack 证据。
 
 ### Task 9：把 AC-028 / AC-029 合成一条公共分享审核真实栈旅程
 

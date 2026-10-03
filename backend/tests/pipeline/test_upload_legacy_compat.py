@@ -25,6 +25,9 @@ def _db():
     conn.execute("PRAGMA foreign_keys=ON")
     run_migrations(conn)
     conn.execute("INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')")
+    conn.execute(
+        "INSERT INTO job_positions (id, name, is_deleted) VALUES (1, '后端', 0)"
+    )
     conn.commit()
     return conn
 
@@ -100,6 +103,49 @@ def test_legacy_public_questions_without_resolution_stay_visible():
         == 0
     )
     conn.close()
+
+
+def test_legacy_public_question_is_visible_through_authorized_bank_api(client, test_db):
+    from app.asgi import app
+    from app.core.auth import get_current_user
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    position_id = test_db.execute(
+        "INSERT INTO job_positions (name) VALUES ('legacy-public-api-position') RETURNING id"
+    ).fetchone()[0]
+    question_id = test_db.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, owner_id, status, frequency, "
+        "sources, original_questions, job_position) VALUES "
+        "('旧版公共题库 API 可见性', '系统设计', '兼容性', NULL, 'approved', 1, '[]', '[]', "
+        "'legacy-public-api-position') "
+        "RETURNING id"
+    ).fetchone()[0]
+    test_db.execute(
+        "INSERT INTO question_position (question_id, position_id) VALUES (?, ?)",
+        (question_id, position_id),
+    )
+    test_db.execute(
+        "UPDATE users SET current_position_id = ? WHERE id = 101", (position_id,)
+    )
+    test_db.commit()
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": 101,
+        "username": "u101",
+        "is_admin": False,
+        "bank_mode": "public",
+        "current_position_id": None,
+    }
+    try:
+        response = client.get(
+            "/api/master-bank",
+            params={"filter": "public", "compact": "true", "page_size": 100},
+        )
+        assert response.status_code == 200, response.text
+        assert question_id in {item["id"] for item in response.json()["items"]}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_legacy_job_retry_resolves_root_and_is_idempotent():

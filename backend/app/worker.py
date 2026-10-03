@@ -580,7 +580,7 @@ async def submit_import_task(ctx, job_id: int):
         fail_job,
         touch_job,
     )
-    from app.services.upload_lifecycle import FIRST_WORK_KEY
+    from app.services.upload_lifecycle import FIRST_WORK_KEY, upload_execution_blocker
 
     worker_id = default_worker_id()
 
@@ -751,6 +751,72 @@ async def submit_import_task(ctx, job_id: int):
         if root_import_id and root_status == "needs_action":
             _fail("凭据预检未通过，请先修复模型配置", terminal=True)
             return
+
+        if root_import_id and root_row:
+            def _check_execution_context():
+                with get_db_connection() as conn:
+                    fresh_root = conn.execute(
+                        "SELECT * FROM upload_imports WHERE id = ?", (root_import_id,)
+                    ).fetchone()
+                    return upload_execution_blocker(conn, fresh_root, policy)
+
+            blocker = await asyncio.to_thread(_check_execution_context)
+            if blocker:
+                error_code, error_message = blocker
+
+                def _block_before_processing():
+                    from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
+
+                    with get_db_connection() as conn:
+                        outcome = fail_job(
+                            conn,
+                            job_id,
+                            worker_id,
+                            f"{error_code}: {error_message}",
+                            max_attempts=0,
+                            lease_generation=lease_generation,
+                        )
+                        if outcome.get("status") != "failed":
+                            conn.commit()
+                            return False
+                        current_root = conn.execute(
+                            "SELECT input_version, pipeline_version FROM upload_imports WHERE id = ?",
+                            (root_import_id,),
+                        ).fetchone()
+                        conn.execute(
+                            "INSERT OR IGNORE INTO upload_stage_results ("
+                            "import_id, stage, unit_key, input_version, pipeline_version, "
+                            "status, error_code, job_id) "
+                            "VALUES (?, 'extract', ?, ?, ?, 'needs_action', ?, ?)",
+                            (
+                                root_import_id,
+                                f"source_validation:job:{job_id}",
+                                int(current_root["input_version"] or 1),
+                                current_root["pipeline_version"],
+                                error_code,
+                                job_id,
+                            ),
+                        )
+                        finalize_attempt_and_aggregate_root(
+                            conn,
+                            import_id=root_import_id,
+                            actor_id=int(payload.get("user_id") or 0),
+                            error_code=error_code,
+                            error_message=error_message,
+                            lease_generation=lease_generation,
+                        )
+                        conn.commit()
+                        return True
+
+                blocked = await asyncio.to_thread(_block_before_processing)
+                if blocked:
+                    logger.info(
+                        "上传任务执行前校验阻塞: import_id=%s code=%s",
+                        root_import_id,
+                        error_code,
+                    )
+                return {"status": "needs_action", "job_id": job_id, "error_code": error_code}
+
         work_key = job_row["work_key"] if job_row else FIRST_WORK_KEY
 
         # F08：恢复执行时读取已成功的 extract/classify 阶段检查点，

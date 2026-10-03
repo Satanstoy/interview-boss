@@ -37,6 +37,87 @@ UPLOAD_JOB_TYPE = "submit_import"
 MAX_FILES = 20
 FIRST_WORK_KEY = "extract:document:v1"
 SUBMIT_PHASES = ["extract", "fill", "tag", "match", "save", "cluster"]
+SUPPORTED_UPLOAD_PIPELINE_VERSION = UPLOAD_PIPELINE_VERSION_DEFAULT
+
+
+def _system_taxonomy_fingerprint(conn, position_name: str) -> str | None:
+    """Fingerprint the system taxonomy that the upload was accepted against."""
+
+    if not position_name:
+        return None
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('taxonomy')").fetchall()
+    }
+    if "tags_json" in columns:
+        row = conn.execute(
+            "SELECT categories_json, tags_json FROM taxonomy "
+            "WHERE position_name = ? AND source = 'system' AND owner_id IS NULL",
+            (position_name,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT categories_json, '[]' AS tags_json FROM taxonomy "
+            "WHERE position_name = ? AND source = 'system' AND owner_id IS NULL",
+            (position_name,),
+        ).fetchone()
+    if row is None:
+        return None
+    snapshot = {}
+    for key in ("categories_json", "tags_json"):
+        raw = row[key] or "[]"
+        try:
+            snapshot[key] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            snapshot[key] = raw
+    canonical = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def upload_execution_blocker(conn, root, policy: dict) -> tuple[str, str] | None:
+    """Return a stable blocker when queued work no longer matches its source contract."""
+
+    root = dict(root)
+    if root.get("interview_id") is not None:
+        source = conn.execute(
+            "SELECT deleted_at FROM interview WHERE id = ?", (root["interview_id"],)
+        ).fetchone()
+        if source is None or source["deleted_at"] is not None:
+            return (
+                "SOURCE_DELETED",
+                "原文已被删除或不存在，任务不会重建已删除内容；请重新提交材料。",
+            )
+
+    position_id = root.get("position_id")
+    position_name = str(root.get("position_name") or "")
+    position = None
+    if position_id is not None:
+        position = conn.execute(
+            "SELECT is_deleted FROM job_positions WHERE id = ?", (position_id,)
+        ).fetchone()
+        if position is None or bool(position["is_deleted"]):
+            return "POSITION_RETIRED", "目标岗位已下线，请选择当前有效岗位后重新提交。"
+    elif position_name:
+        position = conn.execute(
+            "SELECT is_deleted FROM job_positions WHERE name = ?", (position_name,)
+        ).fetchone()
+        if position is not None and bool(position["is_deleted"]):
+            return "POSITION_RETIRED", "目标岗位已下线，请选择当前有效岗位后重新提交。"
+
+    if str(root.get("pipeline_version") or "") != SUPPORTED_UPLOAD_PIPELINE_VERSION:
+        return (
+            "PIPELINE_VERSION_UNSUPPORTED",
+            "任务使用的处理流程版本当前不受支持；请重新提交材料以显式重新分析。",
+        )
+
+    if "taxonomy_fingerprint" in policy and position_name:
+        accepted_fingerprint = policy.get("taxonomy_fingerprint") or "missing"
+        current_fingerprint = _system_taxonomy_fingerprint(conn, position_name) or "missing"
+        if current_fingerprint != accepted_fingerprint:
+            return (
+                "TAXONOMY_CHANGED",
+                "岗位分类体系在任务排队后已更新；请重新提交材料以显式重新分析。",
+            )
+    return None
 
 
 class UploadInputError(Exception):
@@ -585,16 +666,31 @@ def restore_upload(conn, *, actor_id: int, import_id: str | None = None, job_id=
         # 不区分“不存在”与“无权”，避免泄露他人任务存在性
         raise UploadRestoreError("NOT_FOUND", "任务不存在")
 
-    # AC-025：源状态检查——原文已删除时不复活，给可解释阻塞
-    if root["interview_id"] is not None:
-        interview = conn.execute(
-            "SELECT deleted_at FROM interview WHERE id = ?", (root["interview_id"],)
-        ).fetchone()
-        if interview is not None and interview["deleted_at"] is not None:
-            raise UploadRestoreError(
-                "SOURCE_DELETED",
-                "原文已被删除，恢复不会重建已删除内容；如需继续请重新提供材料",
-            )
+    try:
+        policy = json.loads(root["policy_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        policy = {}
+    blocker = upload_execution_blocker(conn, root, policy)
+    if blocker:
+        raise UploadRestoreError(*blocker)
+
+    # AC-026：恢复必须有仍在保留期内的输入快照；不能把清空后的 {} 复制进新 job。
+    try:
+        recovery_payload = json.loads(root["payload_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        recovery_payload = None
+    expiry = root["payload_expires_at"]
+    expired = bool(
+        expiry
+        and conn.execute(
+            "SELECT datetime(?) <= datetime('now')", (expiry,)
+        ).fetchone()[0]
+    )
+    if not isinstance(recovery_payload, dict) or not recovery_payload or expired:
+        raise UploadRestoreError(
+            "SOURCE_EXPIRED",
+            "原稿恢复资料已过期或不可用；请重新提交原始材料",
+        )
 
     # 已完成的根任务不需要恢复（R03：结果可打开，不重复执行）
     if root["status"] == "completed":
@@ -751,6 +847,11 @@ def accept_upload(
         position_name=position_name,
         entry=entry,
     )
+    policy_snapshot = policy.to_policy_json()
+    if position_name:
+        policy_snapshot["taxonomy_fingerprint"] = (
+            _system_taxonomy_fingerprint(conn, position_name) or "missing"
+        )
 
     meta_files = validate_submission(text=text, files=files)
     request_hash = compute_request_hash(
@@ -800,7 +901,7 @@ def accept_upload(
         position_id=position_id,
         position_name=position_name,
         pipeline_version=UPLOAD_PIPELINE_VERSION_DEFAULT,
-        policy_json=json.dumps(policy.to_policy_json(), ensure_ascii=False),
+        policy_json=json.dumps(policy_snapshot, ensure_ascii=False),
         payload_json=json.dumps(payload, ensure_ascii=False),
     )
 

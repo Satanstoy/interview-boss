@@ -158,3 +158,20 @@ def test_allowed_actions_user_scope_unchanged():
     )
     assert "configure_user_model" in actions
     assert "configure_system_model" not in actions
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "SOURCE_DELETED",
+        "SOURCE_EXPIRED",
+        "POSITION_RETIRED",
+        "TAXONOMY_CHANGED",
+        "PIPELINE_VERSION_UNSUPPORTED",
+    ),
+)
+def test_source_and_pipeline_blockers_offer_resubmission_without_config_retry(error_code):
+    actions = allowed_actions("needs_action", error_code=error_code, has_result=True)
+    assert "open_result" in actions
+    assert "resubmit_source" in actions
+    assert "retry_after_configuration" not in actions

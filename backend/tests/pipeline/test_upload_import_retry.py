@@ -28,8 +28,9 @@ def test_db_with_import(test_db):
     )
     test_db.execute(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
-        "target_intent, source_type, pipeline_version, status) "
-        "VALUES ('imp-1', 101, 'k1', 'h1', 'private', 'interview', 'v1', 'partial_failed')"
+        "target_intent, source_type, pipeline_version, status, payload_json) "
+        "VALUES ('imp-1', 101, 'k1', 'h1', 'private', 'interview', 'upload-pipeline-v1', "
+        "'partial_failed', '{\"raw_text\":\"原始面试材料\"}')"
     )
     test_db.commit()
     return test_db
@@ -105,6 +106,31 @@ def test_retry_deleted_source_returns_409(client, test_db_with_import):
         resp = client.post("/api/upload-imports/imp-1/retry", json={})
         assert resp.status_code == 409, resp.text
         assert "SOURCE_DELETED" in resp.text
+
+
+def test_retry_expired_payload_returns_409_without_queuing_empty_job(client, test_db_with_import):
+    test_db_with_import.execute(
+        "UPDATE upload_imports SET payload_json = '{}', "
+        "payload_expires_at = datetime('now', '-1 second') WHERE id = 'imp-1'"
+    )
+    test_db_with_import.commit()
+
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        snapshot = client.get("/api/upload-imports/imp-1")
+        assert snapshot.status_code == 200, snapshot.text
+        assert snapshot.json()["recovery_available"] is False
+        assert "原稿已过期" in snapshot.json()["recovery_message"]
+        assert "resubmit_source" in snapshot.json()["allowed_actions"]
+        resp = client.post("/api/upload-imports/imp-1/retry", json={})
+        assert resp.status_code == 409, resp.text
+        assert "SOURCE_EXPIRED" in resp.text
+
+    assert test_db_with_import.execute(
+        "SELECT COUNT(*) FROM upload_attempts WHERE import_id = 'imp-1'"
+    ).fetchone()[0] == 0
+    assert test_db_with_import.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id = 'imp-1'"
+    ).fetchone()[0] == 0
 
 
 def test_retry_ambiguous_legacy_job_returns_409(client, test_db_with_import):

@@ -46,6 +46,8 @@ class ErrorCode(str, Enum):
     PERMISSION_REVOKED = "PERMISSION_REVOKED"
     SOURCE_DELETED = "SOURCE_DELETED"
     SOURCE_EXPIRED = "SOURCE_EXPIRED"
+    POSITION_RETIRED = "POSITION_RETIRED"
+    TAXONOMY_CHANGED = "TAXONOMY_CHANGED"
     QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
     UPSTREAM_RATE_LIMIT = "UPSTREAM_RATE_LIMIT"
     UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"
@@ -195,6 +197,8 @@ class UploadSnapshot(BaseModel):
     result: UploadResultDTO | None = None
     error: UploadErrorDTO | None = None
     allowed_actions: list[str] = Field(default_factory=list)
+    recovery_available: bool = True
+    recovery_message: str | None = None
     updated_at: str | None = None
 
 

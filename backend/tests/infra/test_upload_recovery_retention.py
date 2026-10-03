@@ -133,3 +133,37 @@ def test_legacy_completed_jobs_still_cleaned_up():
     run_db_retention(conn)
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
     conn.close()
+
+
+def test_completed_payload_retention_starts_after_90_day_boundary():
+    conn = _db()
+    for import_id in ("imp-before-boundary", "imp-after-boundary"):
+        _import(conn, import_id)
+        _job(conn, import_id)
+    conn.execute(
+        "UPDATE upload_imports SET updated_at = datetime('now', '-90 days', '+1 minute') "
+        "WHERE id = 'imp-before-boundary'"
+    )
+    conn.execute(
+        "UPDATE upload_imports SET updated_at = datetime('now', '-90 days', '-1 minute') "
+        "WHERE id = 'imp-after-boundary'"
+    )
+    conn.commit()
+
+    run_db_retention(conn)
+
+    before = conn.execute(
+        "SELECT payload_json FROM upload_imports WHERE id = 'imp-before-boundary'"
+    ).fetchone()
+    after = conn.execute(
+        "SELECT payload_json, payload_expires_at FROM upload_imports "
+        "WHERE id = 'imp-after-boundary'"
+    ).fetchone()
+    assert "SECRET-PAYLOAD-imp-before-boundary" in before["payload_json"]
+    assert after["payload_json"] == "{}"
+    assert after["payload_expires_at"] is not None
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id IN "
+        "('imp-before-boundary', 'imp-after-boundary')"
+    ).fetchone()[0] == 2
+    conn.close()
