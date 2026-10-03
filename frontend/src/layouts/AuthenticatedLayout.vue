@@ -159,7 +159,7 @@ const {
   availableSubTags, interviewSeasons, practicedQuestions,
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadActiveSeason, loadAllData, formatDate,
-  interviewTotal,
+  interviewTotal, interviewCurrentPage, interviewPageSize,
   loadInterviewPage,
 } = useMasterBankData({ onAfterFetch: () => afterFetchCleanup() })
 
@@ -174,8 +174,6 @@ const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true
 const mobileNavOpen = ref(false)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
-const interviewCurrentPage = ref(1)
-const interviewPageSize = ref(20)
 const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
 
@@ -641,6 +639,7 @@ watch(
   () => currentUser.value?.current_position_id,
   (posId) => {
     interviewPositionId.value = posId ? String(posId) : ''
+    interviewCurrentPage.value = 1
     fetchTableData()
   },
   { immediate: true },

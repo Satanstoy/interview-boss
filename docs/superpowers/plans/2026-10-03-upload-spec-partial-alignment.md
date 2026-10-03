@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；Task 1–4 已完成本地验证；Task 5 的 API/模拟浏览器断言已完成，部署镜像 real-stack 丢响应验收待执行；Task 6–9 待实施。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮尚未部署。
+**状态：** 实施中；Task 1–5 已完成本地验证，Task 6 已完成后端与浏览器回归；Task 5 的部署镜像 real-stack 丢响应验收待执行；Task 7–9 待实施。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮尚未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -30,7 +30,7 @@
 | RC-2：一个测试把“新连接”写成了原连接读取 | `backend/tests/pipeline/test_upload_stage_recovery.py::test_stage_checkpoint_survives_restart_and_is_reused` 创建了 `conn2`，但 `get_stage_result` 仍传 `conn`；两个连接还各自使用独立 `:memory:` 数据库 | 008 | 已确认的测试缺陷。该用例不能证明进程/连接重启后从持久存储恢复。 |
 | RC-3：队列测试验证了 SQLite job 生成与轮转，没有验证数据库提交与 Redis/ARQ handoff 的恢复闭环 | `test_upload_queue_reconciliation.py` 用内存 SQLite 直接调用 `reconcile_pending_buckets`；它不验证 Redis 暂不可用后的真实投递和 worker 消费 | 007、008、028、029 | 已确认的测试层级缺口。实现是否有丢任务 bug，需要真实 Redis 反例决定。 |
 | RC-4：不少状态契约在 service 层或 mock API 中分别测试，缺少断线、响应丢失、换账号、恢复按钮到服务端状态的一条可见闭环 | 当前已有 `test_upload_status_projection.py`、`test_upload_stream_contract.py`、`test_upload_submit_api.py` 及 mock Playwright；这些分别证明局部规则，不等于真实浏览器走完整网络生命周期 | 001、010、011、013、017、021、022、026 | 已确认的证据边界；特定状态是否有实现问题仍需新增反例。 |
-| RC-5：审计结论与后续实现存在时间差 | AC-002 旧审计文字引用了“前端本地分页”的历史复审结论；当前 `InterviewView.vue` 传 `server-total` 并在换页调用 `loadInterviewPage`，后端也有 121 条、权限过滤和稳定排序测试 | 002 | 已确认的报告陈旧风险。当前应把问题写成“页面与 API 联动未活验”，不能继续把本地分页当已确认缺陷。 |
+| RC-5：审计结论与后续实现存在时间差 | AC-002 旧审计文字引用了“前端本地分页”的历史复审结论；静态检查可见 `server-total` 与换页请求，但浏览器回归发现 `fetchTableData()` 首次加载硬编码 `page_size=100`，与默认 20 行及页大小状态脱节。改用共享页码/页大小状态后，新浏览器用例验证首屏 20 行、翻页、筛选/排序重置、50 行页大小和 P2 定位；后端分页用例有 121 条、权限过滤和稳定排序测试 | 001、002 | 审计措辞陈旧，同时确认一个客户端分页状态 bug。不能继续把“前端本地分页”当当前缺陷；AC-002 需按新联动证据重定级。 |
 | RC-6：旧客户端、源数据变化和长期保留是跨版本/跨时间问题，常规当前态 fixture 不会自然触发 | 当前有 JD legacy、源删除兼容、retention 服务测试；审计缺口是旧对象完整操作、入队后源状态变化、老任务结果 UI 的组合验收 | 024、025、026 | 覆盖设计缺口；不预设要改迁移或清理实现。 |
 | RC-7：响应式和可访问性缺少明确的自动验收矩阵 | 当前 task-center 有键盘/aria 基础断言，但没有按 AC 固定 375/1440 两种宽度验证焦点稳定、状态播报与所有动作可达 | 027 | 已确认的验收缺口。 |
 
@@ -242,11 +242,19 @@ cd frontend
 - Test: `backend/tests/pipeline/test_interview_server_pagination.py`
 - Possible implementation, only if a new browser test is red: `frontend/src/views/InterviewView.vue`、`frontend/src/composables/useMasterBankData.js`、`frontend/src/components/common/DataTable.vue`、`backend/app/routers/data.py`
 
-- [ ] 用 121 条授权 P1 面经、U2 私人行、P2 行验证 `total`、页边界、稳定排序、权限和岗位过滤。
-- [ ] 浏览器换页/排序/招聘季/每页数量时断言 URL/API 查询参数与当前页数据一致；筛选或 page size 改变后页码回 1。
-- [ ] 核实当前 `server-total` 实现与 API 契约；若测试通过，只把 AC-002 状态从“部分”更新为“回归覆盖”，不改分页实现。
-- [ ] 用户原在 P1 第 2 页时上传 P2 任务：后台完成不强迫导航；用户点击“查看面经”后按 location 切 P2、正确页并高亮目标。
-- [ ] 目标已删除/无权读取时显示明确状态，不跳到同页其他记录。
+- [x] 用 121 条授权 P1 面经、U2 私人行、P2 行验证 `total`、页边界、稳定排序、权限和岗位过滤。
+- [x] 浏览器换页/排序/招聘季/每页数量时断言 API 查询参数与当前页数据一致；筛选或 page size 改变后页码回 1。
+- [x] 浏览器首屏测试先红：服务端请求 `page_size=100`，页面一次展示 45 行，违反默认 20 行的页状态；实现改为使用共享页码/页大小状态。排序和招聘季变化显式回第 1 页；普通数据刷新保留当前页。列表底部增加滚动留白，避免固定任务中心遮挡页大小选择器。
+- [x] 用户原在 P1 第 2 页时上传 P2 任务：后台完成不强迫导航；用户点击“查看面经”后按 location 切 P2、正确页并高亮目标。
+- [x] 目标已删除/无权读取时显示明确状态，不跳到同页其他记录。
+
+**验证结果：**
+
+- 新增 `interview-pagination.spec.js`：3/3 通过；首屏 20 行、下一页、排序/招聘季重置、50 行页大小、P1 第 2 页保持、P2 location 第 3 页高亮、404 不跳页均有浏览器断言。
+- 既有 `upload-task-center.spec.js` 与新分页 spec 合跑：20/20 通过。
+- `test_interview_server_pagination.py`：7/7 通过；覆盖 121 条、total、排序、权限、岗位过滤、边界和 location。
+- `npm run build` 成功；`eslint` 检查修改文件 0 error、10 个既有 warning；`git diff --check` 通过。
+- 前端合跑日志有本地 API 未启动的 Vite proxy `ECONNREFUSED` 噪声；这些 mock E2E 结果不作为真实栈证据，真实栈验收仍留在 Task 10。
 
 **运行：**
 

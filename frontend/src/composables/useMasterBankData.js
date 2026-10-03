@@ -25,6 +25,8 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const masterBankTotal = ref(0)
   const masterBankOverallTotal = ref(0)
   const interviewTotal = ref(0)
+  const interviewCurrentPage = ref(1)
+  const interviewPageSize = ref(20)
   const practiceStats = ref({})
   const activeSeason = ref('')
   const availableSeasons = ref([])
@@ -76,7 +78,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     filteredTagCountsFromServer.value = []
     try {
       const [jdResp, , masterResp] = await Promise.all([
-        api.fetchJdData(), loadInterviewPage(1, 100), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
+        api.fetchJdData(), loadInterviewPage(interviewCurrentPage.value, interviewPageSize.value), api.fetchMasterBank({ page: 1, page_size: PAGE_SIZE, cat1: selectedTag.value !== '全部' ? selectedTag.value : undefined, tag: requestTag || undefined, filter: bankFilter.value })
       ])
       if (currentRequestVersion !== requestVersion.value) return
       // 招聘季全集独立拉取（server 模式下面经数据仅当前页，season 选项需全集）
@@ -196,6 +198,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
 
   // contracts §4.5 server 模式：招聘季/排序变化时回第 1 页重新按页拉取
   watch([filterSeason, interviewSortOrder], () => {
+    interviewCurrentPage.value = 1
     fetchTableData()
   })
 
@@ -301,6 +304,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     isDataLoading, dataLoadError,
     analytics, practiceStats, popularTags, categoryCounts,
     masterBankTotal, masterBankOverallTotal, interviewTotal,
+    interviewCurrentPage, interviewPageSize,
     activeSeason, availableSeasons,
     // infinite scroll
     isLoadingMore, hasMore, loadMoreMasterBank,
