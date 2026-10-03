@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；Task 1–8 已完成本地验证；Task 5 的部署镜像 real-stack 丢响应验收与 Task 9 公共分享审核真实栈旅程待执行。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；AC-024/025/026 已补旧任务、源变更和90天边界；AC-027 已补多状态双视口键盘/读屏回归；本轮尚未部署。
+**状态：** 主实现和部署已完成，代码提交 `513af96e`；生产 backend、worker、nginx、OAuth gateway 均 healthy。disposable 部署镜像 real-stack 的 AC-021 丢响应恢复、AC-028 个人任务停启恢复、AC-029 公共分享/管理员审核/单题失败重试均通过。所有真实栈的 LLM 请求都指向本地 stub，因此不验证用户已过期的外部模型或真实生成质量。仍待用户决定：普通公共/个人 rootless 项达到终态失败后，是否增加应用级重试入口；目前此类项目标为 failed，公共贡献有单独的管理员重试入口。上传恢复 spec 仍是 Draft，未擅自改成 Accepted。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -58,13 +58,13 @@
 - Reference: `docs/superpowers/specs/2026-09-29-upload-recovery/README.md`
 - Reference: `docs/superpowers/specs/2026-09-29-upload-recovery/acceptance.md`
 
-- [ ] 把 17 个 partial 列成 `AC → requirement → 当前测试 → 缺少证据 → 本计划 task` 追踪表。
-- [ ] 将 AC-002 的旧“前端本地分页”措辞改为历史发现；当前缺口写为“浏览器换页/筛选与服务端 API 联动未活验”。
-- [ ] 明确 AC-008 当前测试的 `conn2` 错接是测试缺陷，不能作为进程重启证据。
-- [ ] 对每项标 `implementation bug / test gap / stale audit / draft decision`，禁止把未调查项默认标为代码 bug。
+- [x] 在审计矩阵列出 AC-001～029 当前状态、已有测试证据和剩余场景；TDD 工作包标题与下文对应 AC。
+- [x] 将 AC-002 的旧“前端本地分页”措辞改为历史发现；当前缺口明确为浏览器与真实分页 API 联动未活验。
+- [x] 将 AC-008 的 `conn2` 错接记录为测试证明缺陷；后续同一 SQLite 文件新连接测试另证生产 checkpoint 边界。
+- [x] 根因分析区分已确认实现缺陷、测试缺口、过时审计和 Draft 决策，不把未验证项默认标成代码 bug。
 - [ ] 实施前由 spec 责任人确认 Draft 的 AC 是否仍作为预期行为；已接受 ADR-0048 始终优先。
 
-**验证：** `git diff --check`；人工核对 17 项各出现一次且映射到后续 task。此步骤不跑产品测试。
+**验证：** `git diff --check`；人工核对 AC-001～029 矩阵、证据和工作包映射。Draft 是否成为最终预期仍等待 spec 责任人确认；这个决策没有代为更改。
 
 ### Task 1：修复 AC-008 重启测试的证明缺陷，并测阶段崩溃点
 
@@ -211,7 +211,7 @@ cd frontend
 - Test: `frontend/tests/e2e/submit-flow.spec.js`、`frontend/tests/e2e/real-stack-smoke.spec.js`
 - Possible implementation, only if a new test is red: `frontend/src/services/http.js`、上传表单组件、`backend/app/middleware/request_log.py`
 
-- [ ] 浏览器真实 POST 到隔离 API；测试代理让服务端完成提交后丢弃响应，浏览器用相同 idempotency key 恢复并得到同一个 import_id。测试已加到 `real-stack-smoke.spec.js`，需在 Task 10 的 disposable stack 实跑。
+- [x] 浏览器真实 POST 到隔离 API；测试代理让服务端完成提交后丢弃响应，浏览器用相同 idempotency key 恢复并得到同一个 import_id。部署镜像 disposable stack 实跑通过。
 - [x] 断言同用户同 key/同 hash 只有一个 root、一个 attempt 和同一组有效初始 dispatch；同 key 不同 hash 返回 409。`test_upload_submit_api.py` 记录重复前后的 DB 行与 dispatcher 调用数；不同 hash 冲突已有独立断言。share policy 可含多个 credential scope，因此计数比较初始 dispatch 集合而非硬编码为一个 job。
 - [x] U2 用 U1 的 key 查询仍为 404；响应正文不含 U1 的 import_id 或幂等键，应用请求日志将 by-key 路径中的 key 替换为 `[redacted]`。已有 U1→U2 Playwright 还断言旧任务、SSE 与草稿缓存退出用户作用域后立即清除。
 - [x] 对 400、413 和不支持的文件类型断言草稿仍在、错误字段可读，SQLite 中没有幽灵 root/job；超限与不支持 MIME 均在 `UploadFile.read()` 前拒绝。
@@ -231,7 +231,7 @@ cd frontend
   tests/e2e/submit-flow.spec.js
 ```
 
-新加真实丢响应测试后，用 `REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh` 验证同一部署构建镜像上的接受与恢复；若场景不在 smoke runner，给 runner 增加显式测试入口，不能把 mock 结果记成 AC-021 活体验收。
+真实丢响应测试通过部署镜像 disposable stack 验收：服务端提交成功后代理丢弃 POST 响应，浏览器以相同 key 恢复到同一个 `import_id`。完整 runner 退出码为 0。400/413 草稿保留仍只由 mock API 浏览器用例验证。
 
 ### Task 6：验证 AC-001 / AC-002 的页面定位和服务端分页联动
 
@@ -338,15 +338,15 @@ cd frontend
 - Update if failure artifacts need a stable format: `scripts/` 下的 real-stack trace assertion helper
 - Possible implementation, only if the live test is red: `backend/app/routers/public_contributions.py`、`backend/app/services/public_contributions.py`、`backend/app/worker_cluster_tasks.py`、前端审核/任务中心调用层
 
-- [ ] 扩展 disposable Compose run，确保临时 SQLite volume、独立 Redis、worker、nginx 和本地 stub 全属于唯一项目名；runner 退出时清理 volume。
-- [ ] 用 U1 浏览器从真实 `/api/submit-jobs` 提交 5 道可区分题目的 share；由真实 worker 完成私人预处理和任务投影。
-- [ ] 用 admin 浏览器实际读取申请；排除 1 题、修改 1 题、清除来源敏感字段并批准；断言待审核投影此前不能被普通公共读取。
-- [ ] 在临时库预置一条已发布 public canonical，让一条保留题命中它；断言公共正文、来源、频次不变，私人 resolution 指向同一 canonical。
-- [ ] 在 stub 对另一条保留题的公共阶段注入一次确定性失败；断言状态是部分失败、失败 ordinal 可见、成功 item 的 IDs 和写入数不变。
-- [ ] worker 停止时通过 UI/API 排入失败项恢复，然后重启同一 worker container；断言只恢复失败 ordinal，完成后公共端恰有 4 条获批题，排除题不出现。
-- [ ] U2 尝试访问 U1 私人 root、原稿和 by-key 均被拒绝；admin 可以审核已提交快照，但读取 U1 其他私人 root 仍被拒绝。
-- [ ] runner 导出 `ordinal → stage → private detail/resolution → review item/projection → public detail/resolution/canonical` trace；测试断言真实 DB 关系和 API 读结果，不以截图、HTTP 200 或 completed 单独判通过。
-- [ ] 首次运行保留失败 compose logs、Playwright trace、trace JSON；通过后只保留非敏感摘要，确保临时数据库和 Redis volume 已删除。
+- [x] disposable Compose 使用唯一项目名和临时 SQLite volume、独立 Redis、worker、nginx、本地 stub；runner 退出后清理临时 volume。
+- [x] U1 浏览器从真实 `/api/submit-jobs` 提交 5 道题；真实 worker 完成私人预处理和任务投影。
+- [x] 管理员真实读取申请、排除 1 题、修改 1 题、脱敏并批准；普通公共读取在审核前不可见。
+- [x] 临时库预置公共 canonical；一条保留题命中它，公共正文/来源/频次不变，私人 resolution 指向同一 canonical。
+- [x] 在 stub 对另一题的公共阶段注入一次确定性失败；部分失败投影显示失败 ordinal，既有成功 item 的 ID 和写入数不变。
+- [x] worker 停止期间由管理员重试失败项，重启同一 worker container 后只处理失败 ordinal；公共端最终有 4 条获批题，被排除题不出现。
+- [x] U2 访问 U1 私人 root、原稿和 by-key 均被拒绝；管理员可审核已提交快照，但不能读取 U1 其他私人 root。
+- [x] runner 导出逐题关系 trace；测试核对真实 SQLite 关系和授权 API 结果。
+- [x] Playwright/DB trace 摘要留在 `test-results/real-stack/`；临时数据库和 Redis volume 已删除。
 
 **运行：**
 
@@ -354,7 +354,7 @@ cd frontend
 REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh
 ```
 
-**本地红绿证据：** 新增 API 断言先因非管理员 share policy 合法地产生两个 scope preflight job 而失败；将断言改为比较重复提交前后完整 job 集合与实际 dispatcher 调用数后，证明相同 key 重放不新增 root/attempt/job/dispatch。U2 隔离测试再发现 middleware 将 by-key 路径原样写入应用日志；现在将该路径中的幂等键脱敏。超限与 text/plain 上传均断言 FastAPI `UploadFile.read()` 从未被调用且 SQLite 无 root/job。浏览器 400/413 草稿用例先因错误容器缺少 `role="alert"`、XHR 上传封装丢掉 `Idempotency-Key` 而红；组件现在将错误作为 alert 播报，`http.upload()` 转发调用方 headers。两种错误均保留文本和图片，连续重试复用同一 key。后端目标文件最后定向用例 **1 passed**（整份 **15 passed**，在加入 log redaction 断言之前）；`submit-flow.spec.js` 完整 **16 passed**。real-stack 丢响应测试已加入 `real-stack-smoke.spec.js`，尚未在 Compose 镜像上运行，所以 AC-021 仍未活验。
+**disposable real-stack 证据：** 单题失败反例先于管理员重试进入同一真实 worker；重启后 DB trace 确认失败项 `source_ordinal=40` 恢复，成功项 ID 保持不变，排除项 `source_ordinal=50` 未发布，最终公开题数为 4。完整 `scripts/real_stack_smoke.sh` 退出码 0；此旅程 Playwright **1 passed in 11.3m**。本测试真实运行候选 Docker 镜像、FastAPI、SQLite、Redis、ARQ worker、nginx 和浏览器，但 provider URL 指向本地 deterministic stub。
 
 验收依据直接使用 [AC-028/029](../specs/2026-09-29-upload-recovery/acceptance.md) 第 155～175 行。真实模型供应商不参与；stub 只用于确定性结果与可控故障。
 
@@ -366,13 +366,13 @@ REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh
 - Update: `.tech-audit/work/2026-10-02/findings.tsv`
 - Update: `docs/superpowers/plans/2026-10-03-upload-spec-partial-alignment.md`
 
-- [ ] 按每个 AC 记录初始红灯、对应 commit、最终绿灯命令/计数/耗时/环境及证据边界。
-- [ ] 只有契约必需的证明层通过才将 `partial` 改为 `通过（回归）` 或 `通过（隔离全栈）`；记录 `not-run` 和失败，不推断全绿。
-- [ ] 把已确认修复的代码缺陷与纯测试缺口分列；活动 finding 只保留仍未通过的内容。
-- [ ] 运行全量目标 backend regression、上传/审核前端 Playwright、静态检查及部署镜像 real-stack；生产环境仅做 root/health/image ID 的只读确认。
-- [ ] 若实栈全绿，再按既有部署步骤更新 backend 并单独重启 worker；确认两者镜像相同、health 通过、备份存在。不得向生产库写验收数据。
+- [x] 在 AC 矩阵/验证账记录本轮红绿结果、命令、计数、耗时、环境及边界；本轮统一代码变更由 focused commit `513af96e` 标识。
+- [x] 按契约证据更新状态；隔离全栈、回归、部分与旧审计结论过时项分别注明，没有把 mock/API 回归写成真实栈通过。
+- [ ] `.tech-audit/work/2026-10-02/findings.tsv` 未更新：当前工作区存在其他轮次的未跟踪审计目录，按工作区保护规则没有改动或提交该区域；已在本计划和 AC 矩阵更新可编辑的当前差异摘要。
+- [x] 运行目标 backend regression、任务中心 Playwright、静态检查及候选镜像 real-stack；生产只执行 root/health/image/backup 只读确认。
+- [x] 候选实栈通过后生产 update 并单独重启 worker；首次重启后发现两者 image ID 不同，已让 backend recreate 到当前 `app:local` 并复核一致；health 通过、最新备份存在且完整；生产无验收业务数据。
 - [ ] 根据 Draft 责任人的确认更新 spec 状态或记录批准的偏差；没有设计批准时不得把 Draft 标为 Accepted/Implemented。
-- [ ] 每个已验证工作包做一个 focused commit；不要提交基线中未跟踪的 `.tech-audit/work/2026-08-28/`、`.tech-audit/work/2026-09-23/`、`backups` 或 `docs/specs/2026-09-23-frontend-ui-hierarchy-cleanup.md`。
+- [x] 已为验证过的实现做 focused commit `513af96e`；未提交基线中未跟踪的 `.tech-audit/work/2026-08-28/`、`.tech-audit/work/2026-09-23/`、`backups` 或 `docs/specs/2026-09-23-frontend-ui-hierarchy-cleanup.md`。没有 push 授权，因此只保留本地提交。
 
 **最低回归集合：**
 
