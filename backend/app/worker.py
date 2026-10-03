@@ -865,6 +865,7 @@ async def submit_import_task(ctx, job_id: int):
             "job_position": payload.get("job_position", ""),
             "import_id": root_import_id,
             "attempt_id": attempt_id,
+            "_lease_generation": lease_generation,
             "thread_id": thread_id,
             "work_key": work_key,
             "job_id": job_id,
@@ -963,7 +964,10 @@ async def submit_import_task(ctx, job_id: int):
 
                         if etype == "error":
                             emitted_error = event.get("message") or "处理失败"
-                            break
+                            # Drain the async SSE generator to completion. Breaking
+                            # here closes it from the consumer's context while its
+                            # ContextVar token was set in the generator task.
+                            continue
 
                         if etype == "done":
                             saw_done = True
@@ -1279,10 +1283,8 @@ async def _generate_answer_job(ctx, job_id: int):
     worker_id = default_worker_id()
 
     def _sync_upload_root(conn, status, *, error_code=None, result_json=None):
-        from app.services.job_lifecycle import (
-            refresh_completed_upload_roots,
-            update_upload_answer_stage,
-        )
+        from app.services.job_lifecycle import update_upload_answer_stage
+        from app.services.upload_lifecycle import refresh_completed_upload_roots
 
         root_import_id = update_upload_answer_stage(
             conn,

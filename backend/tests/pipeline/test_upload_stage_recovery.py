@@ -16,7 +16,11 @@ import pytest
 
 from app.db.migrations import run_migrations
 from app.services.upload_lifecycle import build_thread_id
-from app.services.upload_repository import get_stage_result, save_stage_result
+from app.services.upload_repository import (
+    get_stage_result,
+    persist_succeeded_stage_checkpoint,
+    save_stage_result,
+)
 
 
 def _db(db_path=None):
@@ -111,6 +115,67 @@ def test_stage_checkpoint_is_versioned_by_input_version():
     conn.close()
 
 
+def test_completed_stage_checkpoint_requires_current_worker_generation():
+    conn = _db()
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, root_import_id, lease_generation) "
+        "VALUES ('submit_import', 'running', 'imp-1', 7)"
+    )
+    job_id = int(cursor.lastrowid)
+    conn.commit()
+
+    persisted = persist_succeeded_stage_checkpoint(
+        conn,
+        import_id="imp-1",
+        stage="extract",
+        unit_key="document",
+        result_json='{"data":{"questions":["TCP"]}}',
+        job_id=job_id,
+        lease_generation=7,
+    )
+    conn.commit()
+    checkpoint = get_stage_result(
+        conn,
+        import_id="imp-1",
+        stage="extract",
+        unit_key="document",
+        input_version=1,
+    )
+    assert persisted is True
+    assert checkpoint["status"] == "succeeded"
+    assert checkpoint["output_hash"]
+    conn.close()
+
+
+def test_stale_worker_generation_cannot_commit_stage_checkpoint():
+    conn = _db()
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, root_import_id, lease_generation) "
+        "VALUES ('submit_import', 'running', 'imp-1', 8)"
+    )
+    job_id = int(cursor.lastrowid)
+    conn.commit()
+
+    persisted = persist_succeeded_stage_checkpoint(
+        conn,
+        import_id="imp-1",
+        stage="extract",
+        unit_key="document",
+        result_json='{"data":{"questions":["stale"]}}',
+        job_id=job_id,
+        lease_generation=7,
+    )
+    assert persisted is False
+    assert get_stage_result(
+        conn,
+        import_id="imp-1",
+        stage="extract",
+        unit_key="document",
+        input_version=1,
+    ) is None
+    conn.close()
+
+
 # ── 持久化事务性 ─────────────────────────────────────────────
 
 
@@ -148,6 +213,31 @@ def test_submit_interview_in_conn_leaves_commit_to_caller():
     assert conn.execute("SELECT COUNT(*) FROM interview").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM questions_detail").fetchone()[0] == 0
     conn.close()
+
+
+def test_uncommitted_interview_transaction_is_rolled_back_after_connection_loss(tmp_path):
+    """模拟 worker 在 interview/detail 写入后、事务提交前退出。"""
+
+    db_path = tmp_path / "upload-interview-transaction.sqlite"
+    conn = _db(db_path)
+    conn.execute("BEGIN IMMEDIATE")
+    _answer_tasks, interview_id, detail_ids = _submit_in_conn(conn)
+    assert interview_id
+    assert detail_ids
+    assert conn.execute("SELECT COUNT(*) FROM interview").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM questions_detail").fetchone()[0] == 1
+
+    # Closing a process-owned SQLite connection with an open transaction is
+    # the crash boundary: no explicit ROLLBACK is run by the test.
+    conn.close()
+
+    restarted = sqlite3.connect(str(db_path))
+    try:
+        assert restarted.execute("SELECT COUNT(*) FROM interview").fetchone()[0] == 0
+        assert restarted.execute("SELECT COUNT(*) FROM questions_detail").fetchone()[0] == 0
+        assert restarted.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0] == 0
+    finally:
+        restarted.close()
 
 
 def test_submit_interview_in_conn_rolls_back_everything_on_failure():

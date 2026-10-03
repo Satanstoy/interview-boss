@@ -486,3 +486,308 @@ async def test_restored_attempt_reuses_extract_checkpoint_without_llm(isolated_s
         "SELECT revision FROM upload_imports WHERE id = ?", (import_id,)
     ).fetchone()
     assert int(root["revision"]) >= 2
+
+
+async def test_extract_checkpoint_is_committed_before_classify_failure_and_reused(
+    isolated_stack, caplog,
+):
+    """AC-008：extract 完成后、classify 失败前的检查点必须已提交并可恢复。"""
+
+    from contextlib import ExitStack
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.services.credential_preflight import run_credential_preflight
+    from app.services.upload_lifecycle import accept_upload, restore_upload
+    from app.worker import submit_import_task
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="ac008-extract-crash-boundary",
+        target_intent="private",
+        text="面经：TCP 三次握手",
+        position_id=1,
+        position_name="后端",
+        job_position="后端",
+    )
+    conn.commit()
+    import_id = accepted["import_id"]
+
+    def run_preflight(attempt_id=None):
+        query = (
+            "SELECT id FROM jobs WHERE root_import_id = ? "
+            "AND job_type = 'credential_preflight'"
+        )
+        params = [import_id]
+        if attempt_id is not None:
+            query += " AND upload_attempt_id = ?"
+            params.append(attempt_id)
+        preflight = conn.execute(query + " ORDER BY id DESC LIMIT 1", params).fetchone()
+        assert preflight is not None
+        outcome = run_credential_preflight(
+            conn,
+            job_id=int(preflight["id"]),
+            probe=lambda credential: {
+                "status": "ok",
+                "provider": credential.provider,
+                "model": credential.model,
+                "latency_ms": 1,
+            },
+        )
+        conn.commit()
+        assert outcome.status == "ok"
+
+    run_preflight()
+    first_job = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (import_id,),
+    ).fetchone()
+    assert first_job is not None
+
+    counters = {"extract": 0, "classify": 0}
+
+    async def extract_once(*_args, **_kwargs):
+        counters["extract"] += 1
+        return EXTRACT_JSON
+
+    async def fail_classify(**_kwargs):
+        counters["classify"] += 1
+        raise RuntimeError("injected failure after extraction completed")
+
+    def patches(*, classify):
+        return [
+            patch(
+                "app.services.llm._call_llm_with_retry_messages",
+                new=AsyncMock(side_effect=extract_once),
+            ),
+            patch(
+                "app.services.llm.get_llm_client_for_user",
+                return_value=(MagicMock(), "test-model", 30, "", "openai"),
+            ),
+            patch("app.services.llm._should_use_response_format", return_value=False),
+            patch(
+                "app.services.submit_service.tag_questions_batch",
+                new=AsyncMock(side_effect=classify),
+            ),
+            patch(
+                "app.db.connection.get_taxonomy_for_position",
+                return_value=TAXONOMY_STUB,
+            ),
+            patch(
+                "app.services.pipeline.queue._run_cluster_batch_in_background",
+                new=AsyncMock(return_value=False),
+            ),
+        ]
+
+    with ExitStack() as stack:
+        for patcher in patches(classify=fail_classify):
+            stack.enter_context(patcher)
+        await submit_import_task({}, int(first_job["id"]))
+    conn.commit()
+    assert not any(
+        "Task exception was never retrieved" in record.getMessage()
+        for record in caplog.records
+    ), "graph error handling must close its async event stream cleanly"
+
+    extract_checkpoint = conn.execute(
+        "SELECT status, result_json FROM upload_stage_results "
+        "WHERE import_id = ? AND stage = 'extract' AND unit_key = 'document'",
+        (import_id,),
+    ).fetchone()
+    assert extract_checkpoint is not None
+    assert extract_checkpoint["status"] == "succeeded"
+    assert "TCP 三次握手" in extract_checkpoint["result_json"]
+    assert counters == {"extract": 1, "classify": 1}
+
+    restarted_reader = sqlite3.connect(os.environ["UPLOAD_TEST_DB_PATH"])
+    try:
+        durable_checkpoint = restarted_reader.execute(
+            "SELECT status, result_json FROM upload_stage_results "
+            "WHERE import_id = ? AND stage = 'extract' AND unit_key = 'document'",
+            (import_id,),
+        ).fetchone()
+        assert durable_checkpoint is not None
+        assert durable_checkpoint[0] == "succeeded"
+        assert "TCP 三次握手" in durable_checkpoint[1]
+    finally:
+        restarted_reader.close()
+
+    # Simulate a fresh worker generation after the later-stage failure.
+    conn.execute(
+        "UPDATE upload_imports SET status = 'failed', error_code = 'UPSTREAM_TIMEOUT' "
+        "WHERE id = ?",
+        (import_id,),
+    )
+    conn.execute(
+        "UPDATE jobs SET status = 'failed', worker_id = NULL, locked_until = NULL "
+        "WHERE id = ?",
+        (first_job["id"],),
+    )
+    conn.commit()
+    restored = restore_upload(conn, actor_id=101, import_id=import_id)
+    conn.commit()
+    assert restored["created_attempt"] is True
+    run_preflight(restored["attempt_id"])
+    retry_job = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND upload_attempt_id = ? "
+        "AND job_type = 'submit_import'",
+        (import_id, restored["attempt_id"]),
+    ).fetchone()
+    assert retry_job is not None
+
+    async def classify_success(**_kwargs):
+        counters["classify"] += 1
+        return TAGGED_ROWS
+
+    with ExitStack() as stack:
+        for patcher in patches(classify=classify_success):
+            stack.enter_context(patcher)
+        await submit_import_task({}, int(retry_job["id"]))
+    conn.commit()
+
+    assert counters["extract"] == 1, "重启后的恢复必须复用已提交的提取检查点"
+    assert counters["classify"] > 1, "恢复 attempt 必须继续执行失败的分类阶段"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM questions_detail WHERE import_id = ?", (import_id,)
+    ).fetchone()[0] == 2
+
+
+async def test_answer_retries_after_external_result_cannot_be_saved(isolated_stack, monkeypatch):
+    """AC-008：模型已返回但答案事务失败时，可重复调用且业务答案只落一次。"""
+
+    import json
+
+    from app.services.credential_preflight import run_credential_preflight
+    from app.services.upload_lifecycle import accept_upload
+    from app.services.job_lifecycle import update_upload_answer_stage
+    from app.worker import generate_answer_task
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="ac008-answer-save-crash-boundary",
+        target_intent="private",
+        text="面经：缓存一致性",
+        position_id=1,
+        position_name="后端",
+        job_position="后端",
+    )
+    conn.commit()
+    import_id = accepted["import_id"]
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? "
+        "AND job_type = 'credential_preflight'",
+        (import_id,),
+    ).fetchone()
+    assert preflight is not None
+    outcome = run_credential_preflight(
+        conn,
+        job_id=int(preflight["id"]),
+        probe=lambda credential: {
+            "status": "ok",
+            "provider": credential.provider,
+            "model": credential.model,
+            "latency_ms": 1,
+        },
+    )
+    assert outcome.status == "ok"
+
+    parent = conn.execute(
+        "SELECT id, upload_attempt_id FROM jobs WHERE root_import_id = ? "
+        "AND job_type = 'submit_import'",
+        (import_id,),
+    ).fetchone()
+    assert parent is not None
+    conn.execute(
+        "UPDATE jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (parent["id"],),
+    )
+    question = "缓存一致性如何处理？"
+    q_cursor = conn.execute(
+        "INSERT INTO question_bank "
+        "(question, cat1, cat2, owner_id, status, job_position) "
+        "VALUES (?, '系统设计', '缓存', 101, 'approved', '后端')",
+        (question,),
+    )
+    question_id = int(q_cursor.lastrowid)
+    job_cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, root_import_id, "
+        "upload_attempt_id, work_key) "
+        "VALUES ('generate_answer', 'pending', 101, ?, ?, ?)",
+        (import_id, parent["upload_attempt_id"], f"answer:{question_id}:v1"),
+    )
+    answer_job_id = int(job_cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (
+            answer_job_id,
+            json.dumps(
+                {
+                    "question_id": question_id,
+                    "question_text": question,
+                    "user_id": 101,
+                    "skip_search": True,
+                    "llm_scope": "user",
+                    "search_scope": "user",
+                }
+            ),
+        ),
+    )
+    update_upload_answer_stage(conn, answer_job_id, "pending")
+    conn.execute(
+        "CREATE TRIGGER ac008_fail_answer_save BEFORE UPDATE OF ai_answer ON question_bank "
+        "WHEN NEW.ai_answer IS NOT OLD.ai_answer "
+        "BEGIN SELECT RAISE(ABORT, 'injected answer persistence failure'); END"
+    )
+    conn.commit()
+
+    from unittest.mock import AsyncMock
+
+    answer_calls = AsyncMock(return_value="一致性答案")
+    monkeypatch.setattr(
+        "app.services.answer_enrichment.prepare_answer_prompt",
+        AsyncMock(return_value=("prompt", [])),
+    )
+    monkeypatch.setattr(
+        "app.services.answer_enrichment.refine_answer",
+        AsyncMock(side_effect=lambda _prompt, answer, *_args, **_kwargs: (answer, [])),
+    )
+    monkeypatch.setattr("app.services.llm._call_llm_with_retry", answer_calls)
+
+    failed = await generate_answer_task({}, answer_job_id)
+    conn.commit()
+    assert failed["status"] != "completed"
+    assert answer_calls.await_count == 1, "第一次已收到模型结果，只有持久化被注入失败"
+    assert conn.execute(
+        "SELECT ai_answer FROM question_bank WHERE id = ?", (question_id,)
+    ).fetchone()["ai_answer"] is None
+    assert conn.execute(
+        "SELECT status FROM upload_stage_results WHERE import_id = ? "
+        "AND stage = 'answer' AND unit_key = ?",
+        (import_id, f"answer:{question_id}"),
+    ).fetchone()["status"] != "succeeded"
+
+    conn.execute("DROP TRIGGER ac008_fail_answer_save")
+    conn.execute(
+        "UPDATE jobs SET available_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (answer_job_id,),
+    )
+    conn.commit()
+    recovered = await generate_answer_task({}, answer_job_id)
+    conn.commit()
+
+    assert recovered["status"] == "completed"
+    assert answer_calls.await_count == 2, "响应丢失/保存失败允许额外模型调用成本"
+    assert conn.execute(
+        "SELECT ai_answer FROM question_bank WHERE id = ?", (question_id,)
+    ).fetchone()["ai_answer"] == "一致性答案"
+    answer_stage = conn.execute(
+        "SELECT status FROM upload_stage_results WHERE import_id = ? "
+        "AND stage = 'answer' AND unit_key = ?",
+        (import_id, f"answer:{question_id}"),
+    ).fetchone()
+    assert answer_stage["status"] == "succeeded"

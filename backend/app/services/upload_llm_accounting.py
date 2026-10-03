@@ -59,7 +59,9 @@ def upload_llm_context(
         _current_upload_llm_context.reset(token)
 
 
-def upload_llm_stage(stage: str, *, unit_key: str = ""):
+def upload_llm_stage(
+    stage: str, *, unit_key: str = "", checkpoint_result: bool = False
+):
     """Decorate one upload graph node with its durable stage and credential scope."""
 
     def decorate(function):
@@ -75,7 +77,56 @@ def upload_llm_stage(stage: str, *, unit_key: str = ""):
                 credential_scope=state.get("credential_scope", "user"),
                 user_id=state.get("user_id"),
             ):
-                return await function(state, *args, **kwargs)
+                result = await function(state, *args, **kwargs)
+
+            if checkpoint_result and root_import_id:
+                data = result.get("extracted_data") or state.get("extracted_data")
+                job_id = state.get("job_id")
+                lease_generation = state.get("_lease_generation")
+                if data and job_id is not None and lease_generation is not None:
+                    import json
+
+                    from app.services.upload_repository import (
+                        persist_succeeded_stage_checkpoint,
+                    )
+
+                    checkpoint = json.dumps(
+                        {
+                            "doc_type": result.get("doc_type")
+                            or state.get("doc_type", ""),
+                            "data": data,
+                            "url": result.get("saved_url") or state.get("url", ""),
+                        },
+                        ensure_ascii=False,
+                    )
+
+                    def _persist_checkpoint():
+                        from app.db.connection import get_db_connection
+
+                        conn = get_db_connection()
+                        conn.execute("BEGIN IMMEDIATE")
+                        try:
+                            saved = persist_succeeded_stage_checkpoint(
+                                conn,
+                                import_id=str(root_import_id),
+                                stage="extract",
+                                unit_key="document",
+                                result_json=checkpoint,
+                                job_id=int(job_id),
+                                lease_generation=int(lease_generation),
+                            )
+                            if not saved:
+                                raise RuntimeError(
+                                    "上传 worker generation 已失效，不能提交提取检查点"
+                                )
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+                            raise
+
+                    await asyncio.to_thread(_persist_checkpoint)
+
+            return result
 
         return wrapped
 

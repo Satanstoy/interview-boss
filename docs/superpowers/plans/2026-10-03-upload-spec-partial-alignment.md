@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；AC-008 测试可信度已修正，AC-007 已补真实隔离 Redis/ARQ 消费证明；本轮未改产品代码或部署。
+**状态：** 实施中；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；本轮未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -77,9 +77,12 @@
 - [x] 把 `_db()` 改为接收临时文件路径；writer 和重启后的 reader 打开同一个 SQLite 文件。
 - [x] 成功写入 `extract` checkpoint 后关闭 writer 连接，再只用 `conn2` 读取；移除同一 `:memory:` 数据库的假重启。
 - [x] 先单跑 checkpoint 测试，确认它确实由第二连接读取持久数据；再跑整个 stage recovery 文件。
-- [ ] 增加四个独立故障注入：extract checkpoint 后；interview/detail 事务中；outbox 已提交但 ARQ 通知前；answer 外部调用后、业务结果保存前。
-- [ ] 每个点重启 worker/连接后断言：事务边界正确、成功业务成果不重复、已完成 checkpoint 复用；外部调用结果未知时允许额外调用成本，但不允许重复业务成果。
-- [ ] 对每个红灯只改该边界；若实现全通过，就只改测试并更新 AC-008 证据。
+- [x] 在 extract 节点成功返回后注入下一节点 classify 故障；新 worker attempt 必须从已提交 checkpoint 恢复且提取 LLM 物理调用仍为 1 次。
+- [x] 在面经/detail 事务尚未提交时关闭 writer 连接；新连接确认整笔写入回滚。
+- [x] 在 outbox 已提交后注入首次 ARQ handoff 失败；下一次 dispatcher 从 SQLite 补投到隔离 Redis，队列仅一个目标 job。
+- [x] 在 answer 外部模型已返回后注入业务写入失败；恢复重试可承担额外调用成本，最终只留一份答案结果。
+- [x] 各边界使用新连接、新 attempt 或下一轮 dispatcher/worker 恢复，并断言成功业务成果不重复、extract checkpoint 复用。
+- [x] 对红灯只改对应边界；当前确认的实现问题已修复，其余结果只补测试。
 
 **运行：**
 
@@ -87,10 +90,15 @@
 cd backend
 ALLOW_RFC2544_BENCHMARK_RANGE=1 PYTHONPATH=. ../.venv/bin/pytest -q --tb=short \
   tests/pipeline/test_upload_stage_recovery.py \
-  tests/integration/test_upload_recovery_stack.py
+  tests/integration/test_upload_recovery_stack.py \
+  tests/integration/test_upload_recovery_fullstack.py
 ```
 
-**本轮已完成的红绿证据：** 先只把 `get_stage_result` 的参数改为新连接，隔离内存库下得到 **1 failed**（checkpoint 为 `None`）；随后改用同一临时 SQLite 文件、关闭旧连接后读取，定向用例 **1 passed in 1.58s**。这是测试 fixture 的假重启缺陷，当前没有证据要求改生产 checkpoint 实现。
+**初始测试可信度红绿证据：** 先只把 `get_stage_result` 的参数改为新连接，隔离内存库下得到 **1 failed**（checkpoint 为 `None`）；随后改用同一临时 SQLite 文件、关闭旧连接后读取，定向用例 **1 passed in 1.58s**。该用例本身只是测试 fixture 的假重启缺陷；后续正确故障注入另行证明了生产 checkpoint 边界缺陷，见下。
+
+**AC-008 新增红绿证据：** 正确的 extract 故障注入先得到 **1 failed**：分类节点失败后，已完成的 extract 行被 failure aggregator 改成 `failed`，恢复无法复用。现在 extract 节点成功返回时，在独立事务内按当前 `lease_generation` 保存结构化结果；`SubmitState` 明确透传该 fence。另一个 SQLite 连接读到已提交的 `succeeded` checkpoint，恢复后提取调用仍为 1 次。失败路径还复现了 async SSE generator 的 `Task exception was never retrieved`，让 worker 排空错误事件而不是提前 `break` 后消失。答案故障注入另测出 root-bound answer job 的聚合函数导入路径错误；修正后 worker 能处理持久化失败并重试。未提交事务关闭连接、新连接确认无部分写入。定向回归 `test_upload_stage_recovery.py` + `test_upload_recovery_fullstack.py`：**14 passed in 13.75s**。
+
+**AC-007/008 合并回归：** 在专用临时 Redis 容器、临时 SQLite 和独立 ARQ namespace 下运行 stage recovery、queue reconciliation/root wiring、recovery stack、fullstack 共 5 个测试文件：**31 passed in 32.30s**，22 条现有 deprecation/configuration warnings；不连接生产 Redis/数据库。
 
 ### Task 2：让 AC-007 队列对账证明 DB→Redis/ARQ 的最终投递
 

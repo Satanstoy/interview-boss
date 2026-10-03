@@ -22,7 +22,7 @@ async def recognize_node(state: SubmitState) -> dict:
     return {"doc_type": ""}
 
 
-@upload_llm_stage("extract", unit_key="document")
+@upload_llm_stage("extract", unit_key="document", checkpoint_result=True)
 async def extract_node(state: SubmitState) -> dict:
     """LLM 提取结构化数据节点（F08：支持从阶段检查点复用已成功结果）。"""
     from app.services.llm import _call_llm_with_retry_messages, _extract_json, get_llm_client_for_user, _should_use_response_format

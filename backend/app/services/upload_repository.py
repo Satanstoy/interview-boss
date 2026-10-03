@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 from app.services.upload_stage_names import canonical_upload_stage
@@ -170,6 +171,72 @@ def save_stage_result(
         ),
     )
     return cursor.lastrowid
+
+
+def persist_succeeded_stage_checkpoint(
+    conn,
+    *,
+    import_id: str,
+    stage: str,
+    unit_key: str,
+    result_json: str,
+    job_id: int,
+    lease_generation: int,
+) -> bool:
+    """Commit a completed stage only while its owning worker generation is live.
+
+    The worker creates a ``running`` row before entering the graph. This method
+    promotes that row as soon as a checkpointable node returns, so a later node
+    failure cannot erase already completed work. A previous successful
+    checkpoint remains immutable and reusable across attempts.
+    """
+
+    stage = canonical_upload_stage(stage)
+    job = conn.execute(
+        "SELECT root_import_id, status, lease_generation FROM jobs WHERE id = ?",
+        (job_id,),
+    ).fetchone()
+    if (
+        job is None
+        or str(job["root_import_id"] or "") != str(import_id)
+        or job["status"] != "running"
+        or int(job["lease_generation"] or 0) != int(lease_generation)
+    ):
+        return False
+
+    root = conn.execute(
+        "SELECT input_version, pipeline_version FROM upload_imports WHERE id = ?",
+        (import_id,),
+    ).fetchone()
+    if root is None:
+        return False
+
+    input_version = int(root["input_version"] or 1)
+    pipeline_version = str(root["pipeline_version"] or UPLOAD_PIPELINE_VERSION_DEFAULT)
+    output_hash = hashlib.sha256(result_json.encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO upload_stage_results ("
+        "import_id, stage, unit_key, input_version, pipeline_version, status, "
+        "result_json, output_hash, retryable, job_id"
+        ") VALUES (?, ?, ?, ?, ?, 'succeeded', ?, ?, 0, ?) "
+        "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+        "pipeline_version = excluded.pipeline_version, status = 'succeeded', "
+        "result_json = excluded.result_json, output_hash = excluded.output_hash, "
+        "error_code = NULL, retryable = 0, job_id = excluded.job_id, "
+        "updated_at = CURRENT_TIMESTAMP "
+        "WHERE upload_stage_results.status != 'succeeded'",
+        (
+            import_id,
+            stage,
+            unit_key,
+            input_version,
+            pipeline_version,
+            result_json,
+            output_hash,
+            int(job_id),
+        ),
+    )
+    return True
 
 
 def get_stage_result(conn, *, import_id: str, stage: str, unit_key: str, input_version: int):
