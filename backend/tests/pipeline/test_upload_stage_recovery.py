@@ -19,8 +19,8 @@ from app.services.upload_lifecycle import build_thread_id
 from app.services.upload_repository import get_stage_result, save_stage_result
 
 
-def _db():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
+def _db(db_path=None):
+    conn = sqlite3.connect(str(db_path or ":memory:"), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     run_migrations(conn)
@@ -37,8 +37,9 @@ def _db():
 # ── 检查点复用 ───────────────────────────────────────────────
 
 
-def test_stage_checkpoint_survives_restart_and_is_reused():
-    conn = _db()
+def test_stage_checkpoint_survives_restart_and_is_reused(tmp_path):
+    db_path = tmp_path / "upload-recovery.sqlite"
+    conn = _db(db_path)
     # 第一次执行：提取成果落盘
     save_stage_result(
         conn,
@@ -52,14 +53,14 @@ def test_stage_checkpoint_survives_restart_and_is_reused():
         output_hash="h1",
     )
     conn.commit()
+    conn.close()
 
-    # 进程重启：新的连接读到同一检查点，不再重复提取
-    conn2 = sqlite3.connect(":memory:")
+    # 进程重启：新连接打开同一持久化数据库并复用检查点，不再重复提取。
+    conn2 = sqlite3.connect(str(db_path))
     conn2.row_factory = sqlite3.Row
     conn2.execute("PRAGMA foreign_keys=ON")
-    run_migrations(conn2)
     checkpoint = get_stage_result(
-        conn,
+        conn2,
         import_id="imp-1",
         stage="extract",
         unit_key="document",

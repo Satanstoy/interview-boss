@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 提议中的实施计划；本文件只规划，不授权本轮修改产品代码或部署。
+**状态：** 实施中；本轮已开始 AC-008 测试可信度修正，未改产品代码或部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -74,9 +74,9 @@
 - Test: `backend/tests/integration/test_upload_recovery_stack.py`
 - Possible implementation, only if a new test is red: `backend/app/services/upload_repository.py`、`backend/app/worker.py`、对应持久化事务函数
 
-- [ ] 把 `_db()` 改为接收 `tmp_path` 文件路径；writer 和重启后的 reader 打开同一个 SQLite 文件。
-- [ ] 成功写入 `extract` checkpoint 后关闭 writer 连接，再只用 `conn2` 读取；移除同一 `:memory:` 数据库的假重启。
-- [ ] 先单跑 checkpoint 测试，确认它确实由第二连接读取持久数据。
+- [x] 把 `_db()` 改为接收临时文件路径；writer 和重启后的 reader 打开同一个 SQLite 文件。
+- [x] 成功写入 `extract` checkpoint 后关闭 writer 连接，再只用 `conn2` 读取；移除同一 `:memory:` 数据库的假重启。
+- [x] 先单跑 checkpoint 测试，确认它确实由第二连接读取持久数据；再跑整个 stage recovery 文件。
 - [ ] 增加四个独立故障注入：extract checkpoint 后；interview/detail 事务中；outbox 已提交但 ARQ 通知前；answer 外部调用后、业务结果保存前。
 - [ ] 每个点重启 worker/连接后断言：事务边界正确、成功业务成果不重复、已完成 checkpoint 复用；外部调用结果未知时允许额外调用成本，但不允许重复业务成果。
 - [ ] 对每个红灯只改该边界；若实现全通过，就只改测试并更新 AC-008 证据。
@@ -89,6 +89,8 @@ ALLOW_RFC2544_BENCHMARK_RANGE=1 PYTHONPATH=. ../.venv/bin/pytest -q --tb=short \
   tests/pipeline/test_upload_stage_recovery.py \
   tests/integration/test_upload_recovery_stack.py
 ```
+
+**本轮已完成的红绿证据：** 先只把 `get_stage_result` 的参数改为新连接，隔离内存库下得到 **1 failed**（checkpoint 为 `None`）；随后改用同一临时 SQLite 文件、关闭旧连接后读取，定向用例 **1 passed in 1.58s**。这是测试 fixture 的假重启缺陷，当前没有证据要求改生产 checkpoint 实现。
 
 ### Task 2：让 AC-007 队列对账证明 DB→Redis/ARQ 的最终投递
 
