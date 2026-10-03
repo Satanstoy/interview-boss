@@ -86,6 +86,13 @@ def isolated_stack(monkeypatch, tmp_path):
         "INSERT OR REPLACE INTO user_llm_config (user_id, api_key, base_url, model) "
         "VALUES (101, 'k', 'https://u.example.com/v1', 'm')"
     )
+    # The upload lifecycle now rejects queued work for deleted or missing
+    # positions. Keep this full-stack fixture's position reference real and
+    # stable instead of relying on a dangling hard-coded position_id=1.
+    conn.execute(
+        "INSERT OR REPLACE INTO job_positions (id, name, is_deleted) "
+        "VALUES (1, '后端', 0)"
+    )
     conn.commit()
 
     token = db_module._db_conn_var.set(conn)

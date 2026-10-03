@@ -11,6 +11,102 @@ from app.services.worker_observability import record_worker_heartbeat_async
 
 logger = logging.getLogger("interview-boss")
 
+
+async def maybe_inject_e2e_public_failure(ctx, batch, *, root_import_id):
+    """Fail one marked public item in the disposable AC-029 stack.
+
+    The Redis NX marker survives an ARQ worker restart. Failed contribution
+    queue rows are held out of reconciliation until the explicit retry API
+    moves their item back to ``queued``.
+    """
+    if os.environ.get("E2E_STUB_PROVIDER") != "1" or not root_import_id:
+        return
+    redis = ctx.get("redis") if isinstance(ctx, dict) else None
+    if redis is None:
+        return
+    for item in batch or []:
+        if (
+            item.get("owner_id") is not None
+            or not item.get("contribution_request_id")
+            or "AC029_FAIL_PUBLIC_ORDINAL_" not in str(item.get("question") or "")
+        ):
+            continue
+        detail_id = item.get("qd_id")
+        if detail_id is None:
+            continue
+        key = f"e2e:ac029:public-failure:{root_import_id}:{int(detail_id)}"
+        armed = await redis.set(key, "injected", ex=86400, nx=True)
+        if armed:
+            raise RuntimeError(f"AC029_PUBLIC_ITEM_FAILURE detail_id={int(detail_id)}")
+
+
+async def _schedule_cluster_continuation(root_import_id, actor_id):
+    from app.services.pipeline import _run_cluster_batch_in_background
+
+    if root_import_id:
+        await _run_cluster_batch_in_background(
+            user_id=actor_id,
+            root_import_id=str(root_import_id),
+        )
+        return
+    def _rootless_continuation_scope():
+        from app.db.connection import get_db_connection
+
+        with get_db_connection() as conn:
+            has_contribution = conn.execute(
+                "SELECT 1 FROM analysis_queue aq "
+                "JOIN interview i ON i.id = aq.interview_id "
+                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                "JOIN public_contribution_items pci "
+                "ON pci.request_id = aq.contribution_request_id "
+                "AND pci.public_detail_id = aq.question_detail_id "
+                "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
+                "AND aq.owner_id IS NULL AND aq.contribution_request_id IS NOT NULL "
+                "AND pci.status IN ('queued', 'approved_for_processing', 'processing') "
+                "AND i.status = 'approved' AND i.deleted_at IS NULL "
+                "AND qd.deleted_at IS NULL LIMIT 1"
+            ).fetchone()
+            if has_contribution:
+                return "public_contribution"
+
+            # Rebuilds also consume ordinary public queue rows which do not
+            # carry a contribution_request_id. Keep those moving through the
+            # generic rootless batch path after a rebuild releases the queue.
+            has_regular_public_row = conn.execute(
+                "SELECT 1 FROM analysis_queue aq "
+                "JOIN interview i ON i.id = aq.interview_id "
+                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
+                "AND aq.owner_id IS NULL AND aq.contribution_request_id IS NULL "
+                "AND i.owner_id IS NULL AND i.status = 'approved' "
+                "AND i.deleted_at IS NULL AND qd.deleted_at IS NULL LIMIT 1"
+            ).fetchone()
+            if has_regular_public_row:
+                return "generic"
+
+            # Legacy personal rows can also be rootless. Rebuild only drains
+            # the public owner bucket, so release eligible private rows through
+            # the generic worker once the rebuild no longer blocks dispatch.
+            has_personal_row = conn.execute(
+                "SELECT 1 FROM analysis_queue aq "
+                "JOIN interview i ON i.id = aq.interview_id "
+                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
+                "AND aq.owner_id IS NOT NULL AND i.owner_id = aq.owner_id "
+                "AND i.status = 'approved' AND i.deleted_at IS NULL "
+                "AND qd.deleted_at IS NULL LIMIT 1"
+            ).fetchone()
+            return "generic" if has_personal_row else None
+
+    continuation_scope = await asyncio.to_thread(_rootless_continuation_scope)
+    if continuation_scope == "public_contribution":
+        await _run_cluster_batch_in_background(
+            user_id=actor_id,
+            queue_scope="public_contribution",
+        )
+    elif continuation_scope == "generic":
+        await _run_cluster_batch_in_background(user_id=actor_id)
+
 async def recompute_embedding_task(ctx, job_id: int):
     """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
     from app.services.embedding_recompute import run_recompute
@@ -340,6 +436,7 @@ async def cluster_batch_task(ctx, job_id: int):
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
         CLUSTER_BATCH_JOB_TYPE,
+        MAX_JOB_ATTEMPTS,
         JobFenceError,
         claim_job,
         claim_job_with_generation,
@@ -552,7 +649,14 @@ async def cluster_batch_task(ctx, job_id: int):
                 scope_fence=scope_fence,
             )
         else:
-            batch = dequeue_batch(BATCH_SIZE)
+            if payload.get("queue_scope") == "public_contribution":
+                batch = dequeue_batch(
+                    BATCH_SIZE,
+                    owner_id=None,
+                    contribution_only=True,
+                )
+            else:
+                batch = dequeue_batch(BATCH_SIZE)
         if not batch:
             result = {"status": "empty", "new_count": 0}
             if not _complete(result) and job_fence:
@@ -561,7 +665,15 @@ async def cluster_batch_task(ctx, job_id: int):
                     job_id=job_id,
                     generation=job_fence[1],
                 )
+            await _schedule_cluster_continuation(
+                root_import_id,
+                payload.get("actor_id") or payload.get("user_id"),
+            )
             return {"job_id": job_id, **result}
+
+        await maybe_inject_e2e_public_failure(
+            ctx, batch, root_import_id=root_import_id
+        )
 
         batch_root_import_id = batch[0].get("root_import_id")
         if batch_root_import_id:
@@ -657,6 +769,10 @@ async def cluster_batch_task(ctx, job_id: int):
                 job_id=job_id,
                 generation=job_fence[1],
             )
+        await _schedule_cluster_continuation(
+            root_import_id,
+            payload.get("actor_id") or payload.get("user_id"),
+        )
         return {"job_id": job_id, **result}
     except Exception as exc:
         if isinstance(exc, (JobFenceError, UploadScopeLeaseError)):
@@ -665,7 +781,13 @@ async def cluster_batch_task(ctx, job_id: int):
         queue_ids = [item["queue_id"] for item in batch]
         try:
             mark_batch_failed(
-                queue_ids, job_fence=job_fence, scope_fence=scope_fence
+                queue_ids,
+                job_fence=job_fence,
+                scope_fence=scope_fence,
+                terminal=(
+                    root_import_id is None
+                    and int(task.get("attempts") or 0) >= MAX_JOB_ATTEMPTS
+                ),
             )
             from app.services.public_contributions import mark_public_contribution_queue_failed
 
@@ -682,6 +804,20 @@ async def cluster_batch_task(ctx, job_id: int):
             return {"status": "stale", "job_id": job_id}
         outcome = _fail(str(exc)[:500])
         logger.exception("聚类攒批任务失败: job_id=%s", job_id)
+        if root_import_id:
+            should_continue = any(
+                item.get("contribution_request_id") for item in batch
+            )
+        else:
+            # Retryable failures stay on this durable job and honor its backoff.
+            # Only a terminal failure releases the rootless queue; its failed
+            # rows have already been marked failed, so continue other work only.
+            should_continue = outcome.get("status") == "failed"
+        if should_continue:
+            await _schedule_cluster_continuation(
+                root_import_id,
+                payload.get("actor_id") or payload.get("user_id"),
+            )
         return {"status": outcome["status"], "job_id": job_id}
     finally:
         heartbeat_stop.set()
@@ -708,6 +844,7 @@ async def cluster_rebuild_task(ctx, job_id: int):
     from app.db.connection import get_db_connection
     from app.services.job_lifecycle import (
         CLUSTER_REBUILD_JOB_TYPE,
+        MAX_JOB_ATTEMPTS,
         claim_job,
         complete_job,
         default_worker_id,
@@ -739,14 +876,18 @@ async def cluster_rebuild_task(ctx, job_id: int):
             ).fetchone()
             conn.commit()
             payload = json.loads(payload_row["payload"]) if payload_row else {}
-            return payload, int(task["progress_total"] or 1)
+            return (
+                payload,
+                int(task["progress_total"] or 1),
+                int(task["attempts"] or 0),
+            )
 
     claimed = await asyncio.to_thread(_claim_and_load)
     if claimed is None:
         logger.info("全量聚类重建任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
 
-    payload, progress_total = claimed
+    payload, progress_total, attempts = claimed
     processed = 0
     total_new = 0
     total_batches = 0
@@ -766,13 +907,14 @@ async def cluster_rebuild_task(ctx, job_id: int):
 
     def _complete(result):
         with get_db_connection() as conn:
-            complete_job(
+            completed = complete_job(
                 conn,
                 job_id,
                 worker_id,
                 result=json.dumps(result, ensure_ascii=False),
             )
             conn.commit()
+            return completed
 
     def _fail(error):
         with get_db_connection() as conn:
@@ -790,7 +932,15 @@ async def cluster_rebuild_task(ctx, job_id: int):
                     "new_qb_count": total_new,
                     "processed": processed,
                 }
-                _complete(result)
+                completed = _complete(result)
+                if completed:
+                    # Approval/retry can commit a contribution after the last
+                    # empty dequeue but before this job completes. Its inline
+                    # scheduler sees this rebuild as active and defers. Recheck
+                    # after completion so that deferred public work gets a job.
+                    await _schedule_cluster_continuation(
+                        None, payload.get("user_id")
+                    )
                 return {"job_id": job_id, **result}
 
             total_batches += 1
@@ -824,7 +974,10 @@ async def cluster_rebuild_task(ctx, job_id: int):
             await asyncio.sleep(0.5)
     except Exception as exc:
         if batch:
-            mark_batch_failed([item["queue_id"] for item in batch])
+            mark_batch_failed(
+                [item["queue_id"] for item in batch],
+                terminal=attempts >= MAX_JOB_ATTEMPTS,
+            )
             from app.services.public_contributions import mark_public_contribution_queue_failed
 
             with get_db_connection() as connection:
@@ -832,6 +985,12 @@ async def cluster_rebuild_task(ctx, job_id: int):
                     connection, [item["queue_id"] for item in batch], str(exc)
                 )
         outcome = _fail(str(exc)[:500])
+        if outcome.get("status") == "failed":
+            # A terminal failure releases the rootless queue. Approval/retry
+            # may have deferred its batch while this rebuild was active.
+            await _schedule_cluster_continuation(
+                None, payload.get("user_id")
+            )
         logger.exception("全量聚类重建任务失败: job_id=%s", job_id)
         return {"status": outcome["status"], "job_id": job_id}
 

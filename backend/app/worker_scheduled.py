@@ -191,6 +191,18 @@ async def scheduled_submit_job_dispatch_task(ctx):
 
     def _reserve(job_type):
         with get_db_connection() as conn:
+            if job_type == CLUSTER_REBUILD_JOB_TYPE:
+                # Keep the check and reservation atomic with batch completion
+                # and new batch creation. A pending rebuild blocks new batches;
+                # this gate lets an already active batch finish first.
+                from app.services.pipeline.queue import (
+                    has_active_rootless_cluster_batch_job,
+                )
+
+                conn.execute("BEGIN IMMEDIATE")
+                if has_active_rootless_cluster_batch_job(conn):
+                    conn.rollback()
+                    return []
             jobs = claim_dispatch_batch(
                 conn, job_type=job_type, limit=10
             )

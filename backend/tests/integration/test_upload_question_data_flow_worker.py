@@ -184,6 +184,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
     ).fetchone()
     assert submit_job is not None
     submit_job_id = int(submit_job["id"])
+    assert not test_db.in_transaction, "accept/preflight should leave the test connection committed"
 
     extract_response = json.dumps(
         {

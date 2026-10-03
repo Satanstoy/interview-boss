@@ -278,7 +278,12 @@ async def test_http_upload_survives_worker_restart_without_duplicate_work(
     interviews = conn.execute(
         "SELECT id FROM interview WHERE owner_id = 101 ORDER BY id"
     ).fetchall()
-    assert len(interviews) == 1, "重启后必须产出恰好一份私人面经"
+    assert len(interviews) == 1, (
+        "重启后必须产出恰好一份私人面经; "
+        f"root={dict(conn.execute('SELECT status, error_code FROM upload_imports WHERE id = ?', (import_id,)).fetchone())}; "
+        f"jobs={[dict(row) for row in conn.execute('SELECT job_type, status, attempts, last_error FROM jobs WHERE root_import_id = ?', (import_id,)).fetchall()]}; "
+        f"stages={[dict(row) for row in conn.execute('SELECT stage, status, error_code FROM upload_stage_results WHERE import_id = ?', (import_id,)).fetchall()]}"
+    )
     interview_id = int(interviews[0]["id"])
     details_before = conn.execute(
         "SELECT id, question, source_ordinal FROM questions_detail "
@@ -591,14 +596,60 @@ async def test_reconciled_cluster_bucket_is_dispatched_and_consumed_by_arq_worke
     assert cluster_job["arq_job_id"] is None
     cluster_job_id = int(cluster_job["id"])
 
+    from app.worker_enqueue import enqueue_cluster_batch_job as enqueue_cluster_batch
+
+    enqueue_attempts = 0
+
+    async def fail_first_cluster_handoff(job_id):
+        nonlocal enqueue_attempts
+        enqueue_attempts += 1
+        if enqueue_attempts == 1:
+            raise RuntimeError("AC007 first Redis handoff fails")
+        return await enqueue_cluster_batch(job_id)
+
+    monkeypatch.setattr(
+        "app.worker_scheduled.enqueue_cluster_batch_job",
+        fail_first_cluster_handoff,
+    )
+    first_dispatch = await scheduled_submit_job_dispatch_task({})
+    assert first_dispatch["failed"] == 1
+    assert first_dispatch["dispatched"] == 0
+    held = conn.execute(
+        "SELECT status, arq_job_id FROM jobs WHERE id = ?", (cluster_job_id,)
+    ).fetchone()
+    assert held["status"] == "pending"
+    assert held["arq_job_id"] is None
+
+    # Advance to the next durable dispatcher cycle. The same work_key should
+    # be accepted once by Redis and then consumed by the real ARQ worker.
+    conn.execute(
+        "UPDATE jobs SET available_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (cluster_job_id,),
+    )
+    conn.commit()
     dispatched = await scheduled_submit_job_dispatch_task({})
     assert dispatched["failed"] == 0
     assert dispatched["dispatched"] == 1
+    repeated_reconcile = await scheduled_upload_queue_reconcile_task({})
+    assert repeated_reconcile["jobs_created"] == 0
+    repeated_dispatch = await scheduled_submit_job_dispatch_task({})
+    assert repeated_dispatch["dispatched"] == 0
     cluster_job = conn.execute(
         "SELECT status, arq_job_id FROM jobs WHERE id = ?", (cluster_job_id,)
     ).fetchone()
     assert cluster_job["status"] == "queued"
     assert cluster_job["arq_job_id"]
+
+    pool = await isolated_redis["new_pool"]()
+    try:
+        queued = await pool.queued_jobs()
+        matching = [
+            job for job in queued
+            if job.function == "cluster_batch_task" and job.args[0] == cluster_job_id
+        ]
+        assert len(matching) == 1
+    finally:
+        await pool.aclose()
 
     cluster_batch = AsyncMock(return_value={"count": 0, "ids": []})
     monkeypatch.setattr("app.services.pipeline.cluster_batch", cluster_batch)
@@ -637,6 +688,711 @@ async def test_reconciled_cluster_bucket_is_dispatched_and_consumed_by_arq_worke
     ).fetchone()
     assert final_job["status"] == "completed"
     assert queue_row["status"] == "done"
+    final_reconcile = await scheduled_upload_queue_reconcile_task({})
+    assert final_reconcile["jobs_created"] == 0
+    assert (await scheduled_submit_job_dispatch_task({}))["dispatched"] == 0
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE root_import_id = ? "
+        "AND work_key = (SELECT work_key FROM jobs WHERE id = ?)",
+        (accepted["import_id"], cluster_job_id),
+    ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("fail_first_batch", [True, False])
+async def test_rootless_public_contribution_continues_remaining_items(
+    isolated_stack, isolated_redis, monkeypatch, fail_first_batch
+):
+    """AC-007: rootless contributions continue after failed and successful batches."""
+
+    from arq.connections import RedisSettings
+    from arq.worker import Worker
+    from unittest.mock import AsyncMock
+
+    import app.worker_enqueue as enqueue_module
+    from app.services.pipeline import BATCH_SIZE
+    import app.services.pipeline.queue as queue_module
+    from app.services.pipeline.queue import _run_cluster_batch_in_background, enqueue_questions
+    from app.services.public_contributions import create_admin_public_import_approval
+    from app.worker_cluster_tasks import cluster_batch_task
+
+    conn = isolated_stack
+    interview_cursor = conn.execute(
+        "INSERT INTO interview "
+        "(url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES (?, ?, ?, ?, NULL, 'approved', ?)",
+        (
+            "https://ac007.example/rootless-public",
+            "AC007 Rootless",
+            "一面",
+            "rootless fixture",
+            "后端开发",
+        ),
+    )
+    interview_id = int(interview_cursor.lastrowid)
+    source_items = []
+    detail_ids = []
+    item_count = BATCH_SIZE + 1 if fail_first_batch else (BATCH_SIZE * 2) + 1
+    for ordinal in range(item_count):
+        question = f"AC007 rootless public question {ordinal}"
+        source_items.append(
+            {
+                "question": question,
+                "cat1": "后端",
+                "cat2": "队列",
+                "tags": "recovery",
+                "source_ordinal": ordinal,
+            }
+        )
+        detail_cursor = conn.execute(
+            "INSERT INTO questions_detail "
+            "(interview_id, question, cat1, cat2, tags, owner_id, status, source_ordinal) "
+            "VALUES (?, ?, '后端', '队列', 'recovery', NULL, 'approved', ?)",
+            (interview_id, question, ordinal),
+        )
+        detail_ids.append(int(detail_cursor.lastrowid))
+
+    source_snapshot = {
+        "source": {"job_position": "后端开发", "company": "AC007 Rootless"},
+        "items": source_items,
+    }
+    request_id = create_admin_public_import_approval(
+        conn,
+        import_id=None,
+        admin_id=201,
+        interview_id=interview_id,
+        detail_ids=detail_ids,
+        source_snapshot=source_snapshot,
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'queued' WHERE request_id = ?",
+        (request_id,),
+    )
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'queued' WHERE id = ?",
+        (request_id,),
+    )
+    enqueued = enqueue_questions(
+        interview_id,
+        owner_id=None,
+        question_detail_ids=detail_ids,
+        contribution_request_id=request_id,
+        conn=conn,
+    )
+    assert enqueued == item_count
+    private_backlog_detail_ids = []
+    if not fail_first_batch:
+        private_interview_id = int(
+            conn.execute(
+                "INSERT INTO interview "
+                "(url, company, round, questions_list, owner_id, status, job_position) "
+                "VALUES ('https://ac007.example/private-rootless', 'AC007 Private', '一面', "
+                "'private backlog', 101, 'approved', '后端开发')"
+            ).lastrowid
+        )
+        for ordinal in range((BATCH_SIZE * 2) + 5):
+            detail_id = int(
+                conn.execute(
+                    "INSERT INTO questions_detail "
+                    "(interview_id, question, cat1, cat2, owner_id, status) "
+                    "VALUES (?, ?, '后端', '队列', 101, 'approved')",
+                    (private_interview_id, f"AC007 private backlog {ordinal}"),
+                ).lastrowid
+            )
+            private_backlog_detail_ids.append(detail_id)
+            conn.execute(
+                "INSERT INTO analysis_queue "
+                "(interview_id, question_detail_id, owner_id, status) "
+                "VALUES (?, ?, 101, 'pending')",
+                (private_interview_id, detail_id),
+            )
+    conn.commit()
+
+    # Keep the final short batch immediately available so the real worker can
+    # prove that every durable continuation is consumed in this isolated run.
+    monkeypatch.setattr(queue_module, "CLUSTER_DELAY_SECONDS", 0)
+    created = await _run_cluster_batch_in_background(
+        user_id=201,
+        queue_scope=(
+            queue_module.PUBLIC_CONTRIBUTION_QUEUE_SCOPE if fail_first_batch else None
+        ),
+    )
+    assert created
+    concurrent_private_root_id = None
+    if not fail_first_batch:
+        concurrent_private_root_id = "ac007-active-private-root"
+        conn.execute(
+            "INSERT INTO upload_imports "
+            "(id, requester_id, idempotency_key, request_hash, target_intent, "
+            "source_type, pipeline_version) "
+            "VALUES (?, 101, 'ac007-private', 'private-hash', 'private', 'interview', 'v1')",
+            (concurrent_private_root_id,),
+        )
+        private_interview_id = int(
+            conn.execute(
+                "INSERT INTO interview "
+                "(url, company, round, questions_list, owner_id, status, job_position) "
+                "VALUES ('https://ac007.example/private', 'AC007 Private', '一面', "
+                "'private fixture', 101, 'approved', '后端开发')"
+            ).lastrowid
+        )
+        private_detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail "
+                "(interview_id, question, cat1, cat2, owner_id, status) "
+                "VALUES (?, 'AC007 private bucket remains active', '后端', '队列', 101, 'approved')",
+                (private_interview_id,),
+            ).lastrowid
+        )
+        conn.execute(
+            "INSERT INTO analysis_queue "
+            "(interview_id, question_detail_id, owner_id, status, root_import_id) "
+            "VALUES (?, ?, 101, 'pending', ?)",
+            (private_interview_id, private_detail_id, concurrent_private_root_id),
+        )
+        from app.services.upload_queue import reconcile_pending_buckets
+
+        assert reconcile_pending_buckets(conn)["jobs_created"] == 1
+        conn.commit()
+    first_batch_ids = []
+    first_batch_owners = []
+    generic_private_batches = []
+    arrivals_added = 0
+
+    async def cluster_batch_that_fails_once(batch, **_kwargs):
+        contains_contribution = any(
+            item.get("contribution_request_id") == request_id for item in batch
+        )
+        if contains_contribution:
+            first_batch_ids.append([item["qd_id"] for item in batch])
+            first_batch_owners.append([item["owner_id"] for item in batch])
+        else:
+            generic_private_batches.append(batch)
+        if fail_first_batch and len(first_batch_ids) == 1:
+            raise RuntimeError("AC007 deterministic batch failure")
+        from app.services.question_resolution import record_resolution
+
+        for item in batch:
+            if item.get("contribution_request_id") != request_id:
+                continue
+            canonical = conn.execute(
+                "INSERT INTO question_bank "
+                "(question, cat1, cat2, tags, frequency, sources, original_questions, "
+                "original_question_sources, owner_id, status, job_position) "
+                "VALUES (?, ?, ?, ?, 1, '[]', ?, '[]', NULL, 'approved', '后端开发')",
+                (
+                    item["question"],
+                    item["cat1"],
+                    item["cat2"],
+                    item["tags"],
+                    json.dumps([{"question": item["question"]}], ensure_ascii=False),
+                ),
+            )
+            record_resolution(
+                conn,
+                detail_id=int(item["qd_id"]),
+                occurrence_scope="public",
+                occurrence_owner_id=None,
+                canonical_id=int(canonical.lastrowid),
+                canonical_scope="public",
+                status="created",
+                pipeline_version="ac007-rootless-fixture",
+                reason="created",
+            )
+        if not fail_first_batch and batch and batch[0].get("contribution_request_id") == request_id:
+            nonlocal arrivals_added
+            if arrivals_added < 3:
+                ordinal = item_count + arrivals_added
+                question = f"AC007 continuously arriving public question {ordinal}"
+                detail_id = int(
+                    conn.execute(
+                        "INSERT INTO questions_detail "
+                        "(interview_id, question, cat1, cat2, tags, owner_id, status, source_ordinal) "
+                        "VALUES (?, ?, '后端', '队列', 'recovery', NULL, 'approved', ?)",
+                        (interview_id, question, ordinal),
+                    ).lastrowid
+                )
+                item_cursor = conn.execute(
+                    "INSERT INTO public_contribution_items "
+                    "(request_id, source_item_type, source_item_id, ordinal, status, "
+                    "snapshot_json, public_detail_id) "
+                    "VALUES (?, 'question', ?, ?, 'queued', ?, ?)",
+                    (
+                        request_id,
+                        detail_id,
+                        ordinal,
+                        json.dumps({"question": question}, ensure_ascii=False),
+                        detail_id,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO analysis_queue "
+                    "(interview_id, question_detail_id, owner_id, status, contribution_request_id) "
+                    "VALUES (?, ?, NULL, 'pending', ?)",
+                    (interview_id, detail_id, request_id),
+                )
+                assert item_cursor.rowcount == 1
+                arrivals_added += 1
+        conn.commit()
+        return {"count": len(batch), "ids": []}
+
+    cluster_batch_mock = AsyncMock(side_effect=cluster_batch_that_fails_once)
+    monkeypatch.setattr("app.services.pipeline.cluster_batch", cluster_batch_mock)
+
+    async def run_rootless_test_worker():
+        worker = Worker(
+            functions=[cluster_batch_task],
+            queue_name=isolated_redis["queue_name"],
+            redis_settings=RedisSettings.from_dsn(enqueue_module.REDIS_URL),
+            handle_signals=False,
+            burst=True,
+            max_tries=1,
+            job_timeout=30,
+            keep_result=60,
+            poll_delay=0.01,
+            queue_read_limit=10,
+        )
+        await worker.main()
+        await worker.close()
+
+    await run_rootless_test_worker()
+
+    if fail_first_batch:
+        # fail_job keeps a transiently failed job pending with backoff. Advance
+        # its durable clock, then prove the dispatcher creates one Redis work
+        # item and a repeated dispatcher pass does not duplicate it.
+        conn.execute(
+            "UPDATE jobs SET available_at = CURRENT_TIMESTAMP "
+            "WHERE job_type = 'cluster_batch' AND root_import_id IS NULL",
+        )
+        conn.commit()
+        from app.worker_scheduled import scheduled_submit_job_dispatch_task
+
+        dispatched = await scheduled_submit_job_dispatch_task({})
+        assert dispatched["dispatched"] == 1
+        repeated_dispatch = await scheduled_submit_job_dispatch_task({})
+        assert repeated_dispatch["dispatched"] == 0
+        pool = await isolated_redis["new_pool"]()
+        try:
+            durable_job_id = int(
+                conn.execute(
+                    "SELECT id FROM jobs WHERE job_type = 'cluster_batch' "
+                    "AND root_import_id IS NULL"
+                ).fetchone()["id"]
+            )
+            queued = await pool.queued_jobs()
+            matching = [
+                job for job in queued
+                if job.function == "cluster_batch_task" and job.args[0] == durable_job_id
+            ]
+            assert len(matching) == 1
+        finally:
+            await pool.aclose()
+        await run_rootless_test_worker()
+
+    expected_batch_sizes = (
+        [BATCH_SIZE, 1]
+        if fail_first_batch
+        else [BATCH_SIZE, BATCH_SIZE, 3, 1]
+    )
+    if not fail_first_batch:
+        assert generic_private_batches
+        assert len(generic_private_batches[0]) == BATCH_SIZE
+        assert {item["owner_id"] for item in generic_private_batches[0]} == {101}
+        assert [len(batch) for batch in generic_private_batches] == [
+            BATCH_SIZE,
+            BATCH_SIZE,
+            5,
+        ]
+    assert [len(batch) for batch in first_batch_ids] == expected_batch_sizes
+    assert all(owner_ids == [None] * len(owner_ids) for owner_ids in first_batch_owners)
+    assert len({detail_id for batch in first_batch_ids for detail_id in batch}) == sum(expected_batch_sizes)
+
+    item_states = conn.execute(
+        "SELECT status, COUNT(*) AS count FROM public_contribution_items "
+        "WHERE request_id = ? GROUP BY status",
+        (request_id,),
+    ).fetchall()
+    expected_item_states = (
+        {"failed": BATCH_SIZE, "published": 1}
+        if fail_first_batch
+        else {"published": item_count + arrivals_added}
+    )
+    assert {row["status"]: row["count"] for row in item_states} == expected_item_states
+    request_state = conn.execute(
+        "SELECT status FROM public_contribution_requests WHERE id = ?", (request_id,)
+    ).fetchone()
+    assert request_state["status"] == (
+        "partially_published" if fail_first_batch else "published"
+    )
+
+    jobs = conn.execute(
+        "SELECT status FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL ORDER BY id"
+    ).fetchall()
+    expected_job_count = (
+        1 if fail_first_batch else len(expected_batch_sizes) + len(generic_private_batches)
+    )
+    expected_job_states = ["completed"] * expected_job_count
+    assert [row["status"] for row in jobs] == expected_job_states
+    if concurrent_private_root_id:
+        private_job_state = conn.execute(
+            "SELECT status FROM jobs WHERE root_import_id = ? AND job_type = 'cluster_batch'",
+            (concurrent_private_root_id,),
+        ).fetchone()
+        assert private_job_state["status"] == "pending"
+        still_pending_private = conn.execute(
+            "SELECT COUNT(*) FROM analysis_queue WHERE question_detail_id IN ("
+            + ",".join("?" for _ in private_backlog_detail_ids)
+            + ") AND status = 'pending'",
+            private_backlog_detail_ids,
+        ).fetchone()[0]
+        assert still_pending_private == 0
+
+
+@pytest.mark.parametrize(
+    ("active_scope", "requested_scope"),
+    [
+        (None, "public_contribution"),
+        ("public_contribution", None),
+    ],
+)
+async def test_rootless_cluster_jobs_with_different_scopes_do_not_overlap(
+    isolated_stack, monkeypatch, active_scope, requested_scope
+):
+    """Legacy generic jobs can consume public rows, so rootless scopes must serialize."""
+    import json
+
+    import app.services.pipeline.queue as queue_module
+    from app.services.pipeline.queue import _run_cluster_batch_in_background
+
+    conn = isolated_stack
+    payload = {"user_id": 101}
+    if active_scope:
+        payload["queue_scope"] = active_scope
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, idempotency_key) "
+        "VALUES ('cluster_batch', 'queued', 101, 'ac007-cross-scope-active')"
+    )
+    active_job_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (active_job_id, json.dumps(payload)),
+    )
+    conn.commit()
+    monkeypatch.setattr(queue_module, "CLUSTER_DELAY_SECONDS", 300)
+
+    scheduled = await _run_cluster_batch_in_background(
+        user_id=201,
+        queue_scope=requested_scope,
+    )
+
+    assert not scheduled
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL AND status IN ('pending', 'queued', 'running')"
+    ).fetchone()[0] == 1
+
+
+async def test_cluster_rebuild_waits_for_rootless_cluster_batch(
+    isolated_stack, isolated_redis
+):
+    """Full rebuild and incremental jobs must not consume the same public queue concurrently."""
+    import json
+
+    from app.services.pipeline.batch import force_cluster_all_pending
+    from app.services.pipeline.queue import _run_cluster_batch_in_background
+    from app.worker_scheduled import scheduled_submit_job_dispatch_task
+
+    conn = isolated_stack
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, idempotency_key) "
+        "VALUES ('cluster_batch', 'running', 101, 'ac007-active-rootless-batch')"
+    )
+    active_batch_id = int(cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (active_batch_id, json.dumps({"user_id": 101})),
+    )
+    conn.commit()
+
+    rebuild = await force_cluster_all_pending(user_id=201)
+    assert rebuild["status"] == "pending"
+    dispatch_while_batch_active = await scheduled_submit_job_dispatch_task({})
+    assert dispatch_while_batch_active["dispatched"] == 0
+
+    pool = await isolated_redis["new_pool"]()
+    try:
+        queued = await pool.queued_jobs()
+        assert not [job for job in queued if job.function == "cluster_rebuild_task"]
+    finally:
+        await pool.aclose()
+
+    conn.execute(
+        "UPDATE jobs SET status = 'completed' WHERE id = ?", (active_batch_id,)
+    )
+    conn.commit()
+    new_batch = await _run_cluster_batch_in_background(user_id=201)
+    assert not new_batch
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL AND status IN ('pending', 'queued', 'running')"
+    ).fetchone()[0] == 0
+
+    dispatched = await scheduled_submit_job_dispatch_task({})
+    assert dispatched["dispatched"] == 1
+    pool = await isolated_redis["new_pool"]()
+    try:
+        queued = await pool.queued_jobs()
+        rebuild_jobs = [job for job in queued if job.function == "cluster_rebuild_task"]
+        assert len(rebuild_jobs) == 1
+        assert rebuild_jobs[0].args[0] == rebuild["job_id"]
+    finally:
+        await pool.aclose()
+
+
+@pytest.mark.parametrize(
+    "queue_kind", ["public_regular", "public_contribution", "personal"]
+)
+@pytest.mark.parametrize("terminal_failure", [False, True])
+async def test_cluster_rebuild_releases_rootless_work_on_exit(
+    isolated_stack, isolated_redis, monkeypatch, queue_kind, terminal_failure
+):
+    """Rootless work racing with rebuild completion/failure must get a successor."""
+    import app.services.pipeline as pipeline_module
+    import app.services.pipeline.queue as queue_module
+    from app.services.pipeline.queue import has_active_rootless_cluster_job
+    from app.worker_cluster_tasks import cluster_rebuild_task
+
+    conn = isolated_stack
+    rebuild_cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, attempts, created_by, idempotency_key) "
+        "VALUES ('cluster_rebuild', 'pending', ?, 201, 'ac007-empty-read-race')",
+        (100 if terminal_failure else 0,),
+    )
+    rebuild_job_id = int(rebuild_cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, '{}')",
+        (rebuild_job_id,),
+    )
+    conn.commit()
+    monkeypatch.setattr(queue_module, "CLUSTER_DELAY_SECONDS", 0)
+
+    inserted = False
+
+    def dequeue_empty_then_insert_contribution(batch_size, *, owner_id):
+        nonlocal inserted
+        assert owner_id is None
+        assert not inserted
+        inserted = True
+        queue_owner_id = 101 if queue_kind == "personal" else None
+
+        public_interview_id = int(
+            conn.execute(
+                "INSERT INTO interview "
+                "(url, company, round, questions_list, owner_id, status, job_position) "
+                "VALUES ('https://ac007.example/late-public', 'AC007 Late', '一面', "
+                "'late public question', ?, 'approved', '后端开发')",
+                (queue_owner_id,),
+            ).lastrowid
+        )
+        public_detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail "
+                "(interview_id, question, cat1, cat2, owner_id, status) "
+                "VALUES (?, 'AC007 late contribution', '后端', '并发', ?, 'approved')",
+                (public_interview_id, queue_owner_id),
+            ).lastrowid
+        )
+        request_id = None
+        if queue_kind == "public_contribution":
+            request_id = int(conn.execute(
+                "INSERT INTO public_contribution_requests "
+                "(source_type, source_id, requester_id, public_interview_id, status, snapshot_json) "
+                "VALUES ('interview', ?, 101, ?, 'queued', '{}')",
+                (public_interview_id, public_interview_id),
+            ).lastrowid)
+            conn.execute(
+                "INSERT INTO public_contribution_items "
+                "(request_id, source_item_type, source_item_id, ordinal, status, "
+                "snapshot_json, public_detail_id) "
+                "VALUES (?, 'question', ?, 1, 'queued', '{}', ?)",
+                (request_id, public_detail_id, public_detail_id),
+            )
+        conn.execute(
+            "INSERT INTO analysis_queue "
+            "(interview_id, question_detail_id, owner_id, status, contribution_request_id) "
+            "VALUES (?, ?, ?, 'pending', ?)",
+            (public_interview_id, public_detail_id, queue_owner_id, request_id),
+        )
+        conn.commit()
+        # This is the approval/retry scheduler's check during the lost-wakeup
+        # window. The active rebuild correctly defers the incremental job.
+        assert has_active_rootless_cluster_job(conn)
+        if terminal_failure:
+            raise RuntimeError("AC007 deterministic terminal rebuild failure")
+        return []
+
+    monkeypatch.setattr(
+        pipeline_module, "dequeue_batch", dequeue_empty_then_insert_contribution
+    )
+
+    result = await cluster_rebuild_task({}, rebuild_job_id)
+
+    expected_rebuild_status = "failed" if terminal_failure else "completed"
+    assert result["status"] == ("failed" if terminal_failure else "done")
+    rebuild_state = conn.execute(
+        "SELECT status FROM jobs WHERE id = ?", (rebuild_job_id,)
+    ).fetchone()["status"]
+    assert rebuild_state == expected_rebuild_status
+    continuation = conn.execute(
+        "SELECT id, status FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL"
+    ).fetchone()
+    assert continuation is not None
+    assert continuation["status"] == "queued"
+    payload = json.loads(
+        conn.execute(
+            "SELECT payload FROM job_payloads WHERE job_id = ?",
+            (continuation["id"],),
+        ).fetchone()["payload"]
+    )
+    if queue_kind == "public_contribution":
+        assert payload["queue_scope"] == "public_contribution"
+    else:
+        assert "queue_scope" not in payload
+
+    pool = await isolated_redis["new_pool"]()
+    try:
+        queued = await pool.queued_jobs()
+        continuation_jobs = [
+            job for job in queued
+            if job.function == "cluster_batch_task" and job.args[0] == continuation["id"]
+        ]
+        assert len(continuation_jobs) == 1
+    finally:
+        await pool.aclose()
+
+
+def _seed_rootless_poison_row(conn, owner_id):
+    interview_id = int(
+        conn.execute(
+            "INSERT INTO interview "
+            "(url, company, round, questions_list, owner_id, status, job_position) "
+            "VALUES (?, 'AC007 Poison', '一面', 'poison row', ?, 'approved', '后端开发')",
+            (f"https://ac007.example/poison-{owner_id}", owner_id),
+        ).lastrowid
+    )
+    detail_id = int(
+        conn.execute(
+            "INSERT INTO questions_detail "
+            "(interview_id, question, cat1, cat2, owner_id, status) "
+            "VALUES (?, 'AC007 deterministic poison row', '后端', '故障恢复', ?, 'approved')",
+            (interview_id, owner_id),
+        ).lastrowid
+    )
+    queue_id = int(
+        conn.execute(
+            "INSERT INTO analysis_queue "
+            "(interview_id, question_detail_id, owner_id, status) "
+            "VALUES (?, ?, ?, 'pending')",
+            (interview_id, detail_id, owner_id),
+        ).lastrowid
+    )
+    conn.commit()
+    return queue_id
+
+
+@pytest.mark.parametrize("owner_id", [None, 101])
+async def test_terminal_rootless_cluster_batch_failure_does_not_respawn_poison_row(
+    isolated_stack, isolated_redis, monkeypatch, owner_id
+):
+    """A terminal rootless failure is retained for explicit retry, not auto-spawned."""
+    from unittest.mock import AsyncMock
+
+    import app.services.pipeline as pipeline_module
+    import app.worker_cluster_tasks as worker_cluster_tasks
+
+    conn = isolated_stack
+    queue_id = _seed_rootless_poison_row(conn, owner_id)
+    job_id = int(
+        conn.execute(
+            "INSERT INTO jobs "
+            "(job_type, status, attempts, created_by, idempotency_key) "
+            "VALUES ('cluster_batch', 'pending', 2, 201, ?)",
+            (f"ac007-terminal-poison-batch-{owner_id}",),
+        ).lastrowid
+    )
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+        (job_id, json.dumps({"user_id": 201})),
+    )
+    conn.commit()
+    monkeypatch.setattr(
+        worker_cluster_tasks, "_cluster_preflight_ready", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "cluster_batch",
+        AsyncMock(side_effect=RuntimeError("AC007 deterministic poison failure")),
+    )
+
+    result = await worker_cluster_tasks.cluster_batch_task({}, job_id)
+
+    assert result["status"] == "failed"
+    assert conn.execute(
+        "SELECT status FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()["status"] == "failed"
+    assert conn.execute(
+        "SELECT status FROM analysis_queue WHERE id = ?", (queue_id,)
+    ).fetchone()["status"] == "failed"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL AND status IN ('pending', 'queued', 'running')"
+    ).fetchone()[0] == 0
+
+
+async def test_terminal_cluster_rebuild_failure_does_not_respawn_poison_row(
+    isolated_stack, isolated_redis, monkeypatch
+):
+    """A failed rebuild must not turn its poison batch into an endless new job chain."""
+    from unittest.mock import AsyncMock
+
+    import app.services.pipeline as pipeline_module
+    import app.worker_cluster_tasks as worker_cluster_tasks
+
+    conn = isolated_stack
+    queue_id = _seed_rootless_poison_row(conn, None)
+    rebuild_job_id = int(
+        conn.execute(
+            "INSERT INTO jobs "
+            "(job_type, status, attempts, created_by, idempotency_key) "
+            "VALUES ('cluster_rebuild', 'pending', 2, 201, 'ac007-terminal-poison-rebuild')"
+        ).lastrowid
+    )
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, '{}')",
+        (rebuild_job_id,),
+    )
+    conn.commit()
+    monkeypatch.setattr(
+        pipeline_module,
+        "cluster_batch",
+        AsyncMock(side_effect=RuntimeError("AC007 deterministic poison failure")),
+    )
+
+    result = await worker_cluster_tasks.cluster_rebuild_task({}, rebuild_job_id)
+
+    assert result["status"] == "failed"
+    assert conn.execute(
+        "SELECT status FROM jobs WHERE id = ?", (rebuild_job_id,)
+    ).fetchone()["status"] == "failed"
+    assert conn.execute(
+        "SELECT status FROM analysis_queue WHERE id = ?", (queue_id,)
+    ).fetchone()["status"] == "failed"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL AND status IN ('pending', 'queued', 'running')"
+    ).fetchone()[0] == 0
 
 
 def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
@@ -734,7 +1490,6 @@ def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
 
 
 def test_user_scope_never_borrows_system_stub(isolated_stack):
-    conn = isolated_stack
     from app.services.upload_credentials import UploadCredentialError, resolve_upload_credentials
 
     calls = {"global": 0}

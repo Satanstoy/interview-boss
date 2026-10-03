@@ -686,18 +686,26 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
         create_cluster_rebuild_job,
         mark_job_dispatched,
     )
+    from app.services.pipeline.queue import has_active_rootless_cluster_batch_job
 
     def _create():
         with get_db_connection() as conn:
+            # Serialize durable rebuild creation against incremental batch
+            # creation/dispatch. Once the rebuild row exists, batch scheduling
+            # sees it and leaves the shared rootless queue to this rebuild.
+            conn.execute("BEGIN IMMEDIATE")
             job_id, status = create_cluster_rebuild_job(conn, user_id=user_id)
+            batch_is_active = has_active_rootless_cluster_batch_job(conn)
             conn.commit()
-            return job_id, status
+            return job_id, status, batch_is_active
 
     # This transaction is intentionally small; keeping it on the request
     # thread also preserves the connection-local test/database context.
-    job_id, existing_status = _create()
+    job_id, existing_status, batch_is_active = _create()
     if existing_status in {"queued", "running"}:
         return {"status": existing_status, "job_id": job_id}
+    if batch_is_active:
+        return {"status": "pending", "job_id": job_id}
 
     try:
         from app.worker import enqueue_cluster_rebuild_job

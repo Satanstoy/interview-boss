@@ -38,21 +38,23 @@ copy_failure_artifacts() {
   printf 'Real-stack failure artifacts: %s\n' "$FINAL_ARTIFACT_ROOT/$PROJECT" >&2
 }
 
-copy_ac028_result_artifacts() {
+copy_success_artifacts() {
   local artifact_dir="$FINAL_ARTIFACT_ROOT/$PROJECT"
   local copied=0
-  if [ -f "$TEMP_ARTIFACTS/ac028-browser-result.png" ]; then
-    mkdir -p "$artifact_dir"
-    cp "$TEMP_ARTIFACTS/ac028-browser-result.png" "$artifact_dir/"
-    copied=1
-  fi
-  if [ -f "$TEMP_ARTIFACTS/ac028-browser-result.json" ]; then
-    mkdir -p "$artifact_dir"
-    cp "$TEMP_ARTIFACTS/ac028-browser-result.json" "$artifact_dir/"
-    copied=1
-  fi
+  local name
+  for name in \
+    ac028-browser-result.png \
+    ac028-browser-result.json \
+    ac029-browser-result.json \
+    ac029-db-trace.json; do
+    if [ -f "$TEMP_ARTIFACTS/$name" ]; then
+      mkdir -p "$artifact_dir"
+      cp "$TEMP_ARTIFACTS/$name" "$artifact_dir/"
+      copied=1
+    fi
+  done
   if [ "$copied" -eq 1 ]; then
-    printf 'AC-028 browser result artifacts: %s\n' "$artifact_dir"
+    printf 'Real-stack result artifacts: %s\n' "$artifact_dir"
   fi
 }
 
@@ -66,7 +68,21 @@ cleanup() {
     'import sqlite3; c=sqlite3.connect("/app/backend/data/interview-boss.db"); print(c.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone())' \
     >"$TEMP_ARTIFACTS/schema-version.txt" 2>&1
 
-  copy_ac028_result_artifacts
+  if [ "$RUN_STATUS" -ne 0 ] && [ "${REAL_STACK_CAPTURE_FAILURE_DB:-0}" = "1" ]; then
+    backend_container=$(compose ps -q backend)
+    compose exec -T backend python - <<'PY' >/dev/null 2>&1
+import sqlite3
+source = sqlite3.connect("/app/backend/data/interview-boss.db")
+snapshot = sqlite3.connect("/tmp/real-stack-failure.sqlite3")
+source.backup(snapshot)
+snapshot.close()
+source.close()
+PY
+    docker cp "$backend_container:/tmp/real-stack-failure.sqlite3" \
+      "$TEMP_ARTIFACTS/real-stack-failure.sqlite3" >/dev/null 2>&1
+  fi
+
+  copy_success_artifacts
   if [ "$RUN_STATUS" -ne 0 ]; then
     copy_failure_artifacts
   fi
@@ -160,3 +176,68 @@ if [ "$browser_status" -ne 0 ]; then
   exit "$browser_status"
 fi
 wait "$restart_monitor_pid"
+
+# AC-029 seeds a known public canonical, then exercises U1 upload, U2 privacy,
+# admin review/redaction, partial publication, and retry after a worker restart.
+compose exec -T backend python /app/backend/e2e/seed_ac029_public_canonical.py
+ac029_control="$TEMP_ARTIFACTS/ac029-worker"
+ac029_monitor_log="$TEMP_ARTIFACTS/ac029-worker-monitor.log"
+control_ac029_worker() {
+  local attempt=0
+  while [ "$attempt" -lt 7200 ]; do
+    if [ -f "$ac029_control.stop" ]; then
+      compose stop worker >>"$ac029_monitor_log" 2>&1
+      touch "$ac029_control.stopped"
+      break
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.25
+  done
+  if [ "$attempt" -ge 7200 ]; then
+    printf 'Timed out waiting for the AC-029 failed-item boundary.\n' >"$ac029_monitor_log"
+    return 1
+  fi
+
+  attempt=0
+  while [ "$attempt" -lt 7200 ]; do
+    if [ -f "$ac029_control.restart" ]; then
+      compose up -d --wait --wait-timeout 120 worker >>"$ac029_monitor_log" 2>&1
+      touch "$ac029_control.done"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.25
+  done
+  printf 'Timed out waiting for the AC-029 worker restart signal.\n' >"$ac029_monitor_log"
+  return 1
+}
+control_ac029_worker &
+ac029_monitor_pid=$!
+
+cd "$PROJECT_DIR/frontend"
+set +e
+REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+  AC029_WORKER_CONTROL_PREFIX="$ac029_control" \
+  AC029_BROWSER_RESULT_TRACE="$TEMP_ARTIFACTS/ac029-browser-result.json" \
+  run_frontend_playwright tests/e2e/public-contribution-real-stack.spec.js \
+  --timeout "${AC029_REAL_STACK_TEST_TIMEOUT:-1440000}"
+browser_status=$?
+if [ "$browser_status" -ne 0 ]; then
+  kill "$ac029_monitor_pid" >/dev/null 2>&1 || true
+  wait "$ac029_monitor_pid" >/dev/null 2>&1 || true
+  exit "$browser_status"
+fi
+wait "$ac029_monitor_pid"
+
+read -r ac029_import_id ac029_request_id < <(
+  python3 - "$TEMP_ARTIFACTS/ac029-browser-result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    trace = json.load(stream)
+print(trace["import_id"], trace["contribution_request_id"])
+PY
+)
+compose exec -T backend python /app/backend/e2e/assert_ac029_public_trace.py \
+  "$ac029_import_id" "$ac029_request_id" \
+  >"$TEMP_ARTIFACTS/ac029-db-trace.json"

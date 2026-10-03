@@ -15,6 +15,27 @@ logger = logging.getLogger("interview-boss")
 
 STUCK_PROCESSING_THRESHOLD_MINUTES = 30
 _ANY_OWNER = object()
+PUBLIC_CONTRIBUTION_QUEUE_SCOPE = "public_contribution"
+
+
+def has_active_rootless_cluster_batch_job(conn) -> bool:
+    """Whether an incremental rootless cluster batch can consume the shared queue."""
+
+    return conn.execute(
+        "SELECT 1 FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL "
+        "AND status IN ('pending', 'queued', 'running') LIMIT 1"
+    ).fetchone() is not None
+
+
+def has_active_rootless_cluster_job(conn) -> bool:
+    """Whether any active rootless batch or rebuild can consume the shared queue."""
+
+    return conn.execute(
+        "SELECT 1 FROM jobs WHERE job_type IN ('cluster_batch', 'cluster_rebuild') "
+        "AND root_import_id IS NULL "
+        "AND status IN ('pending', 'queued', 'running') LIMIT 1"
+    ).fetchone() is not None
 
 
 def enqueue_questions(
@@ -271,6 +292,7 @@ def dequeue_batch(
     batch_size: int = BATCH_SIZE,
     owner_id=_ANY_OWNER,
     root_import_id: str | None = None,
+    contribution_only: bool = False,
     job_fence: tuple[int, int] | None = None,
     scope_fence: tuple[str, str, int] | None = None,
 ) -> List[Dict]:
@@ -299,6 +321,22 @@ def dequeue_batch(
     root_returning = (
         "root_import_id" if "root_import_id" in queue_columns else "NULL AS root_import_id"
     )
+    if contribution_only and "contribution_request_id" not in queue_columns:
+        return []
+    contribution_only_filter = (
+        " AND aq.owner_id IS NULL AND aq.contribution_request_id IS NOT NULL"
+        if contribution_only
+        else ""
+    )
+    failed_contribution_filter = ""
+    if "contribution_request_id" in queue_columns:
+        failed_contribution_filter = (
+            " AND NOT (aq.contribution_request_id IS NOT NULL AND EXISTS ("
+            "SELECT 1 FROM public_contribution_items pci "
+            "WHERE pci.request_id = aq.contribution_request_id "
+            "AND pci.public_detail_id = aq.question_detail_id "
+            "AND pci.status = 'failed'))"
+        )
     if root_import_id is not None and "root_import_id" not in queue_columns:
         return []
     root_filter = ""
@@ -326,6 +364,8 @@ def dequeue_batch(
             bucket_sql += " AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL))"
             bucket_params.extend([owner_id, owner_id])
         bucket_sql += root_filter
+        bucket_sql += contribution_only_filter
+        bucket_sql += failed_contribution_filter
         bucket_params.extend(root_params)
         bucket_sql += " GROUP BY aq.owner_id ORDER BY cnt DESC LIMIT 1"
         bucket = cursor.execute(bucket_sql, bucket_params).fetchone()
@@ -354,7 +394,7 @@ def dequeue_batch(
             "  AND i.status = 'approved' AND qd.deleted_at IS NULL "
             "  AND (i.owner_id = aq.owner_id OR (i.owner_id IS NULL AND aq.owner_id IS NULL)) "
             "  AND (aq.owner_id = ? OR (aq.owner_id IS NULL AND ? IS NULL)) "
-            + update_root_filter + " "
+            + update_root_filter + contribution_only_filter + failed_contribution_filter + " "
             "  ORDER BY aq.id LIMIT ?"
             ") RETURNING id as queue_id, question_detail_id as qd_id, owner_id, "
             + contribution_returning
@@ -436,6 +476,7 @@ def mark_batch_failed(
     *,
     job_fence: tuple[int, int] | None = None,
     scope_fence: tuple[str, str, int] | None = None,
+    terminal: bool = False,
 ):
     if not queue_ids:
         return
@@ -458,10 +499,12 @@ def mark_batch_failed(
             if "root_import_id" in queue_columns
             else []
         )
+        failed_status = "failed" if terminal else "pending"
+        processed_at = "CURRENT_TIMESTAMP" if terminal else "NULL"
         conn.execute(
-            f"UPDATE analysis_queue SET status = 'pending', locked_until = NULL "
-            f"WHERE id IN ({placeholders}) AND status != 'cancelled'",
-            queue_ids,
+            f"UPDATE analysis_queue SET status = ?, processed_at = {processed_at}, "
+            f"locked_until = NULL WHERE id IN ({placeholders}) AND status != 'cancelled'",
+            (failed_status, *queue_ids),
         )
         for row in roots:
             if row["root_import_id"]:
@@ -487,7 +530,10 @@ def mark_batch_failed(
 CLUSTER_DELAY_SECONDS = int(os.environ.get("CLUSTER_DELAY_SECONDS", "300"))
 
 async def _run_cluster_batch_in_background(
-    user_id: int = None, root_import_id: str | None = None
+    user_id: int = None,
+    root_import_id: str | None = None,
+    *,
+    queue_scope: str | None = None,
 ) -> bool:
     """创建一个持久化攒批 Job，返回是否新建了任务。
 
@@ -545,20 +591,40 @@ async def _run_cluster_batch_in_background(
                 )
         return scheduled or bool(job_ids)
 
+    if queue_scope not in (None, PUBLIC_CONTRIBUTION_QUEUE_SCOPE):
+        raise ValueError(f"不支持的 rootless cluster queue scope: {queue_scope!r}")
+
     def _create():
         conn = get_db_connection()
         try:
             _recover_stuck_processing()
-            existing = conn.execute(
-                "SELECT id FROM jobs WHERE job_type = 'cluster_batch' "
-                "AND status IN ('pending', 'queued', 'running') LIMIT 1"
-            ).fetchone()
-            if existing:
+            # Generic legacy jobs can dequeue public contribution rows too, so
+            # every rootless cluster job shares one scheduling lock regardless
+            # of payload version/scope. BEGIN IMMEDIATE makes this check and
+            # insert atomic across API and worker processes.
+            conn.execute("BEGIN IMMEDIATE")
+            if has_active_rootless_cluster_job(conn):
+                conn.rollback()
                 return None, None
 
-            pending = conn.execute(
-                "SELECT COUNT(*) AS c FROM analysis_queue WHERE status = 'pending'"
-            ).fetchone()["c"]
+            if queue_scope == PUBLIC_CONTRIBUTION_QUEUE_SCOPE:
+                pending = conn.execute(
+                    "SELECT COUNT(*) AS c FROM analysis_queue aq "
+                    "JOIN interview i ON i.id = aq.interview_id "
+                    "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                    "JOIN public_contribution_items pci "
+                    "ON pci.request_id = aq.contribution_request_id "
+                    "AND pci.public_detail_id = aq.question_detail_id "
+                    "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
+                    "AND aq.owner_id IS NULL AND aq.contribution_request_id IS NOT NULL "
+                    "AND pci.status IN ('queued', 'approved_for_processing', 'processing') "
+                    "AND i.status = 'approved' AND i.deleted_at IS NULL "
+                    "AND qd.deleted_at IS NULL"
+                ).fetchone()["c"]
+            else:
+                pending = conn.execute(
+                    "SELECT COUNT(*) AS c FROM analysis_queue WHERE status = 'pending'"
+                ).fetchone()["c"]
             delay = 0 if pending >= BATCH_SIZE else CLUSTER_DELAY_SECONDS
             cursor = conn.execute(
                 "INSERT INTO jobs "
@@ -572,9 +638,12 @@ async def _run_cluster_batch_in_background(
                 ),
             )
             job_id = int(cursor.lastrowid)
+            payload = {"user_id": user_id}
+            if queue_scope:
+                payload["queue_scope"] = queue_scope
             conn.execute(
                 "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-                (job_id, json.dumps({"user_id": user_id}, ensure_ascii=False)),
+                (job_id, json.dumps(payload, ensure_ascii=False)),
             )
             conn.commit()
             return job_id, delay

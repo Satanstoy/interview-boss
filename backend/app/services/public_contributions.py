@@ -12,7 +12,11 @@ import json
 from typing import Any
 
 from app.db.connection import get_db_connection, run_db
-from app.services.pipeline.queue import _run_cluster_batch_in_background, enqueue_questions
+from app.services.pipeline.queue import (
+    _run_cluster_batch_in_background,
+    enqueue_questions,
+    has_active_rootless_cluster_job,
+)
 
 REQUEST_ACTIVE_STATUSES = (
     "pending_review",
@@ -1075,6 +1079,23 @@ APPROVED_PROCESSING_STATES = (
 
 
 def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
+    """Retry failed children under the same rootless queue lock as dispatch."""
+
+    _begin_immediate(conn)
+    try:
+        result = _retry_failed_public_items_in_transaction(
+            conn, request_id=request_id, admin_id=admin_id
+        )
+        _finish(conn, commit=True)
+        return result
+    except Exception:
+        _finish(conn, commit=False)
+        raise
+
+
+def _retry_failed_public_items_in_transaction(
+    conn, *, request_id: int, admin_id: int
+) -> dict:
     """重试已批准申请的失败公共子项（AC-015 / contracts §4.1）。
 
     规则（contracts.md §3.3、§4.1）：
@@ -1178,24 +1199,37 @@ def retry_failed_public_items(conn, *, request_id: int, admin_id: int) -> dict:
                     if str(bucket["root_import_id"]) in roots:
                         ensure_bucket_job(conn, bucket=bucket, created_by=admin_id)
             else:
-                from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
-                from uuid import uuid4 as _uuid4
+                # A legacy generic rootless job can already be queued or
+                # running and can dequeue these public rows. Let it finish
+                # under the shared lock; its worker schedules a scoped
+                # continuation after observing any remaining contributions.
+                if not has_active_rootless_cluster_job(conn):
+                    from app.services.job_lifecycle import CLUSTER_BATCH_JOB_TYPE
+                    from uuid import uuid4 as _uuid4
 
-                cursor = conn.execute(
-                    "INSERT INTO jobs (job_type, status, progress_total, created_by, "
-                    "available_at, idempotency_key) "
-                    "VALUES (?, 'pending', ?, ?, CURRENT_TIMESTAMP, ?)",
-                    (
-                        CLUSTER_BATCH_JOB_TYPE,
-                        max(1, len(reprocessed)),
-                        admin_id,
-                        f"retry:{request_id}:{_uuid4().hex}",
-                    ),
-                )
-                conn.execute(
-                    "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
-                    (int(cursor.lastrowid), _json({"user_id": admin_id})),
-                )
+                    cursor = conn.execute(
+                        "INSERT INTO jobs (job_type, status, progress_total, created_by, "
+                        "available_at, idempotency_key) "
+                        "VALUES (?, 'pending', ?, ?, CURRENT_TIMESTAMP, ?)",
+                        (
+                            CLUSTER_BATCH_JOB_TYPE,
+                            max(1, len(reprocessed)),
+                            admin_id,
+                            f"retry:{request_id}:{_uuid4().hex}",
+                        ),
+                    )
+                    conn.execute(
+                        "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
+                        (
+                            int(cursor.lastrowid),
+                            _json(
+                                {
+                                    "user_id": admin_id,
+                                    "queue_scope": "public_contribution",
+                                }
+                            ),
+                        ),
+                    )
         _event(
             conn,
             request_id,
@@ -1701,6 +1735,7 @@ async def finalize_public_contribution_approval(
         result["cluster_scheduled"] = await _run_cluster_batch_in_background(
             user_id=admin_id,
             root_import_id=root_import_id,
+            queue_scope="public_contribution" if root_import_id is None else None,
         )
     return result
 
@@ -1916,20 +1951,42 @@ def mark_public_contribution_queue_failed(
         )
         updated += max(cursor.rowcount, 0)
     for request_id in request_ids:
+        states = conn.execute(
+            "SELECT status FROM public_contribution_items WHERE request_id = ?",
+            (request_id,),
+        ).fetchall()
+        statuses = {state["status"] for state in states}
+        if statuses & {"queued", "processing", "approved_for_processing"}:
+            final_status = "processing"
+        else:
+            published_count = conn.execute(
+                "SELECT COUNT(*) FROM public_contribution_items "
+                "WHERE request_id = ? AND status = 'published'",
+                (request_id,),
+            ).fetchone()[0]
+            final_status = "partially_published" if published_count else "failed"
+
+        current = _request_row(conn, request_id)
         conn.execute(
-            "UPDATE public_contribution_requests SET status = 'failed', error_message = ?, "
+            "UPDATE public_contribution_requests SET status = ?, error_message = ?, "
             "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (error[:500], request_id),
+            (final_status, error[:500], request_id),
         )
         _event(
             conn,
             request_id,
             None,
             "public_queue_failed",
-            "queued",
-            "failed",
+            current["status"],
+            final_status,
             {"error": error[:500]},
         )
+        if current["public_interview_id"] is not None:
+            # A terminal failed item may be the last in-flight child. Refresh
+            # the parent now so successful siblings become publicly visible.
+            refresh_public_interview_projection(
+                conn, public_interview_id=int(current["public_interview_id"])
+            )
     if owns_transaction:
         conn.commit()
     return updated

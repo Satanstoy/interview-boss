@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 
 import pytest
 
@@ -124,6 +125,54 @@ def test_failed_item_blocks_publish_and_only_success_is_published():
     conn.close()
 
 
+def test_terminal_item_failure_publishes_successful_siblings_and_projection():
+    """A terminal failure must release the public interview publication gate."""
+    conn = _db()
+    from app.services.public_contributions import mark_public_contribution_queue_failed
+
+    record_resolution(
+        conn,
+        detail_id=511,
+        occurrence_scope="public",
+        occurrence_owner_id=None,
+        canonical_id=600,
+        canonical_scope="public",
+        status="matched",
+        pipeline_version="v1",
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published' WHERE id = 11"
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'queued' WHERE id = 12"
+    )
+    conn.execute(
+        "UPDATE interview SET publish_status = 'pending' WHERE id = 500"
+    )
+    queue_id = conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, status, owner_id, contribution_request_id) "
+        "VALUES (500, 512, 'processing', NULL, 1) RETURNING id"
+    ).fetchone()["id"]
+    conn.commit()
+
+    mark_public_contribution_queue_failed(conn, [queue_id], "temporary")
+
+    request_status = conn.execute(
+        "SELECT status FROM public_contribution_requests WHERE id = 1"
+    ).fetchone()["status"]
+    public_row = conn.execute(
+        "SELECT publish_status, questions_list FROM interview WHERE id = 500"
+    ).fetchone()
+    assert request_status == "partially_published"
+    assert public_row["publish_status"] == "published"
+    assert public_row["questions_list"] == "1. TCP 三次握手"
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 12"
+    ).fetchone()["status"] == "failed"
+    conn.close()
+
+
 def test_retry_restores_only_failed_item_without_new_inserts():
     conn = _db()
     record_resolution(
@@ -196,10 +245,59 @@ def test_retry_requeues_only_failed_items_when_original_queue_row_is_done():
         ).fetchall()
     }
     assert result["reprocessed_item_ids"] == [12]
+    retry_payload = conn.execute(
+        "SELECT p.payload FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
+        "WHERE j.job_type = 'cluster_batch' AND j.root_import_id IS NULL "
+        "ORDER BY j.id DESC LIMIT 1"
+    ).fetchone()
+    assert json.loads(retry_payload["payload"])["queue_scope"] == "public_contribution"
     assert queue_statuses == {511: "done", 512: "pending"}, queue_statuses
     assert conn.execute(
         "SELECT status FROM public_contribution_items WHERE id = 11"
     ).fetchone()["status"] == "published"
+    conn.close()
+
+
+def test_rootless_retry_reuses_active_legacy_cluster_job():
+    """A retry must not race an active generic job that can consume public rows."""
+
+    from app.services.public_contributions import retry_failed_public_items
+
+    conn = _db()
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published' WHERE id = 11"
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'failed' WHERE id = 12"
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, status, owner_id, contribution_request_id) "
+        "VALUES (500, 511, 'done', NULL, 1), (500, 512, 'done', NULL, 1)"
+    )
+    cursor = conn.execute(
+        "INSERT INTO jobs (job_type, status, created_by, idempotency_key) "
+        "VALUES ('cluster_batch', 'running', 101, 'legacy-rootless-active')"
+    )
+    conn.execute(
+        "INSERT INTO job_payloads (job_id, payload) VALUES (?, '{\"user_id\":101}')",
+        (int(cursor.lastrowid),),
+    )
+    conn.commit()
+
+    result = retry_failed_public_items(conn, request_id=1, admin_id=101)
+
+    assert result["reprocessed_item_ids"] == [12]
+    assert conn.execute(
+        "SELECT status FROM analysis_queue WHERE question_detail_id = 512"
+    ).fetchone()["status"] == "pending"
+    assert conn.execute(
+        "SELECT status FROM public_contribution_items WHERE id = 12"
+    ).fetchone()["status"] == "queued"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+        "AND root_import_id IS NULL AND status IN ('pending', 'queued', 'running')"
+    ).fetchone()[0] == 1
     conn.close()
 
 

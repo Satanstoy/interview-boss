@@ -15,6 +15,7 @@ import pytest
 
 from app.db.migrations import run_migrations
 from app.services.upload_lifecycle import resolve_root_job, restore_upload
+from app.services.upload_repository import UPLOAD_PIPELINE_VERSION_DEFAULT
 
 
 def _connect(path, migrate=True):
@@ -30,8 +31,9 @@ def _seed(conn):
     conn.execute("INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')")
     conn.execute(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
-        "target_intent, source_type, pipeline_version) "
-        "VALUES ('imp-1', 101, 'k1', 'h1', 'private', 'interview', 'v1')"
+        "target_intent, source_type, pipeline_version, payload_json) "
+        "VALUES ('imp-1', 101, 'k1', 'h1', 'private', 'interview', ?, ?)",
+        (UPLOAD_PIPELINE_VERSION_DEFAULT, '{"text":"retry fixture source"}'),
     )
     conn.commit()
 

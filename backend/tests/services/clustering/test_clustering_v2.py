@@ -2,9 +2,7 @@
 测试优化 1：强化增量聚类（Phase 1.5 - 匹配最近 7 天的 frequency=1 题目）
 """
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timedelta
 
 from app.services.clustering.matcher import (
     process_incremental_batch,
@@ -90,6 +88,20 @@ class TestLoadRecentSingletons:
         call_args = mock_db_connection.execute.call_args
         sql = call_args[0][0]
         assert "cat2 = ?" in sql
+
+    @pytest.mark.asyncio
+    async def test_load_recent_singletons_filters_by_owner_scope(self, mock_db_connection):
+        """A personal batch must not load another user's or public singletons."""
+        mock_db_connection.execute.return_value.fetchall.return_value = []
+
+        with patch('app.services.clustering.matcher.get_db_connection', return_value=mock_db_connection):
+            await _load_recent_singletons(
+                "B1.Agent架构与范式", days=7, owner_id=42
+            )
+
+        sql, params = mock_db_connection.execute.call_args.args
+        assert "owner_id IS ?" in sql
+        assert params == ("B1.Agent架构与范式", 42, "-7 days")
 
     @pytest.mark.asyncio
     async def test_load_recent_singletons_filters_by_days(self, mock_db_connection):
@@ -190,7 +202,7 @@ class TestMatchAndClusterCat2:
                 with patch('app.services.clustering.matcher._extract_json') as mock_json:
                     mock_json.return_value = {"clusters": []}
                     
-                    result = await _match_and_cluster_cat2(
+                    await _match_and_cluster_cat2(
                         "C3.数据库基础",
                         new_questions,
                         existing_clusters,
@@ -225,7 +237,9 @@ class TestMatchAndClusterCat2:
                     )
 
         # 验证：调用时使用了正确的 days 参数
-        mock_load.assert_called_once_with("C3.数据库基础", days=14)
+        mock_load.assert_called_once_with(
+            "C3.数据库基础", days=14, owner_id=None
+        )
 
 
 class TestClusterUnmatchedFastPath:
@@ -404,7 +418,7 @@ class TestIntegration:
                         {"clusters": []}
                     ]
                     
-                    result = await _match_and_cluster_cat2(
+                    await _match_and_cluster_cat2(
                         "C3.数据库基础",
                         new_questions,
                         existing_clusters,

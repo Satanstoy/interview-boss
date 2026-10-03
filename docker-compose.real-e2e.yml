@@ -7,7 +7,7 @@ x-e2e-environment: &e2e-environment
   DEBUG: "false"
   JWT_SECRET: real-stack-e2e-jwt-secret-change-me-1234567890
   OAUTH_SECRET_KEY: real-stack-e2e-oauth-secret-change-me-1234567890
-  ADMIN_USERNAME: real-stack-admin
+  ADMIN_USERNAME: real_stack_admin
   ADMIN_PASSWORD: real-stack-admin-password-123
   OPENAI_API_KEY: real-stack-e2e-provider-key
   OPENAI_BASE_URL: http://llm-stub:8080/v1
@@ -19,6 +19,7 @@ x-e2e-environment: &e2e-environment
   EMBEDDING_BACKEND: hash
   EMBEDDING_OFFLINE: "1"
   E2E_STUB_PROVIDER: "1"
+  CLUSTER_BATCH_SIZE: "1"
   PYTHONUNBUFFERED: "1"
 
 services:

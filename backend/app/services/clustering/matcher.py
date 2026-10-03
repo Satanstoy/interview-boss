@@ -390,12 +390,15 @@ async def _validate_merges(
 # ──────────────────────────── 最近题目加载 ────────────────────────────
 
 
-async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Dict]:
-    """加载最近 N 天入库的 frequency=1 题目（同 cat2）
+async def _load_recent_singletons(
+    cat2: str, days: int = RECENT_DAYS, owner_id: int | None = None
+) -> List[Dict]:
+    """Load recent singleton candidates from the same owner scope and category.
 
     Args:
         cat2: 题目分类
         days: 天数，默认 7 天
+        owner_id: ``None`` for the public corpus, otherwise one user's corpus.
 
     Returns:
         最近 N 天的 frequency=1 题目列表
@@ -405,10 +408,10 @@ async def _load_recent_singletons(cat2: str, days: int = RECENT_DAYS) -> List[Di
         conn = get_db_connection()
         rows = conn.execute(
             "SELECT id, question FROM question_bank "
-            "WHERE cat2 = ? AND frequency = 1 AND deleted_at IS NULL "
+            "WHERE cat2 = ? AND owner_id IS ? AND frequency = 1 AND deleted_at IS NULL "
             "AND created_at > datetime('now', ?) "
             "ORDER BY id DESC",
-            (cat2, f"-{days} days"),
+            (cat2, owner_id, f"-{days} days"),
         ).fetchall()
         return [{"id": r["id"], "question": r["question"]} for r in rows]
 
@@ -514,7 +517,9 @@ async def _match_and_cluster_cat2(
             else recent_days
         )
         try:
-            recent_singletons = await _load_recent_singletons(cat2, days=effective_days)
+            recent_singletons = await _load_recent_singletons(
+                cat2, days=effective_days, owner_id=user_id
+            )
         except Exception as e:
             logger.warning(f"  [{cat2 or '无分类'}] 加载最近题目失败: {e}")
 

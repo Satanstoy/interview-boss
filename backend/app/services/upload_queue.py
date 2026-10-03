@@ -47,6 +47,15 @@ def collect_pending_buckets(conn) -> list[dict]:
           AND q.question_detail_id IS NOT NULL
           AND i.deleted_at IS NULL
           AND d.deleted_at IS NULL
+          AND NOT (
+              q.contribution_request_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM public_contribution_items pci
+                  WHERE pci.request_id = q.contribution_request_id
+                    AND pci.public_detail_id = q.question_detail_id
+                    AND pci.status = 'failed'
+              )
+          )
         GROUP BY q.root_import_id, q.owner_id, COALESCE(i.job_position, '')
         ORDER BY MIN(q.created_at), q.root_import_id
         """

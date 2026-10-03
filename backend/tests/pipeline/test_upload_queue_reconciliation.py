@@ -147,3 +147,42 @@ def test_orphan_rows_become_blocked_not_spinning(tmp_path):
         >= 7
     )
     conn.close()
+
+
+def test_failed_public_contribution_item_is_not_reconciled_until_explicit_retry():
+    conn = _db()
+    conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(id, source_type, source_id, requester_id, public_interview_id, status, snapshot_json, revision) "
+        "VALUES (99, 'interview', 1, 101, 2, 'partially_published', '{}', 1)"
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(id, request_id, source_item_type, source_item_id, ordinal, status, snapshot_json, public_detail_id) "
+        "VALUES (9900, 99, 'question', 2000, 1, 'failed', '{}', 2000), "
+        "       (9901, 99, 'question', 2001, 2, 'queued', '{}', 2001)"
+    )
+    conn.execute(
+        "UPDATE analysis_queue SET contribution_request_id = 99 "
+        "WHERE question_detail_id IN (2000, 2001)"
+    )
+    conn.commit()
+
+    public_bucket = next(
+        bucket for bucket in collect_pending_buckets(conn)
+        if bucket["root_import_id"] == "imp-public"
+    )
+    assert public_bucket["pending_count"] == 10
+
+    # The explicit retry transition changes the failed item back to queued,
+    # which makes that same durable queue row eligible again.
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'queued' WHERE id = 9900"
+    )
+    conn.commit()
+    public_bucket = next(
+        bucket for bucket in collect_pending_buckets(conn)
+        if bucket["root_import_id"] == "imp-public"
+    )
+    assert public_bucket["pending_count"] == 11
+    conn.close()
