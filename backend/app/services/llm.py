@@ -181,6 +181,8 @@ def _make_client(
     timeout: float,
     provider: str = "openai",
     api_format: str | None = None,
+    *,
+    max_retries: int | None = None,
 ):
     """根据 provider 创建对应的 LLM 客户端。"""
     provider = _provider_for_api_format(api_format) or provider
@@ -201,6 +203,7 @@ def _make_client(
         follow_redirects=False,
         trust_env=False,
     )
+    retry_option = {} if max_retries is None else {"max_retries": max_retries}
     if provider == "anthropic":
         return AsyncAnthropic(
             api_key=api_key or None,
@@ -208,6 +211,7 @@ def _make_client(
             timeout=timeout,
             http_client=http_client,
             default_headers=default_headers or None,
+            **retry_option,
         )
     return AsyncOpenAI(
         api_key=api_key or None,
@@ -215,6 +219,7 @@ def _make_client(
         timeout=timeout,
         http_client=http_client,
         default_headers=default_headers or None,
+        **retry_option,
     )
 
 
@@ -295,6 +300,9 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
             resolved.timeout,
             resolved.provider,
             api_format=resolved.api_format,
+            # The upload ledger must reserve once for every physical request.
+            # SDK retries bypass the ledger and multiply the stage budget.
+            max_retries=0,
         )
         return (
             scoped_client,
@@ -1126,9 +1134,46 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
 # --------------- LLM 调用 ---------------
 
 
+_DEFAULT_LLM_STOP = stop_after_attempt(4) | stop_after_delay(60)
+_DEFAULT_LLM_WAIT = wait_exponential(multiplier=2, min=3, max=15)
+
+
+def _active_upload_llm_context():
+    from app.services.upload_llm_accounting import current_upload_llm_context
+
+    return current_upload_llm_context()
+
+
+def _llm_retry_stop(retry_state) -> bool:
+    # Upload requests share one physical-call budget across Tenacity retries
+    # and any additional format-repair request in the same stage context.
+    # Preserve historical non-upload policy.
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        budget = upload_context.retry_budget
+        return (
+            budget.exhausted
+            if budget is not None
+            else retry_state.attempt_number >= 3
+        )
+    return _DEFAULT_LLM_STOP(retry_state)
+
+
+def _llm_retry_wait(retry_state) -> float:
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        attempts = (
+            upload_context.retry_budget.physical_attempts
+            if upload_context.retry_budget is not None
+            else retry_state.attempt_number
+        )
+        return 30 if attempts <= 1 else 60
+    return _DEFAULT_LLM_WAIT(retry_state)
+
+
 @retry(
-    stop=stop_after_attempt(4) | stop_after_delay(60),
-    wait=wait_exponential(multiplier=2, min=3, max=15),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(
         f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
@@ -1244,8 +1289,8 @@ async def _call_llm_with_retry(
 
 
 @retry(
-    stop=stop_after_attempt(4) | stop_after_delay(60),
-    wait=wait_exponential(multiplier=2, min=3, max=15),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
     before_sleep=lambda retry_state: logger.warning(
         f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"

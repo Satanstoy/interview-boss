@@ -80,43 +80,84 @@ async def extract_node(state: SubmitState) -> dict:
                 llm_kwargs["response_format"] = {"type": "json_object"}
             messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
-            response_text = await _call_llm_with_retry_messages(messages, user_id=user_id, **llm_kwargs)
-            parsed = _extract_json(response_text)
+            from app.services.extraction_integrity import (
+                ExtractionSchemaError,
+                normalize_extracted_questions,
+            )
+            from app.services.upload_llm_accounting import upload_retry_budget_scope
 
-            # 解析结果
-            if not doc_type:
-                doc_type = (parsed.get("type") or "").lower()
-            data = parsed.get("data", {})
-
-            # 不静默漏题：黑名单只做标记，清单完整保留（AC-019）
-            if doc_type == "interview":
-                from app.services.extraction_integrity import (
-                    ExtractionSchemaError,
-                    normalize_extracted_questions,
-                )
-
-                raw_list = data.get("具体题目清单", []) or []
+            def parse_output(raw_output):
                 try:
+                    parsed = _extract_json(raw_output)
+                except Exception as exc:
+                    raise ExtractionSchemaError("模型输出不是合法 JSON") from exc
+                if not isinstance(parsed, dict):
+                    raise ExtractionSchemaError("模型输出必须是 JSON 对象")
+
+                parsed_type = str(parsed.get("type") or doc_type or "").lower()
+                parsed_data = parsed.get("data", {})
+                if not isinstance(parsed_data, dict):
+                    raise ExtractionSchemaError("模型输出的 data 必须是 JSON 对象")
+
+                if parsed_type == "interview":
+                    raw_list = parsed_data.get("具体题目清单", [])
                     normalized = normalize_extracted_questions(raw_list)
+                    parsed_data["具体题目清单"] = [
+                        item["question"] for item in normalized["questions"]
+                    ]
+                    parsed_data["题目 ordinal"] = [
+                        item["ordinal"] for item in normalized["questions"]
+                    ]
+                    parsed_data["题目标记"] = {
+                        str(item["ordinal"]): item["review_reason"]
+                        for item in normalized["questions"]
+                        if item["needs_review"]
+                    }
+                    parsed_data["提取计数"] = {
+                        "extracted": normalized["counts"]["extracted"],
+                        "retained": normalized["counts"]["retained"],
+                        "excluded": normalized["counts"]["excluded"],
+                        "needs_review": normalized["counts"]["needs_review"],
+                    }
+                return parsed_type, parsed_data
+
+            async def call_and_parse_with_repairs(retry_budget):
+                response_text = await _call_llm_with_retry_messages(
+                    messages, user_id=user_id, **llm_kwargs
+                )
+                try:
+                    return parse_output(response_text)
                 except ExtractionSchemaError as schema_error:
-                    # 结构错误 → MODEL_OUTPUT_INVALID 走有限修复重试，绝不拆字/丢题
-                    raise ExtractionSchemaError(str(schema_error)) from schema_error
-                questions = [item["question"] for item in normalized["questions"]]
-                data["具体题目清单"] = questions
-                data["题目 ordinal"] = [
-                    item["ordinal"] for item in normalized["questions"]
-                ]
-                data["题目标记"] = {
-                    str(item["ordinal"]): item["review_reason"]
-                    for item in normalized["questions"]
-                    if item["needs_review"]
-                }
-                data["提取计数"] = {
-                    "extracted": normalized["counts"]["extracted"],
-                    "retained": normalized["counts"]["retained"],
-                    "excluded": normalized["counts"]["excluded"],
-                    "needs_review": normalized["counts"]["needs_review"],
-                }
+                    # Repairs are upload-only and capped at two. Every request,
+                    # including Tenacity retries, shares this same budget.
+                    if retry_budget is None:
+                        raise
+                    for _repair_no in range(2):
+                        if retry_budget.exhausted:
+                            raise schema_error
+                        repair_messages = [
+                            *messages,
+                            {"role": "assistant", "content": response_text},
+                            {
+                                "role": "user",
+                                "content": (
+                                    "上一条输出未通过 JSON 结构校验："
+                                    f"{schema_error}。请只返回修正后的 JSON 对象，"
+                                    "保持原有数据和全部题目，不要丢题或添加解释文字。"
+                                ),
+                            },
+                        ]
+                        response_text = await _call_llm_with_retry_messages(
+                            repair_messages, user_id=user_id, **llm_kwargs
+                        )
+                        try:
+                            return parse_output(response_text)
+                        except ExtractionSchemaError as repair_error:
+                            schema_error = repair_error
+                    raise schema_error
+
+            with upload_retry_budget_scope() as retry_budget:
+                doc_type, data = await call_and_parse_with_repairs(retry_budget)
 
     # 质量评估
     quality = evaluate_extraction_quality(data)

@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；本轮未部署。
+**状态：** 实施中；Task 1–4 已完成本地验证，Task 5–9 待实施；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -169,18 +169,20 @@ cd frontend
 
 **Files:**
 
+- Implementation, only for observed red tests: `backend/app/agents/submit/extract.py`、`backend/app/agents/submit/persist_personal.py`、`backend/app/services/llm.py`、`backend/app/services/upload_llm_accounting.py`
 - Test: `frontend/tests/e2e/upload-task-center.spec.js`
 - Test: `backend/tests/services/test_upload_status_projection.py`
 - Test: `backend/tests/infra/test_upload_stream_contract.py`
+- Test: `backend/tests/pipeline/test_upload_extraction_integrity.py`、`backend/tests/pipeline/test_upload_matching_outcomes.py`、`backend/tests/pipeline/test_upload_submit_api.py`
 - Possible implementation, only if a new test is red: `frontend/src/composables/useSubmitJobs.js`、`frontend/src/components/business/UploadTaskCenter.vue`、`backend/app/routers/upload_imports.py`、对应 snapshot/error policy
 
-- [ ] SSE 在非终态 EOF 后断开：断言客户端重连并以服务端 snapshot 收敛。
-- [ ] 恢复 GET 返回 500：断言保留断线任务与已知结果，不清卡片、不显示成功。
-- [ ] 先收到 revision 8 再收到 7：断言状态和计数不回退；心跳不能增加完成数。
-- [ ] U1 登出后再以 U2 登录：断言 U1 卡片、SSE、计时器和私有结果缓存均清掉。
-- [ ] 10 题 8 成功/2 失败：断言 root 为契约规定的 partial 状态，显示正确数量，只提供 `retry_failed_steps`，恢复只调两道失败题。
-- [ ] 覆盖 401 单次停止、429 总尝试数不超过 3、结构修复共用预算，并断言 snapshot 不含原文/key。
-- [ ] 旧 SSE 入口只订阅同一 root；不启动另一份 graph/job。
+- [x] SSE 在非终态 EOF 后断开：断言客户端重连并以更新 snapshot 收敛。
+- [x] 恢复 GET 返回 500：断言保留已知任务和结果入口，不清卡片、不显示成功。
+- [x] 先收到 revision 8 再收到 7：断言状态和计数不回退；心跳不能增加完成数。
+- [x] U1 切到 U2：断言 U1 卡片消失、旧 SSE 被取消、用户分区草稿和活跃任务缓存被清掉。
+- [x] 10 题 8 成功/2 失败：断言 root 是 `partial_failed`、数量为 8/2、只允许 `retry_failed_steps`，恢复只创建两道失败答案任务。
+- [x] 覆盖 401 一次停止、429 最多三次实际 HTTP 请求、结构修复与其内层 429 重试共用三次预算，并断言 snapshot 不含原文/key。
+- [x] 旧 SSE 入口相同 idempotency key 复用同一 root 和已有 job，不在 Web 路由内启动第二份 graph。
 
 **运行：**
 
@@ -196,6 +198,10 @@ cd frontend
 ./node_modules/.bin/playwright test --config tests/playwright.config.js \
   tests/e2e/upload-task-center.spec.js
 ```
+
+**本轮红绿证据：** 新增的真实 OpenAI-compatible `httpx.MockTransport` 测试先将 429 复现为每个 SDK 请求叠加 SDK+Tenacity 的 12 次 HTTP 请求；只关 SDK retry 后仍有 4 次。上传 client 现在关闭 SDK 自带 retry，Tenacity 以账本实际 reserve 数收敛到 3 次，每次 provider HTTP 请求恰有一行 failed ledger；401 实际只请求一次，退避为 30/60 秒。模型结构反例先在首份字符串题目清单处以 `ExtractionSchemaError` 红灯；上传 extract 增加最多两次格式修复，并在格式修复与其中的 provider retry 之间共用同一个 3 次物理请求预算。初次结构错误后两次 429 的用例实际只发出 3 次请求，没有第 4 次；`null` 清单另有实际 extract node 红绿测试，修复为 schema error 而不再被 `or []` 静默转空结果。
+
+10 题/8 成功/2 失败的恢复用例先因已有 linked interview 分支返回 `answer_tasks=[]` 而失败；现在只从 failed 的 `answer:<question_id>` 阶段重建 child jobs，成功的 8 道不再次派发。列表 500、乱序 revision/heartbeat、U1→U2、非终态 SSE EOF、旧 SSE 重复相同幂等键复用 job 都有 API 或 Playwright 实际执行断言。任务中心完整 mock API Playwright **17 passed in 46.1s**。上传相关后端扩展回归 **118 passed, 4 skipped, 1 warning in 36.47s**；4 个 `test_upload_recovery_fullstack.py` 用例由其文件自己的环境门禁跳过，本轮仍保留 Task 1–2 先前 disposable SQLite/Redis/ARQ 的 **31 passed** 证据。`git diff --check` 通过。以上均为本地隔离 SQLite、MockTransport 或 mock API 浏览器结果，不是部署后测试；未部署。
 
 ### Task 5：补 AC-021 / AC-022 的丢响应、幂等和输入草稿闭环
 

@@ -165,3 +165,162 @@ def test_failed_question_never_reaches_the_personal_queue(test_db):
         "个人新 canonical 由队列创建；节点同步不得提前建题"
     )
     assert result["match_failed"] == 1
+
+
+def test_retry_after_eight_of_ten_answers_failed_requeues_only_failed_questions(
+    test_db,
+):
+    """AC-011/013：上传恢复只重建两道失败答案，不重放八道成功答案。"""
+
+    import json
+
+    from app.agents.submit.persist_personal import match_and_persist_personal_node
+    from app.routers.upload_imports import _snapshot, _stage_counts
+    from app.services.job_lifecycle import create_answer_generation_jobs
+
+    _seed_user(test_db)
+    import_id = "answer-retry-root"
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, status, current_attempt_no) "
+        "VALUES (?, 1, 'answer-retry', 'hash', 'private', 'interview', "
+        "'upload-pipeline-v1', 'partial_failed', 1)",
+        (import_id,),
+    )
+    test_db.execute(
+        "INSERT INTO upload_attempts (import_id, attempt_no, status, requested_by) "
+        "VALUES (?, 1, 'failed', 1)",
+        (import_id,),
+    )
+    attempt_id = test_db.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = ?", (import_id,)
+    ).fetchone()[0]
+    test_db.execute(
+        "INSERT INTO interview (id, url, company, round, owner_id, status, job_position) "
+        "VALUES (901, 'https://test.com/retry', '测试公司', '一面', 1, 'approved', '后端')"
+    )
+    questions = [f"恢复用例题目 {index}" for index in range(1, 11)]
+    for index, question in enumerate(questions, start=1):
+        question_id = 1000 + index
+        detail_id = 2000 + index
+        test_db.execute(
+            "INSERT INTO question_bank (id, question, cat1, cat2, owner_id, status, job_position) "
+            "VALUES (?, ?, '系统设计', '恢复', 1, 'approved', '后端')",
+            (question_id, question),
+        )
+        test_db.execute(
+            "INSERT INTO questions_detail "
+            "(id, interview_id, question, url, company, round, owner_id, status, "
+            "job_position, import_id, source_ordinal) "
+            "VALUES (?, 901, ?, 'https://test.com/retry', '测试公司', '一面', 1, "
+            "'approved', '后端', ?, ?)",
+            (detail_id, question, import_id, index),
+        )
+        test_db.execute(
+            "INSERT INTO upload_stage_results "
+            "(import_id, stage, unit_key, input_version, pipeline_version, status, error_code) "
+            "VALUES (?, 'answer', ?, 1, 'upload-pipeline-v1', ?, ?)",
+            (
+                import_id,
+                f"answer:{question_id}",
+                "succeeded" if index <= 8 else "failed",
+                None if index <= 8 else "UPSTREAM_TIMEOUT",
+            ),
+        )
+    test_db.execute(
+        "INSERT INTO upload_stage_results "
+        "(import_id, stage, unit_key, input_version, pipeline_version, status, result_json) "
+        "VALUES (?, 'extract', 'document', 1, 'upload-pipeline-v1', 'succeeded', ?)",
+        (
+            import_id,
+            json.dumps({"提取计数": {"extracted": 10, "retained": 10, "excluded": 0}}),
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO jobs (job_type, status, created_by, root_import_id, "
+        "upload_attempt_id, work_key) VALUES ('submit_import', 'completed', 1, ?, ?, 'extract')",
+        (import_id, attempt_id),
+    )
+    parent_job_id = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    test_db.commit()
+
+    root = test_db.execute(
+        "SELECT * FROM upload_imports WHERE id = ?", (import_id,)
+    ).fetchone()
+    counts = _stage_counts(test_db, import_id)
+    snapshot = _snapshot(root, counts=counts, conn=test_db)
+    assert snapshot["status"] == "partial_failed"
+    assert snapshot["counts"]["total"] == 10
+    assert snapshot["counts"]["answered"] == 8
+    assert snapshot["counts"]["failed"] == 2
+    assert "retry_failed_steps" in snapshot["allowed_actions"]
+
+    tagged_rows = [
+        ["https://test.com/retry", "测试公司", "一面", question, "系统设计", "恢复", "", "L2-中等"]
+        for question in questions
+    ]
+    outcomes = {
+        "results": [
+            {
+                "new_id": index,
+                "outcome": "matched",
+                "canonical_id": 1000 + index + 1,
+                "canonical_scope": "private",
+            }
+            for index in range(10)
+        ]
+    }
+    with (
+        patch("app.services.clustering.match_outcomes", AsyncMock(return_value=outcomes)),
+        patch("app.db.connection.get_current_job_position", return_value="后端"),
+        patch("app.services.pipeline.enqueue_questions", return_value=0),
+        patch(
+            "app.services.pipeline.queue._run_cluster_batch_in_background",
+            AsyncMock(return_value=False),
+        ),
+    ):
+        result = asyncio.run(
+            match_and_persist_personal_node(
+                {
+                    "import_id": import_id,
+                    "user_id": 1,
+                    "credential_scope": "user",
+                    "job_position": "后端",
+                    "saved_url": "https://test.com/retry",
+                    "season": "",
+                    "extracted_data": {
+                        "公司": "测试公司",
+                        "面试轮次": "一面",
+                        "具体题目清单": questions,
+                    },
+                    "tagged_rows": tagged_rows,
+                }
+            )
+        )
+
+    assert result["answer_tasks"] == [
+        (1009, "恢复用例题目 9"),
+        (1010, "恢复用例题目 10"),
+    ]
+    new_jobs = create_answer_generation_jobs(
+        test_db,
+        parent_job_id,
+        result["answer_tasks"],
+        user_id=1,
+        llm_scope="user",
+        search_scope="user",
+    )
+    assert len(new_jobs) == 2
+    retried_question_ids = {
+        json.loads(row["payload"])["question_id"]
+        for row in test_db.execute(
+            "SELECT payload FROM job_payloads WHERE job_id IN (?, ?)",
+            tuple(new_jobs),
+        ).fetchall()
+    }
+    assert retried_question_ids == {1009, 1010}
+    assert test_db.execute(
+        "SELECT COUNT(*) FROM upload_stage_results WHERE import_id = ? "
+        "AND stage = 'answer' AND status = 'pending'",
+        (import_id,),
+    ).fetchone()[0] == 2

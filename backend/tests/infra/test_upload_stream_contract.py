@@ -137,6 +137,41 @@ def test_snapshot_never_contains_raw_text_or_key():
     assert "authorization" not in str(dumped).lower()
 
 
+def test_snapshot_projection_does_not_serialize_private_input_or_credentials(test_db):
+    """The public snapshot builder must omit persisted source text and model keys."""
+
+    import json
+
+    from app.routers.upload_imports import _snapshot
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (101, 'snapshot-owner', 'x', 0)"
+    )
+    private_marker = "SNAPSHOT_PRIVATE_RAW_98fd2"
+    secret_key = "sk-snapshot-secret-98fd2"
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
+        "VALUES ('imp-snapshot-private', 101, 'snapshot-private', 'hash', 'private', "
+        "'interview', 'upload-pipeline-v1', '{}', ?, 'failed')",
+        (json.dumps({"raw_text": private_marker, "api_key": secret_key}),),
+    )
+    test_db.commit()
+
+    row = test_db.execute(
+        "SELECT * FROM upload_imports WHERE id = 'imp-snapshot-private'"
+    ).fetchone()
+    serialized = json.dumps(
+        _snapshot(row, conn=test_db, actor_is_admin=False), ensure_ascii=False
+    )
+
+    assert private_marker not in serialized
+    assert secret_key not in serialized
+    assert "raw_text" not in serialized
+    assert "api_key" not in serialized.lower()
+
+
 def test_stage_counts_reflect_extract_counts_and_resolutions(tmp_path):
     """AC-013：counts 必须是逐题统计——extracted/retained/excluded/
     needs_review 来自 extract 阶段「提取计数」，resolved 来自逐题

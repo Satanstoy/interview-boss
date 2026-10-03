@@ -121,6 +121,26 @@ test('恢复接口 500 时保留已有任务', async ({ page }) => {
   await expect(center.getByText(/恢复失败|内部错误/)).toBeVisible()
 })
 
+test('任务列表恢复 GET 返回 500 时保留已知任务和结果入口', async ({ page }) => {
+  await mockApi(page)
+  let listCalls = 0
+  await page.route('**/api/upload-imports?**', (route) => {
+    listCalls += 1
+    if (listCalls === 1) return route.fulfill({ json: MOCK_TASKS })
+    return route.fulfill({ status: 500, json: { detail: '恢复读取失败' } })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByRole('button', { name: '查看结果' })).toBeVisible()
+  await center.getByRole('button', { name: '刷新' }).click()
+
+  await expect(center.getByText(/恢复读取失败|任务列表加载失败/)).toBeVisible()
+  await expect(center.locator('li', { hasText: 'imp-e2e-0001' })).toBeVisible()
+  await expect(center.getByRole('button', { name: '查看结果' })).toBeVisible()
+})
+
 test('恢复请求复用已有 attempt 时说明任务正在继续', async ({ page }) => {
   const runningTask = {
     ...TASK,
@@ -289,6 +309,120 @@ test('SSE 首次返回 503 后自动重连并继续接收快照', async ({ page 
   await expect.poll(() => streamCalls, { timeout: 10_000 }).toBeGreaterThan(1)
 })
 
+test('SSE 非终态 EOF 后重连并用新快照收敛', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    revision: 4,
+    status: 'running',
+    stage: 'answer',
+    progress: { unit: 'questions', completed: 0, total: 10 },
+    counts: { total: 10, answered: 0, failed: 0 },
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  await mockApi(page, { task: runningTask })
+  let streamCalls = 0
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) => {
+    streamCalls += 1
+    const snapshot = streamCalls === 1
+      ? {
+          ...runningTask,
+          revision: 6,
+          progress: { unit: 'questions', completed: 5, total: 10 },
+          counts: { total: 10, answered: 4, failed: 1 },
+        }
+      : {
+          ...runningTask,
+          revision: 7,
+          status: 'completed',
+          progress: { unit: 'questions', completed: 10, total: 10 },
+          counts: { total: 10, answered: 8, failed: 2 },
+          allowed_actions: ['open_result'],
+        }
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: `event: snapshot\nid: ${snapshot.revision}\ndata: ${JSON.stringify(snapshot)}\n\n`,
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect.poll(() => streamCalls, { timeout: 10_000 }).toBe(2)
+  await expect(center.getByText('已完成', { exact: true })).toBeVisible()
+  await expect(center.getByText('10/10 题已处理')).toBeVisible()
+  await expect(center.getByText('答案成功 8 · 失败 2')).toBeVisible()
+})
+
+test('SSE 先收到 revision 8 再收到 7 时不回退，心跳不改题目计数', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  const newer = {
+    ...runningTask,
+    revision: 8,
+    progress: { unit: 'questions', completed: 8, total: 10 },
+    counts: { total: 10, answered: 8, failed: 0 },
+  }
+  const older = {
+    ...runningTask,
+    revision: 7,
+    progress: { unit: 'questions', completed: 7, total: 10 },
+    counts: { total: 10, answered: 7, failed: 1 },
+  }
+  await mockApi(page, { task: runningTask })
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: [newer, older]
+        .map((snapshot) => `event: snapshot\nid: ${snapshot.revision}\ndata: ${JSON.stringify(snapshot)}\n\n`)
+        .join('') + ': heartbeat\n\n',
+    }),
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('8/10 题已处理')).toBeVisible()
+  await expect(center.getByText('答案成功 8 · 失败 0')).toBeVisible()
+  await expect(center.getByText('7/10 题已处理')).toHaveCount(0)
+})
+
+test('SSE 401 鉴权失败后不重连第二次', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  await mockApi(page, { task: runningTask })
+  let streamCalls = 0
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) => {
+    streamCalls += 1
+    return route.fulfill({ status: 401, json: { detail: 'unauthorized' } })
+  })
+  let refreshCalls = 0
+  await page.route('**/api/auth/refresh', (route) => {
+    refreshCalls += 1
+    if (refreshCalls === 1) {
+      return route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } })
+    }
+    return route.fulfill({ status: 401, json: { detail: 'unauthorized' } })
+  })
+
+  await page.goto('/')
+  // The task center subscribes as soon as the authenticated task list loads;
+  // the second 401 can open the login dialog before the panel is opened.
+  await expect.poll(() => streamCalls).toBe(1)
+  await page.waitForTimeout(1500)
+  expect(streamCalls).toBe(1)
+})
+
 test('题目进度显示服务端真实分子分母和答案计数', async ({ page }) => {
   const task = {
     ...TASK,
@@ -305,6 +439,12 @@ test('题目进度显示服务端真实分子分母和答案计数', async ({ pa
 })
 
 test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
   let servedUserId = '101'
   await page.route('**/api/auth/**', (route) =>
     route.fulfill({ json: { token: 'e2e-token', user: MOCK_USER } }),
@@ -312,17 +452,27 @@ test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({
   await page.route('**/api/upload-imports?**', (route) =>
     route.fulfill({
       json: {
-        items: servedUserId === '101' ? [TASK] : [],
+        items: servedUserId === '101' ? [runningTask] : [],
         total: servedUserId === '101' ? 1 : 0,
         page: 1,
         page_size: 20,
       },
     }),
   )
+  let streamCalls = 0
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) => {
+    streamCalls += 1
+    return route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: `event: snapshot\nid: 4\ndata: ${JSON.stringify({ ...runningTask, revision: 4 })}\n\n`,
+    })
+  })
   await page.goto('/')
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const center = page.getByRole('region', { name: '上传任务中心' })
   await expect(center.locator('li', { hasText: 'imp-e2e-0001' })).toBeVisible()
+  await expect.poll(() => streamCalls).toBeGreaterThan(0)
 
   await page.evaluate(() => {
     localStorage.setItem('interviewboss-submit-jobs:101', '[77]')
@@ -345,6 +495,8 @@ test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({
   await expect(center.locator('li', { hasText: 'imp-e2e-0001' })).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => localStorage.getItem('interviewboss-submit-jobs:101'))).toBeNull()
   await expect.poll(() => page.evaluate(() => localStorage.getItem('interviewboss-submit-draft:101:panel-default'))).toBeNull()
+  await page.waitForTimeout(1500)
+  expect(streamCalls).toBe(1)
 })
 
 test('375px 与 1440px 均可查看任务与恢复按钮', async ({ page }) => {

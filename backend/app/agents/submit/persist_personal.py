@@ -239,9 +239,25 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                     ).fetchall()
                     if not rows:
                         return None
+                    failed_answers = conn.execute(
+                        "SELECT CAST(substr(s.unit_key, 8) AS INTEGER) AS question_id, "
+                        "q.question FROM upload_stage_results s "
+                        "JOIN question_bank q "
+                        "ON q.id = CAST(substr(s.unit_key, 8) AS INTEGER) "
+                        "WHERE s.import_id = ? AND s.stage = 'answer' "
+                        "AND s.status = 'failed' AND s.unit_key GLOB 'answer:[0-9]*' "
+                        "ORDER BY CAST(substr(s.unit_key, 8) AS INTEGER)",
+                        (import_id,),
+                    ).fetchall()
                     return {
                         "interview_id": int(rows[0]["interview_id"]),
                         "detail_ids": [int(r["id"]) for r in rows],
+                        # The existing interview/detail rows are idempotently
+                        # reused; only failed answer units become new child jobs.
+                        "answer_tasks": [
+                            (int(r["question_id"]), str(r["question"]))
+                            for r in failed_answers
+                        ],
                     }
 
             existing_linked = await run_db(_find_existing_linked)
@@ -249,7 +265,7 @@ async def match_and_persist_personal_node(state: SubmitState) -> dict:
                 # F08：该 import 已落库（前次 attempt 成功），恢复执行幂等复用
                 interview_id = existing_linked["interview_id"]
                 detail_ids = existing_linked["detail_ids"]
-                answer_tasks = []
+                answer_tasks = existing_linked["answer_tasks"]
                 match_result = {"matched": [], "unmatched": []}
             else:
                 answer_tasks, interview_id, detail_ids = await _persist_new()

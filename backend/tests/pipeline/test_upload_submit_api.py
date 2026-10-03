@@ -251,14 +251,17 @@ def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
     monkeypatch.setattr(submit_module, "LEGACY_SSE_MAX_POLLS", 1)
 
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        headers = {"Idempotency-Key": "sse-1", "X-Requested-With": "XMLHttpRequest"}
+        payload = {"text": "面经：解释 TCP 三次握手", "target": "private"}
         resp = client.post(
             "/api/submit-stream-v2",
-            headers={"Idempotency-Key": "sse-1", "X-Requested-With": "XMLHttpRequest"},
-            data={"text": "面经：解释 TCP 三次握手", "target": "private"},
+            headers=headers,
+            data=payload,
         )
         assert resp.status_code == 200
         assert "event: snapshot" in resp.text
         event_data = json.loads(resp.text.split("data: ", 1)[1].splitlines()[0])
+        first_import_id = event_data["import_id"]
         assert event_data["progress"] == {
             "unit": "questions",
             "completed": 0,
@@ -266,9 +269,29 @@ def test_legacy_sse_entry_uses_accept_service_not_inline_graph(
         }
         assert event_data["counts"]["total"] is None
 
+        job_ids_before = [
+            row["id"]
+            for row in test_db.execute(
+                "SELECT id FROM jobs WHERE root_import_id = ? ORDER BY id",
+                (first_import_id,),
+            ).fetchall()
+        ]
+        again = client.post("/api/submit-stream-v2", headers=headers, data=payload)
+        assert again.status_code == 200
+        second_event = json.loads(again.text.split("data: ", 1)[1].splitlines()[0])
+        assert second_event["import_id"] == first_import_id
+        assert [
+            row["id"]
+            for row in test_db.execute(
+                "SELECT id FROM jobs WHERE root_import_id = ? ORDER BY id",
+                (first_import_id,),
+            ).fetchall()
+        ] == job_ids_before
+
     row = test_db.execute("SELECT * FROM upload_imports").fetchone()
     assert row is not None, "旧入口必须落根任务"
-    assert row["id"] == "sse-1" or row["idempotency_key"] == "sse-1"
+    assert row["id"] == first_import_id
+    assert test_db.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 1
 
 
 def test_submit_jobs_default_config_uses_unified_accept_service(

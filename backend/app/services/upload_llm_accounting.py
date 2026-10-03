@@ -11,6 +11,14 @@ from functools import wraps
 from typing import Callable
 
 from app.services.upload_stage_names import canonical_upload_stage
+from app.services.upload_retry_budget import RetryBudget
+
+
+class UploadRetryBudgetExceeded(RuntimeError):
+    """No provider request may be sent after this upload unit used its budget."""
+
+    code = "MODEL_OUTPUT_INVALID"
+    retryable = False
 
 
 @dataclass
@@ -22,6 +30,7 @@ class UploadLLMContext:
     user_id: int | None
     credential: object | None = None
     api_format: str | None = None
+    retry_budget: RetryBudget | None = None
 
 
 _current_upload_llm_context: contextvars.ContextVar[UploadLLMContext | None] = (
@@ -57,6 +66,24 @@ def upload_llm_context(
         yield context
     finally:
         _current_upload_llm_context.reset(token)
+
+
+@contextmanager
+def upload_retry_budget_scope(max_attempts: int = 3):
+    """Share one physical-call budget across a model call and its repairs."""
+
+    context = current_upload_llm_context()
+    if context is None:
+        yield None
+        return
+
+    previous_budget = context.retry_budget
+    budget = RetryBudget(max_attempts=max_attempts)
+    context.retry_budget = budget
+    try:
+        yield budget
+    finally:
+        context.retry_budget = previous_budget
 
 
 def upload_llm_stage(
@@ -172,6 +199,11 @@ async def call_provider_with_upload_ledger(
     if context is None:
         return await request()
 
+    if context.retry_budget is not None and context.retry_budget.exhausted:
+        raise UploadRetryBudgetExceeded(
+            f"上传阶段 {context.stage}/{context.unit_key} 的物理模型调用预算已耗尽"
+        )
+
     from app.db.connection import get_db_connection, run_db
     from app.services import llm_quota
     from app.services.upload_credentials import (
@@ -227,6 +259,10 @@ async def call_provider_with_upload_ledger(
                 raise
 
     await run_db(reserve)
+    # Count only after a durable ledger reservation exists and before sending
+    # the request. A lost provider response still consumes one physical try.
+    if context.retry_budget is not None:
+        context.retry_budget.physical_attempts += 1
 
     async def settle(status, *, input_tokens=None, output_tokens=None, error_code=None):
         def persist():
