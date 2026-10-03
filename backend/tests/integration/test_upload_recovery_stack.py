@@ -395,6 +395,250 @@ async def test_successful_preflight_worker_immediately_dispatches_business_job(
     ), "业务 job 必须在本次预检 worker 执行后进入隔离 Redis 队列"
 
 
+async def test_dispatch_recovers_after_committed_job_misses_first_redis_handoff(
+    isolated_stack, isolated_redis, monkeypatch
+):
+    """提交事务已落库但首次 Redis handoff 失败时，dispatcher 后续只补投一次。"""
+
+    from unittest.mock import AsyncMock
+
+    from app.services.upload_lifecycle import accept_upload
+    from app.worker import credential_preflight_task
+    from app.worker_scheduled import scheduled_submit_job_dispatch_task
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="ac007-handoff-retry",
+        target_intent="private",
+        source_type="interview",
+        text="面经：AC007 dispatcher handoff recovery",
+        position_name="后端开发",
+        files=[],
+        images=[],
+        entry="api",
+        credential_loaders=_loaders(),
+    )
+    conn.commit()
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? AND job_type = 'credential_preflight'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert preflight is not None
+
+    monkeypatch.setattr(
+        "app.services.credential_preflight._default_probe",
+        lambda credential: {
+            "status": "ok",
+            "provider": credential.provider,
+            "model": credential.model,
+            "latency_ms": 1,
+        },
+    )
+    failed_enqueue = AsyncMock(side_effect=RuntimeError("isolated Redis unavailable"))
+    with monkeypatch.context() as failure_window:
+        failure_window.setattr(
+            "app.worker_scheduled.enqueue_submit_import_job", failed_enqueue
+        )
+        outcome = await credential_preflight_task({}, int(preflight["id"]))
+    assert outcome["status"] == "ok"
+    failed_enqueue.assert_awaited_once()
+
+    submit_job = conn.execute(
+        "SELECT id, status, arq_job_id FROM jobs "
+        "WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert submit_job is not None
+    assert submit_job["status"] == "pending"
+    assert submit_job["arq_job_id"] is None
+
+    # Advance only this disposable database's retry time; the next pass must
+    # use the real enqueue helper and the fixture's isolated Redis prefix.
+    conn.execute(
+        "UPDATE jobs SET available_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (submit_job["id"],),
+    )
+    conn.commit()
+    recovered = await scheduled_submit_job_dispatch_task({})
+    assert recovered["failed"] == 0
+    assert recovered["dispatched"] == 1
+
+    dispatched = conn.execute(
+        "SELECT status, arq_job_id FROM jobs WHERE id = ?",
+        (submit_job["id"],),
+    ).fetchone()
+    assert dispatched["status"] == "queued"
+    assert dispatched["arq_job_id"]
+
+    pool = await isolated_redis["new_pool"]()
+    try:
+        queued = await pool.queued_jobs()
+        matching = [
+            job for job in queued
+            if job.function == "submit_import_task" and job.args[0] == submit_job["id"]
+        ]
+        assert len(matching) == 1
+
+        repeated = await scheduled_submit_job_dispatch_task({})
+        queued_after_repeat = await pool.queued_jobs()
+        matching_after_repeat = [
+            job for job in queued_after_repeat
+            if job.function == "submit_import_task" and job.args[0] == submit_job["id"]
+        ]
+        assert repeated["dispatched"] == 0
+        assert len(matching_after_repeat) == 1
+    finally:
+        await pool.aclose()
+
+
+async def test_reconciled_cluster_bucket_is_dispatched_and_consumed_by_arq_worker(
+    isolated_stack, isolated_redis, monkeypatch
+):
+    """AC-007：SQLite 对账补出的桶进入真实 Redis，并由 ARQ worker 消费。"""
+
+    from arq.connections import RedisSettings
+    from arq.worker import Worker
+    from unittest.mock import AsyncMock
+
+    import app.worker_enqueue as enqueue_module
+    from app.services.credential_preflight import run_credential_preflight
+    from app.services.upload_lifecycle import accept_upload
+    from app.worker_cluster_tasks import cluster_batch_task
+    from app.worker_scheduled import (
+        scheduled_submit_job_dispatch_task,
+        scheduled_upload_queue_reconcile_task,
+    )
+
+    conn = isolated_stack
+    accepted = accept_upload(
+        conn,
+        actor_id=101,
+        actor_is_admin=False,
+        idempotency_key="ac007-reconciled-cluster-worker",
+        target_intent="private",
+        source_type="interview",
+        text="面经：AC007 reconciled cluster worker",
+        position_name="后端开发",
+        files=[],
+        images=[],
+        entry="api",
+        credential_loaders=_loaders(),
+    )
+    conn.commit()
+    preflight = conn.execute(
+        "SELECT id FROM jobs WHERE root_import_id = ? "
+        "AND job_type = 'credential_preflight'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert preflight is not None
+
+    preflight_outcome = run_credential_preflight(
+        conn,
+        job_id=int(preflight["id"]),
+        probe=lambda credential: {
+            "status": "ok",
+            "provider": credential.provider,
+            "model": credential.model,
+            "latency_ms": 1,
+        },
+    )
+    assert preflight_outcome.status == "ok"
+
+    # The extraction stage has completed and produced one private detail whose
+    # clustering bucket is the durable work being reconciled below.
+    interview_cursor = conn.execute(
+        "INSERT INTO interview (url, company, round, questions_list, owner_id, status, job_position) "
+        "VALUES ('https://ac007.example/interview', 'AC007', '一面', '1.题目', 101, 'approved', '后端开发')"
+    )
+    interview_id = int(interview_cursor.lastrowid)
+    detail_cursor = conn.execute(
+        "INSERT INTO questions_detail "
+        "(interview_id, question, cat1, cat2, tags, owner_id, status, import_id, source_ordinal) "
+        "VALUES (?, 'AC007 队列对账后的题目', '后端', '队列', 'recovery', 101, 'approved', ?, 1)",
+        (interview_id, accepted["import_id"]),
+    )
+    detail_id = int(detail_cursor.lastrowid)
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, owner_id, status, root_import_id) "
+        "VALUES (?, ?, 101, 'pending', ?)",
+        (interview_id, detail_id, accepted["import_id"]),
+    )
+    # This test starts at the post-extraction boundary. Keep the submit job
+    # terminal so the dispatcher only sends the reconciled cluster job.
+    conn.execute(
+        "UPDATE jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP "
+        "WHERE root_import_id = ? AND job_type = 'submit_import'",
+        (accepted["import_id"],),
+    )
+    conn.commit()
+
+    reconciled = await scheduled_upload_queue_reconcile_task({})
+    assert reconciled["jobs_created"] == 1
+    repeated_reconcile = await scheduled_upload_queue_reconcile_task({})
+    assert repeated_reconcile["jobs_created"] == 0
+
+    cluster_job = conn.execute(
+        "SELECT id, status, arq_job_id FROM jobs "
+        "WHERE root_import_id = ? AND job_type = 'cluster_batch'",
+        (accepted["import_id"],),
+    ).fetchone()
+    assert cluster_job is not None
+    assert cluster_job["status"] == "pending"
+    assert cluster_job["arq_job_id"] is None
+    cluster_job_id = int(cluster_job["id"])
+
+    dispatched = await scheduled_submit_job_dispatch_task({})
+    assert dispatched["failed"] == 0
+    assert dispatched["dispatched"] == 1
+    cluster_job = conn.execute(
+        "SELECT status, arq_job_id FROM jobs WHERE id = ?", (cluster_job_id,)
+    ).fetchone()
+    assert cluster_job["status"] == "queued"
+    assert cluster_job["arq_job_id"]
+
+    cluster_batch = AsyncMock(return_value={"count": 0, "ids": []})
+    monkeypatch.setattr("app.services.pipeline.cluster_batch", cluster_batch)
+    settings = RedisSettings.from_dsn(enqueue_module.REDIS_URL)
+    worker = Worker(
+        functions=[cluster_batch_task],
+        queue_name=isolated_redis["queue_name"],
+        redis_settings=settings,
+        handle_signals=False,
+        burst=True,
+        max_tries=1,
+        job_timeout=30,
+        keep_result=60,
+        poll_delay=0.01,
+        queue_read_limit=10,
+    )
+    await worker.main()
+    await worker.close()
+
+    pool = await isolated_redis["new_pool"]()
+    try:
+        from arq.jobs import Job
+
+        arq_job = Job(cluster_job["arq_job_id"], pool)
+        result = await arq_job.result(timeout=2)
+        assert result["status"] == "done"
+        cluster_batch.assert_awaited_once()
+    finally:
+        await pool.aclose()
+
+    final_job = conn.execute(
+        "SELECT status FROM jobs WHERE id = ?", (cluster_job_id,)
+    ).fetchone()
+    queue_row = conn.execute(
+        "SELECT status FROM analysis_queue WHERE question_detail_id = ?", (detail_id,)
+    ).fetchone()
+    assert final_job["status"] == "completed"
+    assert queue_row["status"] == "done"
+
+
 def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
     conn = isolated_stack
     from app.services.upload_lifecycle import accept_upload, build_thread_id

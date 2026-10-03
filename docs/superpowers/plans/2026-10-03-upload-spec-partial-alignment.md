@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；本轮已开始 AC-008 测试可信度修正，未改产品代码或部署。
+**状态：** 实施中；AC-008 测试可信度已修正，AC-007 已补真实隔离 Redis/ARQ 消费证明；本轮未改产品代码或部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -101,12 +101,15 @@ ALLOW_RFC2544_BENCHMARK_RANGE=1 PYTHONPATH=. ../.venv/bin/pytest -q --tb=short \
 - Test: `backend/tests/infra/test_arq_real_redis_integration.py`
 - Possible implementation, only if a new test is red: `backend/app/services/upload_queue.py`、`backend/app/worker_enqueue.py`、对应 reconciler 调度代码
 
-- [ ] 保留当前 service 测试对 bucket 幂等、轮转公平和 orphan blocked 的断言。
-- [ ] 新增真实隔离 Redis namespace 测试：先持久化 job/outbox，再让第一次 ARQ enqueue 失败。
-- [ ] 推进可控时钟到下一次 reconciliation，断言同一合法桶最终恰好一个 ARQ job 被接受并由 worker 消费。
-- [ ] 持续加入公共流量，断言私人桶在契约规定的有限轮次内被选中；断言孤儿没有空循环或数据删除。
-- [ ] Redis 恢复并重复运行 reconciler，断言不重复业务执行、不创建第二个活跃 `work_key`。
+- [x] 保留当前 service 测试对 bucket 幂等、轮转公平和 orphan blocked 的断言。
+- [x] 新增真实隔离 Redis namespace 测试：对账持久化 bucket job，经真实 dispatcher 写入 Redis，再由真实 ARQ worker 消费；只有聚类服务计算 stubbed。
+- [x] 单独验证首次 Redis handoff 失败时 job 留在 SQLite outbox，后续 dispatcher 真实补投且 Redis 里只有一个匹配 ARQ job。
+- [ ] 推进可控时钟到下一次 reconciliation，断言同一合法桶最终恰好一个 ARQ job 被接受并由 worker 消费。当前恢复用例只证明真实入队；正常路径的 reconciled worker 用例证明真实消费。
+- [ ] 持续加入公共流量，断言私人桶在契约规定的有限轮次内被选中；现有轮转测试重复选择静态 bucket 集合，尚未覆盖动态持续流量。
+- [ ] 重复运行 reconciler/dispatcher 并检查 Redis 恢复后不重复业务执行、不创建第二个活跃 `work_key`。当前分别覆盖 reconciler 幂等、dispatch 去重；跨失败恢复到消费的一体化重复执行断言仍待补。
 - [ ] 只修复新增实测失败的 dispatch/reconciliation 分支。
+
+**本轮红绿证据：** 新增 `test_reconciled_cluster_bucket_is_dispatched_and_consumed_by_arq_worker`。首轮 **1 failed** 是测试覆盖掉本地 job id 后最终断言报 `IndexError`；修正测试变量后，在临时 Redis 容器、临时 SQLite 和唯一队列前缀下 **1 passed in 2.57s**。测试真实执行 SQLite reconciler、dispatcher、Redis 入队和 ARQ worker 消费；`cluster_batch` 计算 stubbed，因此不声称验证 embedding/聚类算法。未发现 AC-007 生产实现缺陷。
 
 **运行：**
 
