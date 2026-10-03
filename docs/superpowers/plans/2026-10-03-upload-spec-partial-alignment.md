@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；Task 1–4 已完成本地验证，Task 5–9 待实施；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮未部署。
+**状态：** 实施中；Task 1–4 已完成本地验证；Task 5 的 API/模拟浏览器断言已完成，部署镜像 real-stack 丢响应验收待执行；Task 6–9 待实施。AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；AC-010/011/013 已补客户端收敛、失败答案重试和模型预算证据；本轮尚未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -208,15 +208,14 @@ cd frontend
 **Files:**
 
 - Test: `backend/tests/pipeline/test_upload_submit_api.py`
-- Test: `frontend/tests/e2e/upload-task-center.spec.js` 或新增 `frontend/tests/e2e/upload-submit-recovery.spec.js`
-- Test: `scripts/real_stack_smoke.sh`（仅在需要把新真实网络丢响应场景加入 runner 时）
-- Possible implementation, only if a new test is red: `frontend/src/composables/useSubmitJobs.js`、上传表单组件、`backend/app/routers/submit.py`
+- Test: `frontend/tests/e2e/submit-flow.spec.js`、`frontend/tests/e2e/real-stack-smoke.spec.js`
+- Possible implementation, only if a new test is red: `frontend/src/services/http.js`、上传表单组件、`backend/app/middleware/request_log.py`
 
-- [ ] 浏览器真实 POST 到隔离 API；测试代理让服务端完成提交后丢弃响应，浏览器用相同 idempotency key 恢复并得到同一个 import_id。
-- [ ] 断言同用户同 key/同 hash 只有一个 root、一个有效初始 dispatch；同 key 不同 hash 返回 409。
-- [ ] U2 用 U1 的 key 查询仍为 404；响应、toast 和日志不泄露 U1 的任务信息。
-- [ ] 对 400、413 和不支持的文件类型断言草稿内容仍在，错误字段可读，SQLite 中没有幽灵 root/job；超大文件路径不整份读入内存。
-- [ ] 先检查既有 API 幂等测试是否已证明每个不变量；只为缺失的浏览器/传输反例补新测试。
+- [ ] 浏览器真实 POST 到隔离 API；测试代理让服务端完成提交后丢弃响应，浏览器用相同 idempotency key 恢复并得到同一个 import_id。测试已加到 `real-stack-smoke.spec.js`，需在 Task 10 的 disposable stack 实跑。
+- [x] 断言同用户同 key/同 hash 只有一个 root、一个 attempt 和同一组有效初始 dispatch；同 key 不同 hash 返回 409。`test_upload_submit_api.py` 记录重复前后的 DB 行与 dispatcher 调用数；不同 hash 冲突已有独立断言。share policy 可含多个 credential scope，因此计数比较初始 dispatch 集合而非硬编码为一个 job。
+- [x] U2 用 U1 的 key 查询仍为 404；响应正文不含 U1 的 import_id 或幂等键，应用请求日志将 by-key 路径中的 key 替换为 `[redacted]`。已有 U1→U2 Playwright 还断言旧任务、SSE 与草稿缓存退出用户作用域后立即清除。
+- [x] 对 400、413 和不支持的文件类型断言草稿仍在、错误字段可读，SQLite 中没有幽灵 root/job；超限与不支持 MIME 均在 `UploadFile.read()` 前拒绝。
+- [x] 检查并扩展既有 API 幂等测试，补齐重复 dispatch、U2 响应体泄露和输入拒绝前读文件的断言。
 
 **运行：**
 
@@ -229,7 +228,7 @@ ALLOW_RFC2544_BENCHMARK_RANGE=1 PYTHONPATH=. ../.venv/bin/pytest -q --tb=short \
 ```bash
 cd frontend
 ./node_modules/.bin/playwright test --config tests/playwright.config.js \
-  tests/e2e/upload-submit-recovery.spec.js
+  tests/e2e/submit-flow.spec.js
 ```
 
 新加真实丢响应测试后，用 `REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh` 验证同一部署构建镜像上的接受与恢复；若场景不在 smoke runner，给 runner 增加显式测试入口，不能把 mock 结果记成 AC-021 活体验收。
@@ -342,6 +341,8 @@ cd frontend
 ```bash
 REAL_STACK_REUSE_BUILT_IMAGES=1 ./scripts/real_stack_smoke.sh
 ```
+
+**本地红绿证据：** 新增 API 断言先因非管理员 share policy 合法地产生两个 scope preflight job 而失败；将断言改为比较重复提交前后完整 job 集合与实际 dispatcher 调用数后，证明相同 key 重放不新增 root/attempt/job/dispatch。U2 隔离测试再发现 middleware 将 by-key 路径原样写入应用日志；现在将该路径中的幂等键脱敏。超限与 text/plain 上传均断言 FastAPI `UploadFile.read()` 从未被调用且 SQLite 无 root/job。浏览器 400/413 草稿用例先因错误容器缺少 `role="alert"`、XHR 上传封装丢掉 `Idempotency-Key` 而红；组件现在将错误作为 alert 播报，`http.upload()` 转发调用方 headers。两种错误均保留文本和图片，连续重试复用同一 key。后端目标文件最后定向用例 **1 passed**（整份 **15 passed**，在加入 log redaction 断言之前）；`submit-flow.spec.js` 完整 **16 passed**。real-stack 丢响应测试已加入 `real-stack-smoke.spec.js`，尚未在 Compose 镜像上运行，所以 AC-021 仍未活验。
 
 验收依据直接使用 [AC-028/029](../specs/2026-09-29-upload-recovery/acceptance.md) 第 155～175 行。真实模型供应商不参与；stub 只用于确定性结果与可控故障。
 

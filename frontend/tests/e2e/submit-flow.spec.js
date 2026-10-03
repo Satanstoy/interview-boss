@@ -205,7 +205,7 @@ test.describe('导入 Tab — StagingPanel 提交流程', () => {
   })
 
   test('导入 Tab 可点击并切换到提交面板', async ({ page }) => {
-    await expect(page.getByText('提交后由后台任务完成提取和归档')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('textarea[placeholder*="粘贴面经"]')).toBeVisible({ timeout: 5000 })
   })
 
   test('来源链接输入框存在', async ({ page }) => {
@@ -302,7 +302,52 @@ test.describe('导入 Tab — StagingPanel 提交流程', () => {
     await expect(page.getByText('1 个任务处理中')).toBeVisible()
   })
 
+  for (const { status, expectedMessage } of [
+    { status: 400, expectedMessage: '请求内容无法接受' },
+    { status: 413, expectedMessage: '上传内容过大' },
+  ]) {
+    test(`${status} 提交错误可读且保留文本、图片和同一幂等键`, async ({ page }) => {
+      const idempotencyKeys = []
+      await page.route('**/api/upload-imports/by-key/**', (route) =>
+        route.fulfill({ status: 404, json: { detail: '任务不存在' } }),
+      )
+      await page.route('**/api/submit-jobs', async (route) => {
+        idempotencyKeys.push(route.request().headers()['idempotency-key'])
+        await route.fulfill({
+          status,
+          json: status === 400 ? { detail: '请求内容无法接受' } : {},
+        })
+      })
+
+      const text = '需要保留的草稿内容'
+      const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
+      await textarea.fill(text)
+      await page.locator('input[type="file"]').setInputFiles({
+        name: 'draft.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1sAAAAASUVORK5CYII=', 'base64'),
+      })
+
+      await page.getByRole('button', { name: '提交解析' }).click()
+      const error = page.getByTestId('submit-error')
+      await expect(error).toBeVisible()
+      await expect(error).toHaveAttribute('role', 'alert')
+      await expect(error).toContainText(expectedMessage)
+      await expect(textarea).toHaveValue(text)
+      await expect(page.getByText('1 / 20')).toBeVisible()
+
+      await page.getByRole('button', { name: '提交解析' }).click()
+      await expect.poll(() => idempotencyKeys).toHaveLength(2)
+      expect(idempotencyKeys[0]).toBeTruthy()
+      expect(idempotencyKeys[1]).toBe(idempotencyKeys[0])
+      await expect(textarea).toHaveValue(text)
+      await expect(page.getByText('1 / 20')).toBeVisible()
+    })
+  }
+
   test('拖入非图片文件提示忽略', async ({ page }) => {
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
+    await textarea.fill('保留在输入框里的有效草稿')
     await page.locator('input[type="file"]').setInputFiles({
       name: 'notes.txt',
       mimeType: 'text/plain',
@@ -310,6 +355,8 @@ test.describe('导入 Tab — StagingPanel 提交流程', () => {
     })
     await page.waitForTimeout(500)
     await expect(page.getByText('已忽略非图片文件：notes.txt')).toBeVisible({ timeout: 5000 })
+    await expect(textarea).toHaveValue('保留在输入框里的有效草稿')
+    await expect(page.getByText('0 / 20')).toBeVisible()
   })
 
   test('清空非空内容需确认', async ({ page }) => {

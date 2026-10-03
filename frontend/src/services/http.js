@@ -358,8 +358,14 @@ export function upload(url, formData, options = {}) {
     xhr.open('POST', url)
 
     const token = getAuthToken()
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest')
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(restOptions.headers || {}),
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      if (value != null) xhr.setRequestHeader(name, String(value))
+    }
 
     xhr.timeout = restOptions.timeout || UPLOAD_TIMEOUT
 

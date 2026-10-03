@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -107,11 +108,45 @@ def test_submit_jobs_v2_returns_stable_import_id(
         assert body["status_url"].endswith(body["import_id"])
         assert body["job_id"]
         assert body["idempotency_key"] == f"k-{is_admin}-{target}"
+
+        import_id = body["import_id"]
+        initial_attempts = test_db.execute(
+            "SELECT COUNT(*) FROM upload_attempts WHERE import_id = ?", (import_id,)
+        ).fetchone()[0]
+        initial_jobs = test_db.execute(
+            "SELECT id, job_type, status FROM jobs WHERE root_import_id = ? "
+            "AND job_type IN ('credential_preflight', 'submit_import') ORDER BY id",
+            (import_id,),
+        ).fetchall()
+        initial_dispatch_calls = (
+            _no_dispatch["submit"].await_count
+            + _no_dispatch["preflight"].await_count
+        )
+
         # 同键重发：复用同一根任务
         again = _post(client, target=target, key=f"k-{is_admin}-{target}")
         assert again.status_code == 202
-        assert again.json()["import_id"] == body["import_id"]
+        assert again.json()["import_id"] == import_id
         assert again.json()["created"] is False
+
+        assert test_db.execute(
+            "SELECT COUNT(*) FROM upload_imports WHERE id = ?", (import_id,)
+        ).fetchone()[0] == 1
+        assert test_db.execute(
+            "SELECT COUNT(*) FROM upload_attempts WHERE import_id = ?", (import_id,)
+        ).fetchone()[0] == initial_attempts == 1
+        replay_jobs = test_db.execute(
+            "SELECT id, job_type, status FROM jobs WHERE root_import_id = ? "
+            "AND job_type IN ('credential_preflight', 'submit_import') ORDER BY id",
+            (import_id,),
+        ).fetchall()
+        assert [tuple(row) for row in replay_jobs] == [tuple(row) for row in initial_jobs]
+        # Some policies dispatch one credential probe, others one per scope;
+        # replaying the accepted key must not issue another initial dispatch.
+        assert (
+            _no_dispatch["submit"].await_count
+            + _no_dispatch["preflight"].await_count
+        ) == initial_dispatch_calls
 
 
 def test_submit_jobs_v2_conflict_on_same_key_different_content(
@@ -158,7 +193,7 @@ def test_upload_import_stream_emits_only_the_snapshot_contract(
     assert snapshot["status"] == "completed"
 
 
-def test_by_key_returns_only_own_import(client, monkeypatch, _no_dispatch, test_db):
+def test_by_key_returns_only_own_import(client, monkeypatch, _no_dispatch, test_db, caplog):
     for uid in (101, 102):
         test_db.execute(
             "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",
@@ -169,7 +204,17 @@ def test_by_key_returns_only_own_import(client, monkeypatch, _no_dispatch, test_
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         created = _post(client, key="mine-only").json()
     for _ in _login(client, {"id": 102, "is_admin": 0, "username": "u102"}):
-        assert client.get("/api/upload-imports/by-key/mine-only").status_code == 404
+        with caplog.at_level(logging.INFO, logger="middleware"):
+            hidden = client.get("/api/upload-imports/by-key/mine-only")
+        assert hidden.status_code == 404
+        assert created["import_id"] not in hidden.text
+        assert "mine-only" not in hidden.text
+        middleware_logs = "\n".join(
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "middleware"
+        )
+        assert "mine-only" not in middleware_logs
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         found = client.get("/api/upload-imports/by-key/mine-only")
         assert found.status_code == 200
@@ -197,6 +242,10 @@ def test_oversize_file_returns_413_without_ghost_job(client, monkeypatch, _no_di
     test_db.commit()
     _v2_on(monkeypatch)
     monkeypatch.setattr("app.services.upload_lifecycle.MAX_FILE_SIZE", 64)
+    from app.routers.submit import UploadFile
+
+    read_file = AsyncMock(side_effect=AssertionError("oversized upload was read"))
+    monkeypatch.setattr(UploadFile, "read", read_file)
     for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
         resp = client.post(
             "/api/submit-jobs",
@@ -205,7 +254,37 @@ def test_oversize_file_returns_413_without_ghost_job(client, monkeypatch, _no_di
             files=[("files", ("big.png", b"\x89PNG" + b"0" * 200, "image/png"))],
         )
         assert resp.status_code == 413
+    read_file.assert_not_awaited()
     assert test_db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    assert test_db.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 0
+
+
+def test_unsupported_file_type_returns_400_before_read_without_ghost_rows(
+    client, monkeypatch, _no_dispatch, test_db
+):
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101,'u101','x')"
+    )
+    test_db.commit()
+    _v2_on(monkeypatch)
+    from app.routers.submit import UploadFile
+
+    read_file = AsyncMock(side_effect=AssertionError("unsupported upload was read"))
+    monkeypatch.setattr(UploadFile, "read", read_file)
+    for _ in _login(client, {"id": 101, "is_admin": 0, "username": "u101"}):
+        response = client.post(
+            "/api/submit-jobs",
+            headers={"Idempotency-Key": "unsupported-file", "X-Requested-With": "XMLHttpRequest"},
+            data={"text": "仍保留的草稿", "target": "private"},
+            files=[("files", ("notes.txt", b"not an image", "text/plain"))],
+        )
+        assert response.status_code == 400
+        assert "不是有效的图片文件" in response.json()["detail"]
+    read_file.assert_not_awaited()
+    assert test_db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+    assert test_db.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 0
+    assert _no_dispatch["submit"].await_count == 0
+    assert _no_dispatch["preflight"].await_count == 0
 
 
 def test_legacy_sse_entry_rejects_invalid_target(client, monkeypatch, test_db):

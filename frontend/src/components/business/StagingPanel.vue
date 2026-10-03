@@ -572,6 +572,7 @@ defineExpose({ onSubmit, isSubmitting })
       <div
         v-if="submitError"
         data-testid="submit-error"
+        role="alert"
         class="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive"
       >
         <AlertCircle class="h-4 w-4 shrink-0" />

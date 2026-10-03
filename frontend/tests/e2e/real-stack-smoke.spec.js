@@ -71,4 +71,57 @@ test.describe('disposable real stack', () => {
     await page.getByRole('button', { name: '提交解析' }).click()
     await expect(page.getByTestId('submit-error')).toContainText('请输入有效的 URL')
   })
+
+  test('recovers the same accepted upload after the browser loses the POST response', async ({ page }) => {
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`
+    const username = `lost_response_${suffix}`
+    const password = 'real-stack-lost-response-123'
+    const text = `AC021_LOST_RESPONSE_${suffix}\n公司：隔离网络恢复演练\n面试轮次：一面\n题目：解释数据库事务隔离级别。`
+    const postKeys = []
+    const recoveredSnapshots = []
+    let acceptedSnapshot = null
+    let postCount = 0
+
+    await page.goto('/login')
+    await page.getByRole('button', { name: '立即注册' }).click()
+    await page.getByLabel('用户名').fill(username)
+    await page.getByLabel('密码').fill(password)
+    await page.getByLabel('邮箱').fill(`${username}@example.test`)
+    await page.getByRole('button', { name: '注册', exact: true }).click()
+    await expect(page).toHaveURL(/\/master-bank/, { timeout: 30000 })
+    await configureDisposableUserModel(page)
+
+    await page.route('**/api/upload-imports/by-key/**', async (route) => {
+      const response = await route.fetch()
+      if (response.status() === 200) recoveredSnapshots.push(await response.json())
+      await route.fulfill({ response })
+    })
+    await page.route('**/api/submit-jobs', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue()
+      postCount += 1
+      postKeys.push(route.request().headers()['idempotency-key'])
+
+      // Send the real multipart POST to the disposable API. Let it commit and
+      // capture its 202, then make the browser observe a dropped connection.
+      const response = await route.fetch()
+      expect(response.status(), await response.text()).toBe(202)
+      acceptedSnapshot = await response.json()
+      if (postCount === 1) return route.abort('failed')
+      await route.fulfill({ response })
+    })
+
+    await page.goto('/import')
+    const textarea = page.getByPlaceholder('粘贴面经或 JD 内容...')
+    await textarea.fill(text)
+    await page.getByRole('button', { name: '提交解析' }).click()
+
+    await expect(page.getByText('已提交成功，任务正在后台处理。可继续提交或离开页面，右上角显示进度。')).toBeVisible({ timeout: 30000 })
+    await expect(textarea).toHaveValue('')
+    await expect.poll(() => recoveredSnapshots.length).toBe(1)
+    expect(acceptedSnapshot?.import_id).toBeTruthy()
+    expect(recoveredSnapshots[0].import_id).toBe(acceptedSnapshot.import_id)
+    expect(postCount).toBe(1)
+    expect(postKeys).toHaveLength(1)
+    expect(postKeys[0]).toBeTruthy()
+  })
 })
