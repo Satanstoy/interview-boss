@@ -193,7 +193,9 @@ async function onAction(task, action) {
       const snapshot = await retryUploadTask(task.import_id)
       const index = tasks.value.findIndex((item) => item.import_id === task.import_id)
       if (index >= 0 && snapshot) tasks.value.splice(index, 1, { ...tasks.value[index], ...snapshot })
-      announcement.value = '恢复请求已提交，将继续未完成步骤'
+      announcement.value = snapshot?.created_attempt === false
+        ? '已有恢复任务正在继续处理未完成步骤'
+        : '恢复请求已提交，将继续未完成步骤'
       await refresh({ silent: true })
     } catch (err) {
       error.value = err?.message || '恢复失败，请稍后重试'

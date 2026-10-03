@@ -1,6 +1,6 @@
 # 上传恢复 spec 部分项：根因分析与 TDD 收敛计划
 
-**状态：** 实施中；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；本轮未部署。
+**状态：** 实施中；AC-007 已补真实隔离 Redis/ARQ 消费证明；AC-008 已修复提取检查点提交边界和失败流清理；AC-009/017 已补并发接受、跨代恢复与 UI attempt 复用证据；本轮未部署。
 **基线：** 审计记录提交 `77d29fb1`；已部署产品修复提交 `3a2020b6`。
 **规范：** 已接受 ADR-0048；`docs/superpowers/specs/2026-09-29-upload-recovery/` 当前仍为 Draft。
 **目标：** 对审计中 17 个“部分”AC逐项确认根因、补上对应红绿测试，只在测试证明产品行为错误时修改实现；所有 AC 都有可复查证据后再更新状态。
@@ -140,11 +140,11 @@ ALLOW_RFC2544_BENCHMARK_RANGE=1 PYTHONPATH=. ../.venv/bin/pytest -q --tb=short \
 - Test: `frontend/tests/e2e/upload-task-center.spec.js`
 - Possible implementation, only if a new test is red: `backend/app/services/upload_lifecycle.py`、`backend/app/routers/upload_imports.py`、`frontend/src/components/business/UploadTaskCenter.vue`
 
-- [ ] 用固定时钟同时提交内容完全不同的 A/B，断言得到不同 import/attempt/thread IDs，interview/detail/ordinal 均不串 root。
-- [ ] 建 A→B→C 的 legacy job 链，从 A、B 同时调用 retry，断言都解析到同一 root 和同一 active attempt。
-- [ ] 断言成功阶段 checkpoint 保持原 ID；同一 `work_key` 最多一个 pending/queued/running job。
-- [ ] 让 API 返回 `created_attempt=false`，通过浏览器确认显示“已有任务正在恢复”一类真实状态，不伪装成新重试或新增计数。
-- [ ] 由两个独立 SQLite 连接并发跑 API/事务反例，避免只测单连接顺序行为。
+- [x] 用固定时钟和两个 SQLite 连接并发提交内容完全不同的 A/B；断言 import/job/attempt/thread IDs 不同、时间戳相同且请求 payload 不串 root。真实 worker 的 interview/detail/source ordinal 仍由单 root 全链路覆盖，尚未将 A/B 一起跑过两个 worker。
+- [x] 建 A→B→C 的 legacy job 链，从 A、B 两个独立连接并发调用 retry，断言都解析到同一 root 和同一 active attempt。
+- [x] 断言成功阶段 checkpoint 保持原 ID（AC-008 fullstack restart 测试）；同一 `work_key` 最多一个 pending/queued/running job（retry family 测试）。
+- [x] 让 retry API 返回 `created_attempt=false`，通过 Playwright 确认显示“已有恢复任务正在继续处理未完成步骤”，不显示创建新任务的文案。
+- [x] 并发接受和并发恢复均使用两个独立 SQLite 连接；恢复测试从 A、B 两个历史 job 入口发起。
 
 **运行：**
 
@@ -162,6 +162,8 @@ cd frontend
 ./node_modules/.bin/playwright test --config tests/playwright.config.js \
   tests/e2e/upload-task-center.spec.js
 ```
+
+**本轮红绿证据：** 新增 A/B 并发接受后，固定时间戳和不同 payload 断言在隔离 SQLite 下 **1 passed in 1.58s**；两个连接从 A、B 历史 job 并发恢复的 retry family 与 submit API 回归 **23 passed in 18.83s**。AC-007/008 相关 stage/reconcile/worker/fullstack 集成回归在 disposable Redis 与 SQLite 下 **31 passed in 32.13s**。并发恢复的第一轮失败是 fixture 没有先提交 A→B→C 种子链，修正 fixture 提交后通过，不是产品缺陷。`created_attempt=false` 的浏览器测试先复现了 UI 一律播报“恢复请求已提交”的状态误导；现在按响应标志使用“已有恢复任务正在继续处理未完成步骤”。任务中心整份 mock API Playwright **13 passed in 28.1s**。浏览器回归不代表真实部署/真实 API 验收。fullstack fixture 也改为每个 worker 线程单独打开同一临时 SQLite 文件，避免测试把跨线程并发压在一条连接上；AC-008 三个 fullstack 场景 **4 passed in 7.86s**。仍未覆盖两个并发 root 各自完整 worker 产物的交叉隔离，后续须补或保留为未验证。
 
 ### Task 4：补 AC-010 / AC-011 / AC-013 的客户端状态收敛测试
 

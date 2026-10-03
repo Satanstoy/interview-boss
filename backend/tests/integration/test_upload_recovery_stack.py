@@ -643,48 +643,94 @@ def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
     conn = isolated_stack
     from app.services.upload_lifecycle import accept_upload, build_thread_id
 
-    first = accept_upload(
-        conn,
-        actor_id=101,
-        actor_is_admin=False,
-        idempotency_key="stack-a",
-        target_intent="private",
-        source_type="interview",
-        text="面经 A：Redis 持久化",
-        position_name="后端",
-        files=[],
-        images=[],
-        entry="api",
-        credential_loaders=_loaders(),
+    import threading
+
+    fixed_timestamp = "2026-10-03 12:34:56"
+    conn.execute(
+        "CREATE TRIGGER fixed_upload_created_at AFTER INSERT ON upload_imports "
+        "BEGIN UPDATE upload_imports SET created_at = '2026-10-03 12:34:56', "
+        "updated_at = '2026-10-03 12:34:56' WHERE id = NEW.id; END"
     )
-    second = accept_upload(
-        conn,
-        actor_id=101,
-        actor_is_admin=False,
-        idempotency_key="stack-b",
-        target_intent="private",
-        source_type="interview",
-        text="面经 B：线程池参数",
-        position_name="后端",
-        files=[],
-        images=[],
-        entry="api",
-        credential_loaders=_loaders(),
+    conn.execute(
+        "CREATE TRIGGER fixed_job_created_at AFTER INSERT ON jobs "
+        "BEGIN UPDATE jobs SET created_at = '2026-10-03 12:34:56', "
+        "updated_at = '2026-10-03 12:34:56' WHERE id = NEW.id; END"
     )
+    conn.commit()
+
+    barrier = threading.Barrier(2)
+    submitted = {}
+    errors = {}
+    requests = {
+        1: ("stack-a", "面经 A：Redis 持久化"),
+        2: ("stack-b", "面经 B：线程池参数"),
+    }
+
+    def _submit(index):
+        db = sqlite3.connect(
+            os.environ["UPLOAD_TEST_DB_PATH"], check_same_thread=False, timeout=30
+        )
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
+        try:
+            barrier.wait(timeout=10)
+            key, text = requests[index]
+            submitted[index] = accept_upload(
+                db,
+                actor_id=101,
+                actor_is_admin=False,
+                idempotency_key=key,
+                target_intent="private",
+                source_type="interview",
+                text=text,
+                position_name="后端",
+                files=[],
+                images=[],
+                entry="api",
+                credential_loaders=_loaders(),
+            )
+            db.commit()
+        except Exception as exc:  # pragma: no cover - assertion reports worker errors
+            errors[index] = exc
+        finally:
+            db.close()
+
+    threads = [threading.Thread(target=_submit, args=(i,)) for i in (1, 2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert all(not thread.is_alive() for thread in threads), "并发提交线程必须结束"
+    assert not errors, errors
+    first, second = submitted[1], submitted[2]
     assert first["import_id"] != second["import_id"]
     assert first["job_id"] != second["job_id"]
 
+    roots = conn.execute(
+        "SELECT id, created_at, payload_json FROM upload_imports "
+        "WHERE id IN (?, ?) ORDER BY idempotency_key",
+        (first["import_id"], second["import_id"]),
+    ).fetchall()
+    assert len(roots) == 2
+    assert {row["created_at"] for row in roots} == {fixed_timestamp}
+    job_times = conn.execute(
+        "SELECT id, created_at, upload_attempt_id FROM jobs WHERE id IN (?, ?)",
+        (first["job_id"], second["job_id"]),
+    ).fetchall()
+    assert len(job_times) == 2
+    assert {row["created_at"] for row in job_times} == {fixed_timestamp}
+    assert all(row["upload_attempt_id"] is not None for row in job_times)
+    assert len({row["upload_attempt_id"] for row in job_times}) == 2
+    payloads = {row["id"]: row["payload_json"] for row in roots}
+    assert "Redis" in payloads[first["import_id"]]
+    assert "线程池" not in payloads[first["import_id"]]
+    assert "线程池" in payloads[second["import_id"]]
+    assert "Redis" not in payloads[second["import_id"]]
+
     thread_a = build_thread_id(first["import_id"], 1, first["job_id"])
     thread_b = build_thread_id(second["import_id"], 1, second["job_id"])
-    assert thread_a != thread_b, "同秒提交的任务不得共享执行状态"
-
-    rows = conn.execute(
-        "SELECT id, payload_json FROM upload_imports ORDER BY id"
-    ).fetchall()
-    payloads = [row["payload_json"] for row in rows]
-    assert any("Redis" in p for p in payloads)
-    assert any("线程池" in p for p in payloads)
-    assert not (payloads[0].count("线程池") and payloads[0].count("Redis")), "结果不得串单"
+    assert thread_a != thread_b, "固定时钟下的并发提交不得共享执行状态"
 
 
 def test_user_scope_never_borrows_system_stub(isolated_stack):

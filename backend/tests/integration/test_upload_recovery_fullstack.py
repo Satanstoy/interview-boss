@@ -64,6 +64,7 @@ def isolated_stack(monkeypatch, tmp_path):
     """注入临时库与本地 stub（与 AC-028 同协议）；测试结束还原。"""
 
     import sys
+    import threading
 
     db_path = os.environ["UPLOAD_TEST_DB_PATH"]
     if os.path.exists(db_path):
@@ -90,8 +91,25 @@ def isolated_stack(monkeypatch, tmp_path):
     token = db_module._db_conn_var.set(conn)
     monkeypatch.setattr(db_module, "DB_PATH", db_path)
 
+    owner_thread_id = threading.get_ident()
+    thread_connections = threading.local()
+    all_connections = [conn]
+    connections_lock = threading.Lock()
+
     def _test_get_db_connection():
-        return conn
+        if threading.get_ident() == owner_thread_id:
+            return conn
+        current = getattr(thread_connections, "conn", None)
+        if current is None:
+            current = sqlite3.connect(
+                db_path, check_same_thread=False, timeout=30
+            )
+            current.row_factory = sqlite3.Row
+            current.execute("PRAGMA foreign_keys=ON")
+            thread_connections.conn = current
+            with connections_lock:
+                all_connections.append(current)
+        return current
 
     async def _sync_run_db(func):
         return func()
@@ -109,6 +127,8 @@ def isolated_stack(monkeypatch, tmp_path):
     yield conn
 
     db_module._db_conn_var.reset(token)
+    for extra_conn in all_connections[1:]:
+        extra_conn.close()
     conn.close()
     if os.path.exists(db_path):
         os.remove(db_path)
@@ -592,7 +612,7 @@ async def test_extract_checkpoint_is_committed_before_classify_failure_and_reuse
     ), "graph error handling must close its async event stream cleanly"
 
     extract_checkpoint = conn.execute(
-        "SELECT status, result_json FROM upload_stage_results "
+        "SELECT id, status, result_json FROM upload_stage_results "
         "WHERE import_id = ? AND stage = 'extract' AND unit_key = 'document'",
         (import_id,),
     ).fetchone()
@@ -652,6 +672,12 @@ async def test_extract_checkpoint_is_committed_before_classify_failure_and_reuse
     assert conn.execute(
         "SELECT COUNT(*) FROM questions_detail WHERE import_id = ?", (import_id,)
     ).fetchone()[0] == 2
+    resumed_checkpoint_id = conn.execute(
+        "SELECT id FROM upload_stage_results WHERE import_id = ? "
+        "AND stage = 'extract' AND unit_key = 'document'",
+        (import_id,),
+    ).fetchone()["id"]
+    assert resumed_checkpoint_id == extract_checkpoint["id"]
 
 
 async def test_answer_retries_after_external_result_cannot_be_saved(isolated_stack, monkeypatch):

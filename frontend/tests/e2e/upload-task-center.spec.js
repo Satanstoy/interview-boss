@@ -121,6 +121,41 @@ test('恢复接口 500 时保留已有任务', async ({ page }) => {
   await expect(center.getByText(/恢复失败|内部错误/)).toBeVisible()
 })
 
+test('恢复请求复用已有 attempt 时说明任务正在继续', async ({ page }) => {
+  const runningTask = {
+    ...TASK,
+    status: 'running',
+    allowed_actions: ['view_progress'],
+    error: null,
+  }
+  await mockApi(page)
+  let listCalls = 0
+  await page.route('**/api/upload-imports?**', (route) => {
+    listCalls += 1
+    const task = listCalls === 1 ? TASK : runningTask
+    return route.fulfill({ json: { items: [task], total: 1, page: 1, page_size: 20 } })
+  })
+  await page.route('**/api/upload-imports/imp-e2e-0001/retry', (route) =>
+    route.fulfill({ json: { ...runningTask, created_attempt: false } }),
+  )
+  await page.route('**/api/upload-imports/imp-e2e-0001/stream', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+      body: `event: snapshot\nid: 4\ndata: ${JSON.stringify({ ...runningTask, revision: 4 })}\n\n`,
+    }),
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await page.getByRole('button', { name: '重试失败步骤' }).click()
+
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.locator('[aria-live="polite"]')).toHaveText(
+    '已有恢复任务正在继续处理未完成步骤',
+  )
+})
+
 test('任务卡片可用键盘操作且状态对读屏可见', async ({ page }) => {
   await mockApi(page)
   await page.goto('/')

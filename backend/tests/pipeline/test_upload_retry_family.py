@@ -90,22 +90,43 @@ def test_restore_from_legacy_job_resolves_same_root(tmp_path):
 
 
 def test_concurrent_restore_creates_single_attempt(tmp_path):
-    """两个连接同时恢复：只有一个能创建 active attempt。"""
+    """A→B→C 历史链上的两个 job 并发恢复，只创建一个 active attempt。"""
 
     import threading
 
     db_path = str(tmp_path / "race.db")
     setup = _connect(db_path)
     _seed(setup)
+    job_a = _job(setup, work_key="extract:document:v1", status="failed")
+    job_b = _job(
+        setup,
+        work_key="classify:document:v1",
+        parent=job_a,
+        status="failed",
+    )
+    job_c = _job(
+        setup,
+        work_key="persist:document:v1",
+        parent=job_b,
+        status="failed",
+    )
+    assert resolve_root_job(setup, job_c)["id"] == job_a
+    setup.commit()
     setup.close()
 
     results: dict[int, dict] = {}
     errors: dict[int, Exception] = {}
 
+    legacy_job_ids = {1: job_a, 2: job_b}
+
     def _run(index):
         conn = _connect(db_path, migrate=False)
         try:
-            results[index] = restore_upload(conn, actor_id=101, import_id="imp-1")
+            results[index] = restore_upload(
+                conn,
+                actor_id=101,
+                job_id=legacy_job_ids[index],
+            )
             conn.commit()
         except Exception as exc:  # pragma: no cover - 失败时由断言暴露
             errors[index] = exc
@@ -122,9 +143,16 @@ def test_concurrent_restore_creates_single_attempt(tmp_path):
     assert len(results) == 2
     created_flags = sorted(item["created_attempt"] for item in results.values())
     assert created_flags == [False, True]
+    assert {item["import_id"] for item in results.values()} == {"imp-1"}
     assert results[1]["attempt_id"] == results[2]["attempt_id"]
     conn = _connect(db_path, migrate=False)
     assert conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0] == 1
+    duplicate_active_work = conn.execute(
+        "SELECT work_key, COUNT(*) AS count FROM jobs "
+        "WHERE root_import_id = 'imp-1' AND status IN ('pending','queued','running') "
+        "GROUP BY work_key HAVING COUNT(*) > 1"
+    ).fetchall()
+    assert duplicate_active_work == []
     conn.close()
 
 
