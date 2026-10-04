@@ -1070,9 +1070,11 @@ async def get_interview_location(
     season: str | None = Query(None),
     position_id: str | None = Query(None),
     scope: str = Query("all"),
+    page_size: int = Query(20, ge=1),
     user: dict = Depends(get_current_user),
 ):
     """AC-001：按与列表一致的排序/筛选定位面经所在页；无权目标一律 404。"""
+    effective_page_size = min(100, page_size)
 
     def _query():
         with get_db_connection() as conn:
@@ -1103,7 +1105,6 @@ async def get_interview_location(
                 rank_sql,
                 (*params, target["created_at"], target["created_at"], int(record_id)),
             ).fetchone()[0]
-            page_size = 20
             # R09：position_id 必须是岗位 ID（前端 switchPositionById(Number(position))
             # 需要数字），岗位名称另放 position_name 供展示。
             position_name = target["job_position"] or ""
@@ -1130,8 +1131,8 @@ async def get_interview_location(
             return {
                 "interview_id": int(record_id),
                 "rank": int(rank),
-                "page_size": page_size,
-                "page": int(rank) // page_size + 1,
+                "page_size": effective_page_size,
+                "page": int(rank) // effective_page_size + 1,
                 "position_id": position_id_value,
                 "position_name": position_name,
             }

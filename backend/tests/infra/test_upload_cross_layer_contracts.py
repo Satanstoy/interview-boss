@@ -93,6 +93,11 @@ def _insert_completed_root(test_db, *, interview_id):
         "INSERT INTO users (id, username, password_hash, is_admin) VALUES (101, 'u101', 'x', 0)"
     )
     test_db.execute(
+        "INSERT INTO interview (id, url, questions_list, owner_id, status, publish_status) "
+        "VALUES (?, 'private://completed-root', 'PRIVATE_RESULT', 101, 'approved', 'published')",
+        (interview_id,),
+    )
+    test_db.execute(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
         "target_intent, source_type, pipeline_version, policy_json, status, interview_id) "
         "VALUES ('imp-ct2', 101, 'key-ct2', 'hash-ct2', 'private', 'interview', "
@@ -118,13 +123,18 @@ def test_completed_root_snapshot_is_serializable(test_db):
     row = _insert_completed_root(test_db, interview_id=555)
     snapshot = _snapshot(row, conn=test_db)
     assert snapshot["result"]["interview_id"] == 555
+    assert snapshot["result_target"] == {
+        "entity_type": "interview",
+        "entity_id": 555,
+        "scope": "private",
+    }
     assert snapshot["status"] == "completed"
 
 
-def test_task_center_reads_an_interview_id_field_the_snapshot_provides(
+def test_task_center_uses_the_result_target_field_the_snapshot_provides(
     client, test_db, as_user
 ):
-    """前端 ``openResult`` 读取的字段必须真实存在于服务端快照。
+    """前端 ``openResult`` 优先读取带 scope 的目标，字段必须来自服务端快照。
 
     从 ``UploadTaskCenter.vue`` 源码提取实际读取路径，再用真实 HTTP 快照校验，
     避免测试自己编造顶层 ``interview_id`` 造成假绿。
@@ -135,10 +145,9 @@ def test_task_center_reads_an_interview_id_field_the_snapshot_provides(
     ).read_text(encoding="utf-8")
     body = re.search(r"async function openResult\(task\)\s*\{(?P<body>.*?)\n\}", source, re.S)
     assert body, "openResult 结构变化，契约测试需要同步更新"
-    read = re.search(r"task((?:\??\.[A-Za-z_]\w*)+)", body.group("body"))
-    assert read, "openResult 未读取任务字段"
-    # 支持可选链写法（task.result?.interview_id）
-    keys = [part.rstrip("?") for part in read.group(1).split(".") if part and part != "?"]
+    assert re.search(r"task\.result_target", body.group("body")), (
+        "openResult 必须优先使用由服务端授权的 result_target"
+    )
 
     _insert_completed_root(test_db, interview_id=555)
 
@@ -146,15 +155,67 @@ def test_task_center_reads_an_interview_id_field_the_snapshot_provides(
     resp = client.get("/api/upload-imports/imp-ct2")
     assert resp.status_code == 200
     snapshot = resp.json()
+    assert snapshot["result_target"] == {
+        "entity_type": "interview",
+        "entity_id": 555,
+        "scope": "private",
+    }
 
-    cursor = snapshot
-    for key in keys:
-        assert isinstance(cursor, dict) and key in cursor, (
-            f"任务中心读取 task.{'.'.join(keys)}，但快照中没有该字段；"
-            f"实际快照顶层字段：{sorted(snapshot)}"
-        )
-        cursor = cursor[key]
-    assert cursor == 555, "结果定位必须指向真实 interview_id"
+
+def test_share_snapshot_targets_the_published_public_interview(test_db):
+    """已发布 share 卡片必须定位 public_interview_id，不把私人结果当公共结果。"""
+
+    from app.routers.upload_imports import _snapshot
+
+    test_db.execute(
+        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (101, 'u101', 'x', 0)"
+    )
+    test_db.execute(
+        "INSERT INTO interview (id, url, questions_list, owner_id, status, publish_status) "
+        "VALUES (555, 'private://share', 'PRIVATE_QUESTION', 101, 'approved', 'published')"
+    )
+    test_db.execute(
+        "INSERT INTO interview (id, url, questions_list, owner_id, status, publish_status) "
+        "VALUES (777, 'public://share', 'PUBLIC_QUESTION', NULL, 'approved', 'published')"
+    )
+    test_db.execute(
+        "INSERT INTO public_contribution_requests "
+        "(id, source_type, source_id, requester_id, status, snapshot_json, public_interview_id) "
+        "VALUES (99, 'interview', 555, 101, 'published', '{}', 777)"
+    )
+    test_db.execute(
+        "INSERT INTO upload_imports "
+        "(id, requester_id, idempotency_key, request_hash, target_intent, source_type, "
+        "pipeline_version, policy_json, status, interview_id, contribution_request_id) "
+        "VALUES ('imp-share-ct2', 101, 'key-share-ct2', 'hash-share-ct2', 'share', 'interview', "
+        "'upload-pipeline-v1', '{}', 'completed', 555, 99)"
+    )
+    test_db.commit()
+
+    row = test_db.execute(
+        "SELECT * FROM upload_imports WHERE id = 'imp-share-ct2'"
+    ).fetchone()
+    snapshot = _snapshot(row, conn=test_db)
+    assert snapshot["result"]["interview_id"] == 555
+    assert snapshot["result_target"] == {
+        "entity_type": "interview",
+        "entity_id": 777,
+        "scope": "public",
+    }
+
+    test_db.execute(
+        "UPDATE interview SET publish_status = 'pending' WHERE id = 777"
+    )
+    test_db.execute(
+        "UPDATE public_contribution_requests SET status = 'processing' WHERE id = 99"
+    )
+    test_db.commit()
+    pending_snapshot = _snapshot(row, conn=test_db)
+    assert pending_snapshot["result_target"] == {
+        "entity_type": "interview",
+        "entity_id": 555,
+        "scope": "private",
+    }, "公共投影未发布时只能把所有者私人结果作为结果目标"
 
 
 # ── CT-3：私人 JD 归属契约（AC-024 / E6）──────────────────────────────

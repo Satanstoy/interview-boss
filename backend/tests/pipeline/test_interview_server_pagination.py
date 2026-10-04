@@ -172,6 +172,20 @@ def test_location_endpoint_returns_page_under_same_ordering(api, test_db):
     assert body["position_name"] == "P1"
 
 
+def test_location_endpoint_honors_requested_page_size(api, test_db):
+    _seed_interviews(test_db, count=121)
+    test_db.execute("INSERT INTO job_positions (id, name) VALUES (1, 'P1')")
+    test_db.commit()
+    target_id = 1000 + 60
+    resp = api.get(
+        f"/api/data/interview/{target_id}/location?sort=created_at_desc&position_id=P1&page_size=40"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page_size"] == 40
+    assert body["page"] == (60 // 40) + 1
+
+
 def test_location_for_unauthorized_target_is_404(api, test_db):
     _seed_interviews(test_db, count=5)
     resp = api.get("/api/data/interview/2000/location?sort=created_at_desc&position_id=P1")

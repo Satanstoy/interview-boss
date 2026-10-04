@@ -7,7 +7,7 @@
  * - 结果入口：按 location 接口定位页码与高亮，不打断当前浏览；
  * - 状态更新 aria-live=polite，键盘可操作；375px/1440px 均可查看。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   isTerminalStatus,
@@ -19,6 +19,7 @@ import { fetchInterviewLocation } from '@/services/dataApi.js'
 import { currentUser } from '@/composables/useAuth.js'
 
 const router = useRouter()
+const appData = inject('appData', null)
 const open = ref(false)
 const loading = ref(false)
 const error = ref('')
@@ -228,17 +229,32 @@ async function onAction(task, action) {
 }
 
 async function openResult(task) {
-  // contracts §4.2：interview_id 在 result 内（快照顶层没有该字段）
-  const interviewId = task.result?.interview_id
+  // 已发布分享优先定位 public projection；旧/private 快照继续读 result.interview_id。
+  const resultTarget = task.result_target
+  const interviewId = resultTarget?.entity_type === 'interview'
+    ? resultTarget.entity_id
+    : task.result?.interview_id
   if (!interviewId) return
   try {
-    const location = await fetchInterviewLocation(interviewId, { sort: 'created_at_desc' })
+    const pageSize = Number(appData?.interviewPageSize?.value || PAGE_SIZE)
+    const sort = appData?.interviewSortOrder?.value === 'asc'
+      ? 'created_at_asc'
+      : 'created_at_desc'
+    const location = await fetchInterviewLocation(interviewId, {
+      sort,
+      page_size: pageSize,
+      position_id: task.position_id || task.result?.position_id || undefined,
+      scope: 'all',
+    })
     // 只在用户主动“查看结果”时切换筛选与页码
+    if (appData?.filterSeason) appData.filterSeason.value = ''
     router.push({
       name: 'interview',
       query: {
         page: location.page,
+        page_size: location.page_size || pageSize,
         position: location.position_id || undefined,
+        position_name: location.position_name || undefined,
         highlight: interviewId,
       },
     })

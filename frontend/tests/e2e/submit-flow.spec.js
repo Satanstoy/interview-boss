@@ -345,7 +345,7 @@ test.describe('导入 Tab — StagingPanel 提交流程', () => {
     })
   }
 
-  test('拖入非图片文件提示忽略', async ({ page }) => {
+  test('选择非图片文件时保留文件供服务端校验', async ({ page }) => {
     const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
     await textarea.fill('保留在输入框里的有效草稿')
     await page.locator('input[type="file"]').setInputFiles({
@@ -353,10 +353,61 @@ test.describe('导入 Tab — StagingPanel 提交流程', () => {
       mimeType: 'text/plain',
       buffer: Buffer.from('hello world'),
     })
-    await page.waitForTimeout(500)
-    await expect(page.getByText('已忽略非图片文件：notes.txt')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText('1 / 20')).toBeVisible()
+    await expect(page.getByText('notes.txt', { exact: true })).toBeVisible()
     await expect(textarea).toHaveValue('保留在输入框里的有效草稿')
-    await expect(page.getByText('0 / 20')).toBeVisible()
+  })
+
+  test('服务端拒绝文件后保留原稿与文件，修正后复用同一幂等键', async ({ page }) => {
+    const submissions = []
+    await page.route('**/api/upload-imports/by-key/**', (route) =>
+      route.fulfill({ status: 404, json: { detail: '任务不存在' } }),
+    )
+    await page.route('**/api/submit-jobs', async (route) => {
+      const form = await route.request().postDataBuffer()
+      const body = form.toString('latin1')
+      submissions.push({
+        key: route.request().headers()['idempotency-key'],
+        hasNotes: body.includes('filename="notes.txt"'),
+        hasPng: body.includes('filename="corrected.png"'),
+      })
+      if (submissions.length === 1) {
+        await route.fulfill({ status: 400, json: { detail: '文件 notes.txt 不是有效的图片文件' } })
+      } else {
+        await route.fulfill({ status: 202, json: { import_id: 'imp-corrected', job_id: 81, status: 'queued' } })
+      }
+    })
+
+    const text = '修正文件时仍需保留的正文'
+    const textarea = page.locator('textarea[placeholder*="粘贴面经"]')
+    await textarea.fill(text)
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('not an image'),
+    })
+
+    await expect(page.getByText('1 / 20')).toBeVisible()
+    await expect(page.getByText('notes.txt', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '提交解析' }).click()
+    await expect(page.getByTestId('submit-error')).toContainText('不是有效的图片文件')
+    await expect(textarea).toHaveValue(text)
+    await expect(page.getByText('notes.txt', { exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: '移除图片 1' }).click()
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'corrected.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1sAAAAASUVORK5CYII=', 'base64'),
+    })
+    await page.getByRole('button', { name: '提交解析' }).click()
+
+    await expect.poll(() => submissions).toHaveLength(2)
+    expect(submissions[0].hasNotes).toBe(true)
+    expect(submissions[1].hasPng).toBe(true)
+    expect(submissions[1].key).toBe(submissions[0].key)
+    await expect(textarea).toHaveValue('')
+    await expect(page.getByText('corrected.png')).toHaveCount(0)
   })
 
   test('清空非空内容需确认', async ({ page }) => {

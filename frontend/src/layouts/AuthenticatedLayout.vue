@@ -584,6 +584,8 @@ provide('appData', {
   // Fetch
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadAllData, formatDate,
+  interviewPageSize, interviewSortOrder,
+  filterSeason,
   interviewTotal,
   loadInterviewPage,
   // Auth
@@ -651,9 +653,14 @@ watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeCon
 // 这里消费它们：切换岗位筛选、跳到目标页并高亮目标行（只主动打开时生效）。
 const locationQueryConsumed = ref(false)
 watch(
-  () => [route.path, route.query.page, route.query.highlight, route.query.position],
-  async ([path, page, highlight, position]) => {
-    if (!isAuthenticatedForUi.value || path !== '/interview') return
+  () => [route.path, route.query.page, route.query.highlight, route.query.position, route.query.position_name, route.query.page_size],
+  async ([path, page, highlight, position, positionName, pageSize]) => {
+    if (path !== '/interview') return
+    const requestedPageSize = Number(pageSize)
+    if ([10, 20, 50, 100].includes(requestedPageSize)) {
+      interviewPageSize.value = requestedPageSize
+    }
+    if (!isAuthenticatedForUi.value) return
     if (!highlight) {
       locationQueryConsumed.value = false
       return
@@ -662,15 +669,21 @@ watch(
     if (locationQueryConsumed.value && highlightInterviewId.value) return
     if (position && String(position) !== String(currentUser.value?.current_position_id || '')) {
       // 仅主动「查看结果」时切到目标岗位并回到第 1 页（spec §7）。
-      // 岗位切换由服务端完成，随后拉取该岗位视图。
+      // 通过个人岗位接口切换当前用户；管理员岗位维护端点禁止普通用户调用。
       try {
-        const { switchPositionById } = await import('@/services/profileApi.js')
-        const data = await switchPositionById(Number(position))
+        const { fetchPositions, switchMyPosition } = await import('@/services/profileApi.js')
+        let targetName = positionName ? String(positionName) : ''
+        if (!targetName) {
+          const { positions = [] } = await fetchPositions()
+          targetName = positions.find((item) => String(item.id) === String(position))?.name || ''
+        }
+        if (!targetName) throw new Error('目标岗位不可用')
+        const data = await switchMyPosition(targetName)
         if (currentUser.value) {
           currentUser.value = {
             ...currentUser.value,
             current_position: data.current_position || data.current_job_position || currentUser.value.current_position,
-            current_position_id: data.current_position_id ?? null,
+            current_position_id: data.current_position_id ?? Number(position),
           }
         }
         await fetchTableData()
@@ -688,10 +701,13 @@ watch(
     locationQueryConsumed.value = true
     // 消费后清理 query，避免刷新再次触发/污染 URL
     if (String(route.query.page || '') !== String(pageNumber) || String(route.query.highlight || '') !== String(highlight)) {
-      router.replace({ path: '/interview', query: {} })
+      router.replace({
+        path: '/interview',
+        query: pageSize ? { page_size: String(interviewPageSize.value) } : {},
+      })
     }
   },
-  { immediate: false },
+  { immediate: true },
 )
 
 onMounted(async () => {

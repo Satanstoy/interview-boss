@@ -85,6 +85,16 @@ async function mockApi(page, { task = null, locationStatus = 200 } = {}) {
         json: { interview_id: 9001, page: 3, page_size: 20, rank: 41, position_id: 2, position_name: 'P2' },
       })
     }
+    if (path === '/api/profile/my-position' && request.method() === 'PUT') {
+      const requestedPosition = request.postDataJSON()?.position
+      if (requestedPosition === 'P2') currentPositionId = 2
+      return route.fulfill({
+        json: {
+          current_position_id: currentPositionId,
+          current_position: `P${currentPositionId}`,
+        },
+      })
+    }
     if (path === '/api/profile/position' && request.method() === 'PUT') {
       currentPositionId = Number(request.postDataJSON()?.position_id || 1)
       return route.fulfill({ json: { current_position_id: currentPositionId, current_position: `P${currentPositionId}` } })

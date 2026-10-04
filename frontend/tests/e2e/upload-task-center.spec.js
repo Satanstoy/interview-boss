@@ -30,10 +30,17 @@ const TASK = {
   position_name: '后端开发工程师',
   // contracts §4.2：interview_id 在 result 内，快照顶层没有该字段
   result: { interview_id: 555, position_id: 1 },
+  result_target: { entity_type: 'interview', entity_id: 555, scope: 'private' },
   error: { code: 'UPSTREAM_TIMEOUT', message: '答案生成超时', retryable: true },
   allowed_actions: ['open_result', 'retry_failed_steps'],
   created_at: '2026-09-29T10:00:00Z',
   updated_at: '2026-09-29T10:05:00Z',
+}
+
+const PUBLISHED_PUBLIC_TASK = {
+  ...TASK,
+  target_intent: 'share',
+  result_target: { entity_type: 'interview', entity_id: 777, scope: 'public' },
 }
 
 const MOCK_TASKS = { items: [TASK], total: 1, page: 1, page_size: 20 }
@@ -103,6 +110,26 @@ test('查看结果按 location 定位页码并高亮目标', async ({ page }) =>
   await expect.poll(() => locationCalled).toBe(true)
   await expect(page).toHaveURL(/page=4/)
   await expect(page).toHaveURL(/highlight=555/)
+})
+
+test('已发布分享任务定位公共结果并沿用当前每页数量', async ({ page }) => {
+  await mockApi(page, { task: PUBLISHED_PUBLIC_TASK })
+  let locationQuery
+  await page.route('**/api/data/interview/777/location?**', async (route) => {
+    locationQuery = new URL(route.request().url()).searchParams
+    await route.fulfill({
+      json: { interview_id: 777, page: 3, page_size: 50, rank: 120, position_id: 1 },
+    })
+  })
+
+  await page.goto('/interview?page_size=50')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await page.getByRole('button', { name: '查看结果' }).click()
+
+  await expect.poll(() => locationQuery?.get('page_size')).toBe('50')
+  await expect(page).toHaveURL(/page=3/)
+  await expect(page).toHaveURL(/page_size=50/)
+  await expect(page).toHaveURL(/highlight=777/)
 })
 
 test('恢复接口 500 时保留已有任务', async ({ page }) => {

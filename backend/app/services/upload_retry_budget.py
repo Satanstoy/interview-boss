@@ -13,6 +13,7 @@ from app.models.upload_contracts import (
     UploadErrorDTO,
     UploadProgressDTO,
     UploadResultDTO,
+    UploadResultTargetDTO,
     UploadSnapshot,
     UploadStatus,
 )
@@ -195,6 +196,7 @@ def snapshot_from_parts(
     progress=None,
     counts=None,
     result=None,
+    result_target=None,
     error=None,
     allowed_actions=None,
     recovery_available: bool = True,
@@ -214,6 +216,11 @@ def snapshot_from_parts(
         progress=UploadProgressDTO(**progress) if isinstance(progress, dict) else progress,
         counts=UploadCountsDTO(**counts) if isinstance(counts, dict) else counts,
         result=UploadResultDTO(**result) if isinstance(result, dict) else result,
+        result_target=(
+            UploadResultTargetDTO(**result_target)
+            if isinstance(result_target, dict)
+            else result_target
+        ),
         error=UploadErrorDTO(**error) if isinstance(error, dict) else error,
         allowed_actions=list(allowed_actions or []),
         recovery_available=bool(recovery_available),

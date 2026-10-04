@@ -119,6 +119,16 @@ def test_snapshot_event_carries_revision_as_event_id():
     assert event["data"]["import_id"] == "imp-1"
 
 
+def test_snapshot_accepts_partially_published_review_status():
+    snapshot = snapshot_from_parts(
+        import_id="imp-partially-published",
+        revision=4,
+        status=UploadStatus.COMPLETED,
+        review_status="partially_published",
+    )
+    assert snapshot.review_status.value == "partially_published"
+
+
 def test_snapshot_never_contains_raw_text_or_key():
     snapshot = snapshot_from_parts(
         import_id="imp-1",

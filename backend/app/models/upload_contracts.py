@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -35,6 +35,7 @@ class ReviewStatus(str, Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
     PUBLISHED = "published"
+    PARTIALLY_PUBLISHED = "partially_published"
     REJECTED = "rejected"
     WITHDRAWN = "withdrawn"
     FAILED = "failed"
@@ -180,6 +181,14 @@ class UploadResultDTO(BaseModel):
     contribution_request_id: int | None = None
 
 
+class UploadResultTargetDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: Literal["interview"]
+    entity_id: int
+    scope: Literal["private", "public"]
+
+
 class UploadSnapshot(BaseModel):
     """根任务快照；SSE 的 ``snapshot`` 事件数据即此模型。"""
 
@@ -195,6 +204,7 @@ class UploadSnapshot(BaseModel):
     progress: UploadProgressDTO | None = None
     counts: UploadCountsDTO | None = None
     result: UploadResultDTO | None = None
+    result_target: UploadResultTargetDTO | None = None
     error: UploadErrorDTO | None = None
     allowed_actions: list[str] = Field(default_factory=list)
     recovery_available: bool = True

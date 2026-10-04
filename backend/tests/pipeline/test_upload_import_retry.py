@@ -121,6 +121,10 @@ def test_retry_expired_payload_returns_409_without_queuing_empty_job(client, tes
         assert snapshot.json()["recovery_available"] is False
         assert "原稿已过期" in snapshot.json()["recovery_message"]
         assert "resubmit_source" in snapshot.json()["allowed_actions"]
+        assert not ({"retry", "retry_failed_steps", "retry_after_configuration"} &
+                    set(snapshot.json()["allowed_actions"])), (
+            "任务中心不得提供没有恢复输入的重试操作"
+        )
         resp = client.post("/api/upload-imports/imp-1/retry", json={})
         assert resp.status_code == 409, resp.text
         assert "SOURCE_EXPIRED" in resp.text

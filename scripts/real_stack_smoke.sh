@@ -18,7 +18,9 @@ compose() {
 ensure_real_stack_builder() {
   local driver
   if docker buildx inspect "$REAL_STACK_BUILDER" >/dev/null 2>&1; then
-    driver=$(docker buildx inspect "$REAL_STACK_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+    # Read the full inspect output: exiting awk as soon as it sees Driver can
+    # close the pipe early, making docker buildx exit with SIGPIPE under pipefail.
+    driver=$(docker buildx inspect "$REAL_STACK_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ && !found {gsub(/^ +| +$/, "", $2); driver=$2; found=1} END {if (found) print driver}')
     [ "$driver" = "docker-container" ] || {
       printf 'Real-stack BuildKit builder has driver=%s, expected docker-container\n' "$driver" >&2
       return 1
@@ -45,6 +47,9 @@ copy_success_artifacts() {
   for name in \
     ac028-browser-result.png \
     ac028-browser-result.json \
+    ac001-ac002-browser-result.json \
+    ac022-browser-result.json \
+    ac022-db-trace.json \
     ac029-browser-result.json \
     ac029-db-trace.json; do
     if [ -f "$TEMP_ARTIFACTS/$name" ]; then
@@ -130,6 +135,41 @@ fi
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/api/health" >/dev/null
+
+# AC-001/002: real API + SQLite + browser pagination and authorized target lookup.
+compose exec -T backend python /app/backend/e2e/seed_ac001_ac002.py \
+  >"$TEMP_ARTIFACTS/ac001-ac002-seed.json"
+cd "$PROJECT_DIR/frontend"
+REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+  AC001_AC002_BROWSER_TRACE="$TEMP_ARTIFACTS/ac001-ac002-browser-result.json" \
+  run_frontend_playwright tests/e2e/interview-pagination-real-stack.spec.js \
+  --timeout "${AC001_AC002_REAL_STACK_TEST_TIMEOUT:-180000}"
+if [ "${REAL_STACK_ONLY_AC001_AC002:-0}" = "1" ]; then
+  exit 0
+fi
+
+# AC-022: send unsupported, empty, oversized, corrected, replayed, and changed
+# multipart bodies through the real browser/API before checking disposable SQLite.
+cd "$PROJECT_DIR/frontend"
+REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+  AC022_BROWSER_TRACE="$TEMP_ARTIFACTS/ac022-browser-result.json" \
+  run_frontend_playwright tests/e2e/upload-file-validation-real-stack.spec.js \
+  --timeout "${AC022_REAL_STACK_TEST_TIMEOUT:-210000}"
+read -r ac022_key ac022_import_id < <(
+  python3 - "$TEMP_ARTIFACTS/ac022-browser-result.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    trace = json.load(stream)
+print(trace["idempotency_key"], trace["accepted_import_id"])
+PY
+)
+cd "$PROJECT_DIR"
+compose exec -T backend python /app/backend/e2e/assert_ac022_upload_trace.py \
+  "$ac022_key" "$ac022_import_id" >"$TEMP_ARTIFACTS/ac022-db-trace.json"
+if [ "${REAL_STACK_ONLY_AC022:-0}" = "1" ]; then
+  exit 0
+fi
 
 cd "$PROJECT_DIR/frontend"
 REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \

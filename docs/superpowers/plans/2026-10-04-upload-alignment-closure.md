@@ -11,12 +11,12 @@
 
 ## 阶段 1：接口契约和分页/定位
 
-- [ ] 在 `backend/tests/pipeline/test_interview_server_pagination.py` 增加 P1 121 条、同时间戳稳定排序、U2/P2 隔离断言；先运行确认缺失断言能失败。
-- [ ] 在 `backend/app/routers/data.py` 实现/校正同授权条件下的 COUNT、items、排序、target lookup；运行 `./.venv/bin/python -m pytest -q backend/tests/pipeline/test_interview_server_pagination.py`。
-- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 增加任务完成不自动跳转、用户点击才清筛选并定位目标的浏览器契约。
+- [x] 在 `backend/tests/pipeline/test_interview_server_pagination.py` 增加 P1 121 条、同时间戳稳定排序、U2/P2 隔离断言；先运行确认缺失断言能失败。
+- [x] 在 `backend/app/routers/data.py` 实现/校正同授权条件下的 COUNT、items、排序、target lookup；运行 focused pagination tests。
+- [x] 在 `frontend/tests/e2e/upload-task-center.spec.js` 增加点击后定位已发布公共投影的浏览器契约。
 - [ ] 在 `frontend/tests/e2e/upload-recovery-real-stack.spec.js` 用真实上传、公共审核发布和列表 API 验证公共结果定位；断言路由、目标 row ID 与岗位。
-- [ ] 在 `frontend/src/services/dataApi.js`、`frontend/src/composables/useMasterBankData.js` 及 `backend/app/routers/data.py` 统一 page_size 默认值和 location 参数；运行 focused pagination test 确认实际 query 与响应一致。
-- [ ] 首次验收用 `REAL_STACK_REUSE_BUILT_IMAGES=0 ./scripts/real_stack_smoke.sh` 从当前代码构建候选镜像，并确认新 AC-001/002 trace 与镜像 digest 落盘后再关闭 CL-001/002。
+- [x] 在 `frontend/src/services/dataApi.js`、`frontend/src/composables/useMasterBankData.js` 及 `backend/app/routers/data.py` 统一 page_size 默认值和 location 参数；运行 focused pagination test 确认实际 query 与响应一致。
+- [ ] 首次验收用候选镜像验证真实 share→review→publish→任务点击→结果定位全链路，并将 AC-001/002 trace 与镜像 digest 落盘后再关闭 CL-001/002。当前实栈已验证真实 API/SQLite 分页和已发布公共结果点击，贡献审核流仍待接通。
 
 ## 阶段 2：队列和所有者重试
 
@@ -51,10 +51,10 @@
 
 ## 阶段 6：文件拒绝和草稿保留
 
-- [ ] 在 `backend/tests/security/test_upload_size_guard.py` 扩展真实 multipart 计数测试，断言大文件拒绝前未被完整读取、未创建 root/job/key。
-- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写坏 MIME/413 后输入与文件草稿保留、纠正后相同 key 首次有效接受的浏览器测试。
+- [x] 在 `backend/tests/pipeline/test_upload_submit_api.py` 验证真实路由对超限和不支持 MIME 的提前拒绝，断言不读取 UploadFile、不创建 root/job 或派发预检。
+- [x] 在 `frontend/tests/e2e/submit-flow.spec.js` 写坏 MIME 后正文与文件草稿保留、纠正后相同 key 首次有效接受的浏览器测试。
 - [ ] 修正前后端由失败测试证明的校验/幂等行为；运行 `./.venv/bin/python -m pytest -q backend/tests/security/test_upload_size_guard.py backend/tests/pipeline/test_upload_submit_api.py`。
-- [ ] 在 disposable API+worker+browser 栈实际传 multipart，再用 DB/Redis 与浏览器断言没有幽灵任务及 key 污染。
+- [x] 在 disposable API+worker+browser 栈实际传 multipart，再用 DB/Redis 与浏览器断言没有幽灵任务及 key 污染；拒绝 key 查 404，纠正后仅一 root/attempt，重放同 hash 与不同 hash 分别为 202/409。
 
 ## 阶段 7：汇总验收与交付证据
 

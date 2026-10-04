@@ -186,13 +186,61 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
     ) if conn is not None else policy.get("credential_scope", "user")
 
     review_status = None
+    contribution_public_interview_id = None
     if conn is not None and row["contribution_request_id"]:
         review_row = conn.execute(
-            "SELECT status FROM public_contribution_requests WHERE id = ?",
+            "SELECT status, public_interview_id FROM public_contribution_requests WHERE id = ?",
             (row["contribution_request_id"],),
         ).fetchone()
         if review_row:
             review_status = review_row["status"]
+            contribution_public_interview_id = review_row["public_interview_id"]
+
+    result_target = None
+    if conn is not None and row["interview_id"] is not None:
+        result_row = conn.execute(
+            "SELECT owner_id, status, publish_status, deleted_at FROM interview WHERE id = ?",
+            (row["interview_id"],),
+        ).fetchone()
+        if result_row and result_row["deleted_at"] is None:
+            if result_row["owner_id"] == row["requester_id"]:
+                result_target = {
+                    "entity_type": "interview",
+                    "entity_id": int(row["interview_id"]),
+                    "scope": "private",
+                }
+            elif (
+                result_row["owner_id"] is None
+                and result_row["status"] == "approved"
+                and result_row["publish_status"] == "published"
+            ):
+                result_target = {
+                    "entity_type": "interview",
+                    "entity_id": int(row["interview_id"]),
+                    "scope": "public",
+                }
+
+    if (
+        conn is not None
+        and contribution_public_interview_id is not None
+        and review_status in ("published", "partially_published")
+    ):
+        public_row = conn.execute(
+            "SELECT owner_id, status, publish_status, deleted_at FROM interview WHERE id = ?",
+            (contribution_public_interview_id,),
+        ).fetchone()
+        if (
+            public_row
+            and public_row["owner_id"] is None
+            and public_row["status"] == "approved"
+            and public_row["publish_status"] == "published"
+            and public_row["deleted_at"] is None
+        ):
+            result_target = {
+                "entity_type": "interview",
+                "entity_id": int(contribution_public_interview_id),
+                "scope": "public",
+            }
 
     count_values = counts or {
         "total": None,
@@ -254,6 +302,14 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
         credential_scope=action_scope,
         is_admin=bool(actor_is_admin),
     )
+    if not recovery_available:
+        # AC-007: an owner may retry only while the original input is still
+        # available. Expired/cleared payloads must offer a fresh submission,
+        # never a retry action that is guaranteed to fail or enqueue nothing.
+        snapshot_actions = [
+            action for action in snapshot_actions
+            if action not in {"retry", "retry_failed_steps", "retry_after_configuration"}
+        ]
     if not recovery_available and "resubmit_source" not in snapshot_actions:
         snapshot_actions.append("resubmit_source")
     snapshot = snapshot_from_parts(
@@ -288,6 +344,7 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
         }
         if row["interview_id"] is not None
         else None,
+        result_target=result_target,
         error=(
             _error_dto(
                 row["error_code"],

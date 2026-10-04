@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Sparkles,
   Upload,
+  X,
 } from '@lucide/vue'
 
 import {
@@ -41,7 +42,6 @@ const { activeJobs, retryJob } = useSubmitJobs()
 const { confirm: showConfirm } = useConfirm()
 
 const TEXT_MAX_LENGTH = 50000
-const MAX_FILE_SIZE = 10 * 1024 * 1024
 const MAX_FILES = 20
 
 const rawText = ref('')
@@ -135,24 +135,15 @@ function handleFiles(files) {
   submitError.value = ''
 
   for (const file of files) {
-    if (!file.type.startsWith('image/')) {
-      // 拖入/粘贴非图片文件时给出反馈，避免用户以为功能没反应
-      toast.info(`已忽略非图片文件：${file.name}`)
-      continue
-    }
     if (images.value.length >= MAX_FILES) {
       submitError.value = `最多上传 ${MAX_FILES} 张图片`
       break
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      submitError.value = `图片 "${file.name}" 超过 10MB 限制`
-      continue
     }
 
     images.value.push({
       id: `${Date.now()}-${Math.random()}`,
       file,
-      preview: URL.createObjectURL(file),
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
     })
   }
 }
@@ -407,7 +398,6 @@ defineExpose({ onSubmit, isSubmitting })
           <input
             ref="fileInput"
             type="file"
-            accept="image/*"
             multiple
             class="hidden"
             :disabled="isSubmitting"
@@ -439,7 +429,16 @@ defineExpose({ onSubmit, isSubmitting })
               :key="img.id"
               class="group/img relative aspect-square overflow-hidden rounded-md border bg-muted"
             >
-              <img :src="img.preview" :alt="`图片 ${index + 1}`" class="h-full w-full object-cover" />
+              <img
+                v-if="img.preview"
+                :src="img.preview"
+                :alt="`图片 ${index + 1}`"
+                class="h-full w-full object-cover"
+              />
+              <div v-else class="flex h-full flex-col items-center justify-center gap-2 p-2 text-muted-foreground">
+                <FileText class="h-8 w-8" />
+                <span class="text-center text-xs">服务端将校验此文件类型</span>
+              </div>
               <button
                 type="button"
                 class="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity hover:bg-black/80 sm:size-7 sm:opacity-0 sm:group-hover/img:opacity-100 sm:focus-visible:opacity-100"
