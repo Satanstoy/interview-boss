@@ -80,20 +80,40 @@ def collect_pending_buckets(conn) -> list[dict]:
 
 
 def select_next_bucket(buckets, *, recently_selected=None):
-    """最早可用优先 + 轮转：刚选过的 scope 排到本轮队尾。"""
+    """Select every eligible scope once before starting the next round.
+
+    ``recently_selected`` is a mutable list carried by the durable continuation
+    job. A larger public backlog therefore cannot repeatedly win on count alone
+    while public work continues arriving.
+    """
 
     if not buckets:
+        if isinstance(recently_selected, list):
+            recently_selected.clear()
         return None
-    recent = set(recently_selected or [])
+
+    keys = {bucket["scope_key"] for bucket in buckets}
+    history = list(dict.fromkeys(
+        key for key in (recently_selected or []) if key in keys
+    ))
+    if keys.issubset(history):
+        history = []
+
     ordered = sorted(
         buckets,
         key=lambda bucket: (
-            bucket["scope_key"] in recent,
+            bucket["scope_key"] in history,
             bucket["available_at"] or "",
             bucket["scope_key"],
         ),
     )
-    return ordered[0]
+    selected = ordered[0]
+    history.append(selected["scope_key"])
+    if keys.issubset(history):
+        history = []
+    if isinstance(recently_selected, list):
+        recently_selected[:] = history
+    return selected
 
 
 def ensure_bucket_job(conn, *, bucket: dict, created_by=None) -> dict:

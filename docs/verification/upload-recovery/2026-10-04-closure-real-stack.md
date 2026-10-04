@@ -59,6 +59,17 @@ bash -n scripts/real_stack_smoke.sh \
 - [当前镜像浏览器/API trace](2026-10-04-real-stack/ac007-browser-result-current.json)、[当前镜像 SQLite trace](2026-10-04-real-stack/ac007-db-trace-current.json)。
 - 此复跑仍未覆盖持续公共流量公平性和 COMMIT 后丢通知对账，所以 AC-007 维持部分状态。
 
+## AC-007 rootless 队列公平性与 Redis 通知恢复
+
+- 命令：`REAL_STACK_ONLY_AC007_QUEUE=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_QUEUE_WORKER_REPLICAS=2 ./scripts/real_stack_smoke.sh`
+- 结果：退出码 `0`。候选项目：`interview-boss-real-e2e-3182738-1791115817`；两个真实 worker 容器均通过 Compose health check。
+- 环境：一次性 SQLite volume、真实 API、两套 Redis、ARQ dispatcher/worker；仅模型边界使用本地确定性 HTTP stub。未连接生产数据库。
+- 公共持续到达公平性：U1 私人队列 7 项，初始公共队列 11 项；worker 处理期间新增 12 波、60 个公共项。9.68 秒时，U1 已完成 5 项，公共队列仍有 65 项 pending；随后两类队列均排空，rootless 活跃 job 为 0。[seed](2026-10-04-real-stack/ac007-queue-seed.json)、[公平性 trace](2026-10-04-real-stack/ac007-queue-fairness.json)、[排空 trace](2026-10-04-real-stack/ac007-queue-idle.json)。
+- COMMIT 后丢通知：真实停止 disposable 队列 Redis，再调用真实 `_run_cluster_batch_in_background`。记录到一次 ARQ 连接失败；SQLite 中同一 durable job 保持 pending。Redis 重启后对真实 `scheduled_submit_job_dispatch_task` 连调两次，只得到一个 queued job/`arq_job_id`；两个 worker 恢复后完成该 job，未完成队列行数为 0。[故障种子](2026-10-04-real-stack/ac007-lost-dispatch-seed.json)、[故障后 outbox](2026-10-04-real-stack/ac007-lost-notification.json)、[dispatcher trace](2026-10-04-real-stack/ac007-dispatch-recovery.json)、[最终 worker 状态](2026-10-04-real-stack/ac007-lost-dispatch-final.json)。
+- 候选镜像：backend/worker `sha256:c42aa4a1afd9b8f70ccefa2c9595b55f02dca79160d0ad5500c7fbe4ef1d048c`；frontend `sha256:46a9c7decf6a46c0f8fb27c5bf5c9a9776380715537aced6e7cc801fe43a5767`；HTTP model stub `sha256:c454e2bb1c70ef31231bd8dda2524794e00b11ba6fdaff8b05a030d64b0c1891`；OAuth gateway `sha256:8e3c05c29a50481784cb5332c4347b1793d5ec3c8b0bf889f8f3085b85d21371`。
+- 上传根任务所有者重试另有真实浏览器/API/SQLite 证据：并发请求共用 attempt 2，U2 与管理员访问为 404，worker 重启后成功，checkpoint hash 保持不变，且浏览器实际打开了恢复后的私人面经。[浏览器 trace](2026-10-04-real-stack/ac007-owner-retry-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac007-owner-retry-db-trace.json)。
+- AC-007 仍为部分：上述所有者重试覆盖 `upload_import` 根任务；原审计缺口是终态 failed 的个人 rootless `analysis_queue` 项没有 owner retry 入口。这个队列项没有 upload attempt/checkpoint 根身份；范围决策已向项目所有者澄清，完成该项前不得将 AC-007 标为通过。
+
 ## AC-010 独立候选栈验收
 
 - 命令：`REAL_STACK_ONLY_AC010=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`

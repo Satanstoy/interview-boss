@@ -53,6 +53,13 @@ copy_success_artifacts() {
     ac007-seed.json \
     ac007-browser-result.json \
     ac007-db-trace.json \
+    ac007-queue-seed.json \
+    ac007-queue-fairness.json \
+    ac007-queue-idle.json \
+    ac007-lost-dispatch-seed.json \
+    ac007-lost-notification.json \
+    ac007-dispatch-recovery.json \
+    ac007-lost-dispatch-final.json \
     ac010-seed.json \
     ac010-revision7.json \
     ac010-browser-result.json \
@@ -219,7 +226,9 @@ fi
 
 # AC-001/002 and AC-022 normally run first in the shared candidate stack. The
 # focused AC-007 loop can skip them while iterating on the retry scenario.
-if [ "${REAL_STACK_ONLY_AC007:-0}" != "1" ] && [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ]; then
+if [ "${REAL_STACK_ONLY_AC007:-0}" != "1" ] \
+  && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ] \
+  && [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ]; then
 # AC-001/002: real API + SQLite + browser pagination and authorized target lookup.
 compose exec -T backend python /app/backend/e2e/seed_ac001_ac002.py \
   >"$TEMP_ARTIFACTS/ac001-ac002-seed.json"
@@ -258,7 +267,8 @@ fi
 
 # AC-007: two owner sessions race a real retry while worker delivery is stopped.
 # Restart the same worker only after both API requests and cross-owner 404 checks.
-if [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ]; then
+if [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ] \
+  && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ]; then
 cd "$PROJECT_DIR"
 compose exec -T backend python /app/backend/e2e/seed_ac007_owner_retry.py \
   >"$TEMP_ARTIFACTS/ac007-seed.json"
@@ -332,6 +342,86 @@ compose exec -T backend python /app/backend/e2e/assert_ac007_owner_retry_trace.p
 if [ "${REAL_STACK_ONLY_AC007:-0}" = "1" ]; then
   exit 0
 fi
+fi
+
+if [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" = "1" ]; then
+  cd "$PROJECT_DIR"
+  compose stop worker
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py seed-fairness \
+    >"$TEMP_ARTIFACTS/ac007-queue-seed.json"
+  read -r ac007_queue_owner ac007_queue_admin ac007_queue_request \
+    ac007_queue_private_interview ac007_queue_source_interview ac007_queue_public_interview < <(
+      python3 - "$TEMP_ARTIFACTS/ac007-queue-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    seed = json.load(stream)
+print(seed["owner_id"], seed["admin_id"], seed["request_id"],
+      seed["private_interview_id"], seed["source_interview_id"], seed["public_interview_id"])
+PY
+    )
+
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    watch-fairness "$ac007_queue_request" "$ac007_queue_private_interview" \
+    "$ac007_queue_source_interview" "$ac007_queue_public_interview" \
+    --timeout "${AC007_QUEUE_FAIRNESS_TIMEOUT:-120}" \
+    >"$TEMP_ARTIFACTS/ac007-queue-fairness.json" &
+  ac007_fairness_monitor_pid=$!
+  compose up -d --scale "worker=${AC007_QUEUE_WORKER_REPLICAS:-2}" \
+    --wait --wait-timeout 120 worker
+  set +e
+  wait "$ac007_fairness_monitor_pid"
+  ac007_fairness_status=$?
+  set -e
+  if [ "$ac007_fairness_status" -ne 0 ]; then
+    exit "$ac007_fairness_status"
+  fi
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    wait-fairness-idle "$ac007_queue_request" "$ac007_queue_private_interview" \
+    --timeout "${AC007_QUEUE_IDLE_TIMEOUT:-240}" \
+    >"$TEMP_ARTIFACTS/ac007-queue-idle.json"
+
+  compose stop worker
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    seed-lost-dispatch "$ac007_queue_owner" \
+    >"$TEMP_ARTIFACTS/ac007-lost-dispatch-seed.json"
+  ac007_lost_interview=$(python3 - "$TEMP_ARTIFACTS/ac007-lost-dispatch-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["interview_id"])
+PY
+  )
+  compose stop redis
+  compose exec -T -e AC007_EXPECT_QUEUE_OUTAGE=1 backend \
+    python /app/backend/e2e/ac007_queue_real_stack.py \
+    create-lost-dispatch "$ac007_queue_owner" \
+    >"$TEMP_ARTIFACTS/ac007-lost-notification.json"
+  ac007_lost_job=$(python3 - "$TEMP_ARTIFACTS/ac007-lost-notification.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["job_id"])
+PY
+  )
+
+  compose up -d --wait --wait-timeout 60 redis
+  compose exec -T backend python -c \
+    'import asyncio; from app.worker_scheduled import scheduled_submit_job_dispatch_task; print(asyncio.run(scheduled_submit_job_dispatch_task({})))' \
+    >"$TEMP_ARTIFACTS/ac007-dispatch-first.log"
+  compose exec -T backend python -c \
+    'import asyncio; from app.worker_scheduled import scheduled_submit_job_dispatch_task; print(asyncio.run(scheduled_submit_job_dispatch_task({})))' \
+    >"$TEMP_ARTIFACTS/ac007-dispatch-second.log"
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    assert-dispatched "$ac007_lost_job" \
+    >"$TEMP_ARTIFACTS/ac007-dispatch-recovery.json"
+  compose up -d --scale "worker=${AC007_QUEUE_WORKER_REPLICAS:-2}" \
+    --wait --wait-timeout 120 worker
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    wait-lost-dispatch "$ac007_lost_job" "$ac007_lost_interview" \
+    --timeout "${AC007_QUEUE_WORKER_TIMEOUT:-120}" \
+    >"$TEMP_ARTIFACTS/ac007-lost-dispatch-final.json"
+  exit 0
 fi
 
 if [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ]; then

@@ -13,12 +13,14 @@ from __future__ import annotations
 import sqlite3
 
 from app.db.migrations import run_migrations
+from app.services.pipeline import queue as pipeline_queue
 from app.services.upload_queue import (
     collect_pending_buckets,
     ensure_bucket_job,
     reconcile_pending_buckets,
     select_next_bucket,
 )
+from app.worker_cluster_tasks import _cluster_batch_user_id
 
 
 def _db(tmp_path=None):
@@ -113,20 +115,155 @@ def test_bucket_with_active_job_is_skipped(tmp_path):
 
 
 def test_earliest_available_rotation_prevents_starvation(tmp_path):
-    """连续公共流量下，私人桶必须在有限轮次内被选中。"""
+    """The selector completes one scope round before starting another."""
 
     conn = _db(tmp_path)
-    selected_counts = {}
     recently_selected: list[str] = []
-    for _ in range(12):
+    buckets = collect_pending_buckets(conn)
+    selected = []
+    for _ in range(len(buckets)):
         buckets = collect_pending_buckets(conn)
         chosen = select_next_bucket(buckets, recently_selected=recently_selected)
         assert chosen is not None
-        key = chosen["scope_key"]
-        selected_counts[key] = selected_counts.get(key, 0) + 1
-        recently_selected.append(key)
-    assert any(":user:101" in k for k in selected_counts), "私人桶不得被饿死"
-    assert any("public" in k for k in selected_counts)
+        selected.append(chosen["scope_key"])
+    assert set(selected) == {bucket["scope_key"] for bucket in buckets}
+    conn.close()
+
+
+def test_live_dequeue_rotates_private_bucket_under_continuous_public_arrivals(monkeypatch):
+    """Exercise the real dequeue path while new public work keeps arriving."""
+
+    conn = _db()
+    monkeypatch.setattr(pipeline_queue, "get_db_connection", lambda: conn)
+
+    def add_public_arrivals(wave: int, count: int = 5):
+        interview_id = int(
+            conn.execute(
+                "INSERT INTO interview "
+                "(url, company, round, questions_list, owner_id, status, job_position) "
+                "VALUES (?, ?, '一面', 'incoming public work', NULL, 'approved', '后端')",
+                (f"https://public-arrivals.example/{wave}", f"Public wave {wave}"),
+            ).lastrowid
+        )
+        for index in range(count):
+            detail_id = int(
+                conn.execute(
+                    "INSERT INTO questions_detail "
+                    "(interview_id, question, cat1, cat2, owner_id, status) "
+                    "VALUES (?, ?, 'a', 'b', NULL, 'approved')",
+                    (interview_id, f"incoming public {wave}-{index}"),
+                ).lastrowid
+            )
+            conn.execute(
+                "INSERT INTO analysis_queue "
+                "(interview_id, question_detail_id, owner_id, status) "
+                "VALUES (?, ?, NULL, 'pending')",
+                (interview_id, detail_id),
+            )
+        conn.commit()
+
+    # The public rows are oldest and there are more of them initially. Replace
+    # each public batch as it is consumed, so age and count alone cannot expose
+    # the private backlog after the first round.
+    add_public_arrivals(0, 11)
+    for index in range(7):
+        detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail "
+                "(interview_id, question, cat1, cat2, owner_id, status) "
+                "VALUES (1, ?, 'a', 'b', 101, 'approved')",
+                (f"rootless private backlog {index}",),
+            ).lastrowid
+        )
+        conn.execute(
+            "INSERT INTO analysis_queue "
+            "(interview_id, question_detail_id, owner_id, status) "
+            "VALUES (1, ?, 101, 'pending')",
+            (detail_id,),
+        )
+    selected_owners = []
+    recently_selected_scopes = []
+    for wave in range(1, 5):
+        batch = pipeline_queue.dequeue_batch(
+            batch_size=5,
+            recently_selected_scopes=recently_selected_scopes,
+        )
+        assert batch, "a durable pending bucket should be dequeued"
+        selected_owners.append(batch[0]["owner_id"])
+        pipeline_queue.mark_batch_done([item["queue_id"] for item in batch])
+        add_public_arrivals(wave)
+
+    assert 101 in selected_owners, (
+        "the private bucket must run within a bounded number of batches even "
+        f"while public work keeps arriving; selected owners={selected_owners}"
+    )
+    conn.close()
+
+
+async def test_private_backlog_uses_generic_continuation_with_public_contribution(
+    monkeypatch,
+):
+    """A dedicated public contribution loop must yield to rootless private work."""
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO public_contribution_requests "
+        "(id, source_type, source_id, requester_id, public_interview_id, status, snapshot_json, revision) "
+        "VALUES (99, 'interview', 1, 101, 2, 'partially_published', '{}', 1)"
+    )
+    public_detail_id = int(
+        conn.execute(
+            "INSERT INTO questions_detail "
+            "(interview_id, question, cat1, cat2, owner_id, status) "
+            "VALUES (2, 'continuous contribution', 'a', 'b', NULL, 'approved')"
+        ).lastrowid
+    )
+    conn.execute(
+        "INSERT INTO public_contribution_items "
+        "(request_id, source_item_type, source_item_id, ordinal, status, snapshot_json, public_detail_id) "
+        "VALUES (99, 'question', ?, 1, 'queued', '{}', ?)",
+        (public_detail_id, public_detail_id),
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, owner_id, status, contribution_request_id) "
+        "VALUES (2, ?, NULL, 'pending', 99)",
+        (public_detail_id,),
+    )
+    private_detail_id = int(
+        conn.execute(
+            "INSERT INTO questions_detail "
+            "(interview_id, question, cat1, cat2, owner_id, status) "
+            "VALUES (1, 'legacy private question', 'a', 'b', 101, 'approved')"
+        ).lastrowid
+    )
+    conn.execute(
+        "INSERT INTO analysis_queue "
+        "(interview_id, question_detail_id, owner_id, status) "
+        "VALUES (1, ?, 101, 'pending')",
+        (private_detail_id,),
+    )
+    conn.commit()
+
+    from app.db import connection as db_connection
+    from app.services import pipeline
+    from app.worker_cluster_tasks import _schedule_cluster_continuation
+
+    monkeypatch.setattr(db_connection, "get_db_connection", lambda: conn)
+    scheduled = []
+
+    async def capture_schedule(**kwargs):
+        scheduled.append(kwargs)
+
+    monkeypatch.setattr(pipeline, "_run_cluster_batch_in_background", capture_schedule)
+    history = ["rootless:public"]
+    await _schedule_cluster_continuation(
+        None,
+        201,
+        recently_selected_scopes=history,
+    )
+
+    assert scheduled == [{"user_id": 201, "recently_selected_scopes": history}]
     conn.close()
 
 
@@ -186,3 +323,13 @@ def test_failed_public_contribution_item_is_not_reconciled_until_explicit_retry(
     )
     assert public_bucket["pending_count"] == 11
     conn.close()
+
+
+def test_rootless_private_continuation_uses_owner_model_account():
+    payload = {"user_id": 201}
+    private_batch = [{"owner_id": 101}]
+    public_batch = [{"owner_id": None}]
+
+    assert _cluster_batch_user_id(payload, private_batch, root_import_id=None) == 101
+    assert _cluster_batch_user_id(payload, public_batch, root_import_id=None) == 201
+    assert _cluster_batch_user_id(payload, private_batch, root_import_id="imp-root") == 201

@@ -150,6 +150,10 @@ test('owner retry is authorized, concurrent requests share one attempt, and work
     const finished = await snapshotFor(page, IMPORT_ID)
     expect(finished.status).toBe(200)
     expect(finished.body.result?.interview_id).toBeTruthy()
+    await expect(ownerTask.getByRole('button', { name: '查看结果' })).toBeVisible()
+    await ownerTask.getByRole('button', { name: '查看结果' }).click()
+    await expect(page).toHaveURL(/\/interview(?:\?|$)/)
+    await expect(page.getByText('AC007 checkpoint question', { exact: false })).toBeVisible({ timeout: 30000 })
     writeFileSync(tracePath, `${JSON.stringify({
       import_id: IMPORT_ID,
       owner_id: Number(process.env.AC007_EXPECTED_OWNER_ID),
@@ -162,6 +166,7 @@ test('owner retry is authorized, concurrent requests share one attempt, and work
       admin_retry_status: adminRetry.status,
       final_status: finished.body.status,
       result_interview_id: finished.body.result.interview_id,
+      recovered_private_result_opened: true,
       worker_restarted_after_retry: true,
     }, null, 2)}\n`, { flag: 'wx' })
     writeFileSync(finishSignal, 'owner retry completed\n', { flag: 'wx' })

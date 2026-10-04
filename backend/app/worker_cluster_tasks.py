@@ -12,6 +12,13 @@ from app.services.worker_observability import record_worker_heartbeat_async
 logger = logging.getLogger("interview-boss")
 
 
+def _cluster_batch_user_id(payload, batch, *, root_import_id):
+    """Resolve LLM account for rootless personal work without changing actor."""
+    if not root_import_id and batch and batch[0].get("owner_id") is not None:
+        return int(batch[0]["owner_id"])
+    return payload.get("user_id")
+
+
 async def maybe_inject_e2e_public_failure(ctx, batch, *, root_import_id):
     """Fail one marked public item in the disposable AC-029 stack.
 
@@ -40,7 +47,12 @@ async def maybe_inject_e2e_public_failure(ctx, batch, *, root_import_id):
             raise RuntimeError(f"AC029_PUBLIC_ITEM_FAILURE detail_id={int(detail_id)}")
 
 
-async def _schedule_cluster_continuation(root_import_id, actor_id):
+async def _schedule_cluster_continuation(
+    root_import_id,
+    actor_id,
+    *,
+    recently_selected_scopes=None,
+):
     from app.services.pipeline import _run_cluster_batch_in_background
 
     if root_import_id:
@@ -53,6 +65,21 @@ async def _schedule_cluster_continuation(root_import_id, actor_id):
         from app.db.connection import get_db_connection
 
         with get_db_connection() as conn:
+            # A dedicated contribution job may keep receiving public rows.
+            # If legacy private rows are also waiting, use the generic path so
+            # its owner-bucket rotation can give both scopes bounded service.
+            has_personal_row = conn.execute(
+                "SELECT 1 FROM analysis_queue aq "
+                "JOIN interview i ON i.id = aq.interview_id "
+                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
+                "AND aq.owner_id IS NOT NULL AND i.owner_id = aq.owner_id "
+                "AND i.status = 'approved' AND i.deleted_at IS NULL "
+                "AND qd.deleted_at IS NULL LIMIT 1"
+            ).fetchone()
+            if has_personal_row:
+                return "generic"
+
             has_contribution = conn.execute(
                 "SELECT 1 FROM analysis_queue aq "
                 "JOIN interview i ON i.id = aq.interview_id "
@@ -84,28 +111,20 @@ async def _schedule_cluster_continuation(root_import_id, actor_id):
             if has_regular_public_row:
                 return "generic"
 
-            # Legacy personal rows can also be rootless. Rebuild only drains
-            # the public owner bucket, so release eligible private rows through
-            # the generic worker once the rebuild no longer blocks dispatch.
-            has_personal_row = conn.execute(
-                "SELECT 1 FROM analysis_queue aq "
-                "JOIN interview i ON i.id = aq.interview_id "
-                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
-                "WHERE aq.status = 'pending' AND aq.root_import_id IS NULL "
-                "AND aq.owner_id IS NOT NULL AND i.owner_id = aq.owner_id "
-                "AND i.status = 'approved' AND i.deleted_at IS NULL "
-                "AND qd.deleted_at IS NULL LIMIT 1"
-            ).fetchone()
-            return "generic" if has_personal_row else None
+            return None
 
     continuation_scope = await asyncio.to_thread(_rootless_continuation_scope)
     if continuation_scope == "public_contribution":
         await _run_cluster_batch_in_background(
             user_id=actor_id,
             queue_scope="public_contribution",
+            recently_selected_scopes=recently_selected_scopes,
         )
     elif continuation_scope == "generic":
-        await _run_cluster_batch_in_background(user_id=actor_id)
+        await _run_cluster_batch_in_background(
+            user_id=actor_id,
+            recently_selected_scopes=recently_selected_scopes,
+        )
 
 async def recompute_embedding_task(ctx, job_id: int):
     """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
@@ -502,6 +521,7 @@ async def cluster_batch_task(ctx, job_id: int):
     task, payload = claimed
     root_import_id = task.get("root_import_id")
     job_fence = (job_id, int(task["lease_generation"])) if root_import_id else None
+    recently_selected_scopes = list(payload.get("recently_selected_scopes") or [])
 
     def _complete(result):
         with get_db_connection() as conn:
@@ -654,9 +674,13 @@ async def cluster_batch_task(ctx, job_id: int):
                     BATCH_SIZE,
                     owner_id=None,
                     contribution_only=True,
+                    recently_selected_scopes=recently_selected_scopes,
                 )
             else:
-                batch = dequeue_batch(BATCH_SIZE)
+                batch = dequeue_batch(
+                    BATCH_SIZE,
+                    recently_selected_scopes=recently_selected_scopes,
+                )
         if not batch:
             result = {"status": "empty", "new_count": 0}
             if not _complete(result) and job_fence:
@@ -668,6 +692,7 @@ async def cluster_batch_task(ctx, job_id: int):
             await _schedule_cluster_continuation(
                 root_import_id,
                 payload.get("actor_id") or payload.get("user_id"),
+                recently_selected_scopes=recently_selected_scopes,
             )
             return {"job_id": job_id, **result}
 
@@ -723,9 +748,15 @@ async def cluster_batch_task(ctx, job_id: int):
                     scope_fence=scope_fence,
                 )
         else:
+            # Rootless work may mix legacy public and personal buckets. Keep
+            # model lookup scoped to the selected private owner even when the
+            # continuation job was originally triggered by an admin/public
+            # contribution flow.
             cluster_result = await cluster_batch(
                 batch,
-                user_id=payload.get("user_id"),
+                user_id=_cluster_batch_user_id(
+                    payload, batch, root_import_id=root_import_id
+                ),
                 return_new_ids=True,
                 job_fence=job_fence,
                 scope_fence=scope_fence,
@@ -772,6 +803,7 @@ async def cluster_batch_task(ctx, job_id: int):
         await _schedule_cluster_continuation(
             root_import_id,
             payload.get("actor_id") or payload.get("user_id"),
+            recently_selected_scopes=recently_selected_scopes,
         )
         return {"job_id": job_id, **result}
     except Exception as exc:
@@ -817,6 +849,7 @@ async def cluster_batch_task(ctx, job_id: int):
             await _schedule_cluster_continuation(
                 root_import_id,
                 payload.get("actor_id") or payload.get("user_id"),
+                recently_selected_scopes=recently_selected_scopes,
             )
         return {"status": outcome["status"], "job_id": job_id}
     finally:

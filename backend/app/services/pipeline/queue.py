@@ -295,6 +295,7 @@ def dequeue_batch(
     contribution_only: bool = False,
     job_fence: tuple[int, int] | None = None,
     scope_fence: tuple[str, str, int] | None = None,
+    recently_selected_scopes: list[str] | None = None,
 ) -> List[Dict]:
     """原子取出一批 pending 任务并标记为 processing（防并发重复取出）。
 
@@ -350,10 +351,13 @@ def dequeue_batch(
     cursor.execute("BEGIN IMMEDIATE")
     try:
         _assert_queue_write_fences(conn, job_fence, scope_fence)
-        # Pick the owner_id bucket with the most pending items.
-        # NULL owner_id (public) gets priority when tied.
+        # Keep the historical largest-bucket choice for callers which do not
+        # carry durable rotation state. Rootless cluster jobs pass the state
+        # through each continuation so sustained public arrivals cannot starve
+        # a smaller personal bucket.
         bucket_sql = (
-            "SELECT aq.owner_id, COUNT(*) as cnt FROM analysis_queue aq "
+            "SELECT aq.owner_id, COUNT(*) as cnt, MIN(aq.created_at) AS available_at "
+            "FROM analysis_queue aq "
             "JOIN interview i ON i.id = aq.interview_id "
             "WHERE aq.status = 'pending' AND i.deleted_at IS NULL "
             "AND i.status = 'approved' "
@@ -367,12 +371,40 @@ def dequeue_batch(
         bucket_sql += contribution_only_filter
         bucket_sql += failed_contribution_filter
         bucket_params.extend(root_params)
-        bucket_sql += " GROUP BY aq.owner_id ORDER BY cnt DESC LIMIT 1"
-        bucket = cursor.execute(bucket_sql, bucket_params).fetchone()
-        if not bucket:
+        bucket_sql += " GROUP BY aq.owner_id"
+        bucket_rows = cursor.execute(bucket_sql, bucket_params).fetchall()
+        if not bucket_rows:
             conn.commit()
             return []
-        target_owner = bucket["owner_id"]
+        if recently_selected_scopes is None:
+            bucket_rows.sort(
+                key=lambda row: (
+                    -int(row["cnt"]),
+                    row["owner_id"] is not None,
+                    row["owner_id"] or 0,
+                )
+            )
+            target_owner = bucket_rows[0]["owner_id"]
+        else:
+            from app.services.upload_queue import select_next_bucket
+
+            buckets = [
+                {
+                    "scope_key": (
+                        "rootless:public"
+                        if row["owner_id"] is None
+                        else f"rootless:user:{int(row['owner_id'])}"
+                    ),
+                    "owner_id": row["owner_id"],
+                    "pending_count": int(row["cnt"]),
+                    "available_at": row["available_at"],
+                }
+                for row in bucket_rows
+            ]
+            selected_bucket = select_next_bucket(
+                buckets, recently_selected=recently_selected_scopes
+            )
+            target_owner = selected_bucket["owner_id"]
 
         dequeue_params = [
             f"+{STUCK_PROCESSING_THRESHOLD_MINUTES} minutes",
@@ -534,6 +566,7 @@ async def _run_cluster_batch_in_background(
     root_import_id: str | None = None,
     *,
     queue_scope: str | None = None,
+    recently_selected_scopes: list[str] | None = None,
 ) -> bool:
     """创建一个持久化攒批 Job，返回是否新建了任务。
 
@@ -641,6 +674,8 @@ async def _run_cluster_batch_in_background(
             payload = {"user_id": user_id}
             if queue_scope:
                 payload["queue_scope"] = queue_scope
+            if recently_selected_scopes is not None:
+                payload["recently_selected_scopes"] = list(recently_selected_scopes)
             conn.execute(
                 "INSERT INTO job_payloads (job_id, payload) VALUES (?, ?)",
                 (job_id, json.dumps(payload, ensure_ascii=False)),

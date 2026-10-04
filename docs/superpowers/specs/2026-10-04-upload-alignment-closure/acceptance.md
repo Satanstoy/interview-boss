@@ -8,7 +8,7 @@
 |---|---|---|
 | CL-AC-001 | 部分 | 真实栈定位了预置的已发布公共任务结果；尚未在同一浏览器流程验证 share→review→publish 后从该任务卡点击定位。 |
 | CL-AC-002 | 部分 | 真实 SQLite 分页、排序、隔离和目标 lookup 已过；JD 共享 DataTable 的未启用 server mode 回归尚未验证。 |
-| CL-AC-007 | 部分 | 所有者并发恢复、越权 404、保留成功检查点和 worker 重启已过；持续公共流量公平性及 COMMIT 后丢通知的真实恢复尚未联测。 |
+| CL-AC-007 | 部分 | 两个真实 worker 下的持续公共流量公平性、停掉真实队列 Redis 后的 COMMIT→dispatcher→worker 恢复，以及 upload_import 所有者恢复已过；个人 rootless 队列项的所有者重试入口尚未实现和验收，故不满足完整 AC。 |
 | CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
 | CL-AC-011 | 部分 | 状态投影单测通过；8/10 成功、2/10 失败后真实 worker 仅恢复两题的浏览器/API/DB 验收尚未运行。 |
