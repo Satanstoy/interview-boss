@@ -59,13 +59,24 @@ bash -n scripts/real_stack_smoke.sh \
 - [当前镜像浏览器/API trace](2026-10-04-real-stack/ac007-browser-result-current.json)、[当前镜像 SQLite trace](2026-10-04-real-stack/ac007-db-trace-current.json)。
 - 此复跑仍未覆盖持续公共流量公平性和 COMMIT 后丢通知对账，所以 AC-007 维持部分状态。
 
+## AC-010 独立候选栈验收
+
+- 命令：`REAL_STACK_ONLY_AC010=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`。候选项目：`interview-boss-real-e2e-3122953-1791113436`。该栈使用临时 SQLite volume 和独立 Redis；没有连接、读取或写入生产数据库。
+- 测试专用代理路由只存在于 `nginx/nginx.real-e2e.conf`，由 disposable Compose 只读挂载；生产 `nginx/nginx.conf` 不引用该代理。
+- 使用真实 backend、浏览器和 SSE；故障代理只对真实 API/SSE 响应注入 500、延迟 401 和截断 EOF，不伪造成功任务响应。停住 worker 以固定任务快照；本地 HTTP 模型 stub 仅替代模型供应商。
+- 浏览器/API 断言：U1 先收到 revision 8，再经真实重连收到 revision 7，页面保留较新状态；任务列表和详情请求 500 时卡片、状态和进度仍保留；心跳不改变状态/进度/计数。跨 owner 详情为 404。U1 登出后旧 SSE 请求被 abort，延迟列表/refresh 401 不重新打开登录遮罩；切换至 U2 后只有 U2 任务流和任务可见，通用 GET 缓存返回 U2 身份。旧用户草稿清除，U2 的恢复草稿在恢复接口 500 后保留。
+- 恢复接口在 U2 自有 `partial_failed` 任务上实际返回 500；浏览器重试请求未创建第二条工作图。SQLite 证明 U1/U2 两条 running root 及 U2 recoverable root 均保持原 attempt/job 数量。
+- 候选镜像 ID：backend/worker/proxy `sha256:062b341c2c4cb2e39e1538039dda6bac27d18d80aecff50ee4e5079a9c59531c`；frontend `sha256:1b73a93bff67f9dd89d79a85a3cc7341641bd5535825a27caf126fc8a20b1cf8`。本次复用已经构建的镜像。
+- 持久证据：[浏览器/API/SSE trace](2026-10-04-real-stack/ac010-browser-result.json)、[SQLite attempt/job trace](2026-10-04-real-stack/ac010-db-trace.json)、[乱序 revision 7 事件](2026-10-04-real-stack/ac010-revision7.json)。
+
 ## 红绿与专项回归
 
 | 命令 / 验证 | 结果 | 说明 |
 |---|---:|---|
 | `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js -g '私人结果没有岗位 ID 时不发送字面量 undefined 过滤条件'`（修复前） | 1 failed（预期红） | 捕获 location 请求把空岗位 ID 编码成字面量 `position_id=undefined`。 |
 | 同上（修复后） | 1 passed | `UploadTaskCenter.vue` 现在只在岗位 ID 存在时发送该参数。AC-028 的真实候选栈随后通过。 |
-| `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js --reporter=line` | 23 passed | 页面层测试通过 API mock 覆盖 EOF 重连、500 保留最后状态、revision 排序/心跳、账号切换和权限动作；这是 mock UI 回归，不作为真实 SSE/候选栈证据。首次并行运行曾因 Vite 动态模块加载超时 1 项，停掉候选栈后独立重跑全绿。 |
+| `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js --reporter=line` | 24 passed | 页面层测试通过 API mock 覆盖 EOF 重连、500 保留最后状态、revision 排序/心跳、账号切换、权限动作和切换账号清缓存；这是 mock UI 回归，不作为真实 SSE/候选栈证据。真实 API/SSE 证据见 AC-010 独立候选栈验收。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/pipeline/test_upload_snapshot_counts.py backend/tests/pipeline/test_upload_classify_checkpoint_recovery.py backend/tests/pipeline/test_upload_stage_recovery.py backend/tests/pipeline/test_upload_graph_recovery_regressions.py backend/tests/pipeline/test_upload_import_retry.py -q` | 35 passed, 1 warning | AC-007 checkpoint 恢复和 list/detail/by-key 答案计数回归。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/pipeline/test_upload_retry_family.py backend/tests/pipeline/test_upload_queue_reconciliation.py -q` | 12 passed | attempt 复用/并发、授权、work key 和调度公平性单测。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/services/test_upload_status_projection.py backend/tests/services/test_upload_llm_accounting.py backend/tests/infra/test_upload_stream_contract.py -q` | 49 passed | 状态投影、调用账本 helper 和 stream DTO/contract 单测。 |
@@ -73,4 +84,4 @@ bash -n scripts/real_stack_smoke.sh \
 
 ## 尚未关闭的验收
 
-本次真实栈是增量证据，不代表 11 项全部对齐。当前状态表见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)：AC-024 尚未运行；AC-001/002/007/010/011/013/016/017/022 仍有表中列明的验收缺口。后续只在该 AC 完整 Given/When/Then 的真实候选栈证据齐备后标记通过。
+本次真实栈是增量证据，不代表 11 项全部对齐。当前状态表见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)：AC-024 尚未运行；AC-001/002/007/011/013/016/017/022 仍有表中列明的验收缺口。后续只在该 AC 完整 Given/When/Then 的真实候选栈证据齐备后标记通过。

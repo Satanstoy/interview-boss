@@ -31,9 +31,10 @@
 
 - [ ] 在 `backend/tests/pipeline/test_upload_stage_recovery.py` 固定同秒时间，以 U1/U2 两个输入断言根、detail、resolution 和答案归属。
 - [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 用两个连接竞争恢复，并验证 A/B 旧 attempt 都返回 C active。
-- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景。
-- [ ] 在 `frontend/src/composables/useSubmitJobs.js` 修复快照收敛、EOF 重连及身份变化清理，再运行 `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js`。
+- [x] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景；任务中心 24 项 mock 页面回归通过，真实边界另由下方 AC-010 候选栈验收。
+- [x] 在 `frontend/src/composables/useSubmitJobs.js` 验证快照收敛、EOF 重连及身份变化清理；`cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js` 通过，真实 API/SSE 行为见 AC-010 证据。
 - [x] 在实栈场景启两个真实 worker、两个浏览器上下文，交错上传；固定同秒边界后检查跨用户 API 404、任务结果页、DB owner、work_key、resolution、canonical/source 和答案。证据见 `docs/verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json`。跨代并发 retry 仍待 AC-017 场景。
+- [x] 以一次性 SQLite/Redis 候选栈运行 AC-010，验证真实 SSE EOF、列表/详情 500、乱序 revision、心跳、延迟 401、登出切换 U2 与失败恢复保留；Playwright 1 passed，DB attempt/job 数未变。证据见 `docs/verification/upload-recovery/2026-10-04-real-stack/ac010-browser-result.json` 和 `ac010-db-trace.json`。
 
 ## 阶段 4：答案状态和错误预算
 

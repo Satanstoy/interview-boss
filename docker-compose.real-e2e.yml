@@ -188,6 +188,24 @@ services:
       retries: 20
       start_period: 10s
 
+  ac010-proxy:
+    image: interview-boss-app:real-e2e
+    command: ["python", "/app/backend/e2e/ac010_fault_proxy.py"]
+    environment:
+      AC010_CONTROL_TOKEN: real-stack-ac010-control-token
+      AC010_TRUNCATE_DELAY_SECONDS: "4"
+      PYTHONUNBUFFERED: "1"
+    networks: [edge-network, data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+
   nginx:
     build:
       context: .
@@ -195,6 +213,8 @@ services:
       target: nginx-runtime
       network: host
     image: interview-boss-nginx:real-e2e
+    volumes:
+      - ./nginx/nginx.real-e2e.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "127.0.0.1:${REAL_STACK_PORT:-18081}:8080"
     networks: [edge-network]
@@ -202,6 +222,8 @@ services:
       backend:
         condition: service_healthy
       oauth-gateway:
+        condition: service_healthy
+      ac010-proxy:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]

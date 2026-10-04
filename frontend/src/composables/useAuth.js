@@ -44,6 +44,9 @@ const initAuth = async () => {
 
 // ── 登录成功 ──
 const handleLoginSuccess = (user) => {
+  if (String(currentUser.value?.id ?? '') !== String(user?.id ?? '')) {
+    invalidateCache()
+  }
   setTaskUserScope(user?.id)
   currentUser.value = user
   _onReady?.()
@@ -56,6 +59,7 @@ const handleLogout = async () => {
     await authLogout()
   } finally {
     showLoginModal.value = false
+    invalidateCache()
     setTaskUserScope(null)
     setAuthToken('')
     currentUser.value = null
@@ -73,7 +77,11 @@ const handleShareDefaultChanged = (shareDefault) => {
 }
 
 // ── 401 拦截：弹出登录框 ──
-setUnauthorizedHandler(() => { showLoginModal.value = true })
+setUnauthorizedHandler(() => {
+  // A delayed 401 from a request started before logout must not cover the
+  // signed-out LoginPage with a second login form.
+  if (currentUser.value) showLoginModal.value = true
+})
 
 /**
  * 初始化单例回调（在 layout 中调用一次）

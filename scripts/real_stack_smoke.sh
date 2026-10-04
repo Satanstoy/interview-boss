@@ -53,6 +53,10 @@ copy_success_artifacts() {
     ac007-seed.json \
     ac007-browser-result.json \
     ac007-db-trace.json \
+    ac010-seed.json \
+    ac010-revision7.json \
+    ac010-browser-result.json \
+    ac010-db-trace.json \
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
@@ -141,6 +145,77 @@ fi
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/api/health" >/dev/null
+
+if [ "${REAL_STACK_ONLY_AC010:-0}" = "1" ]; then
+  compose stop worker >/dev/null
+  compose exec -T backend python /app/backend/e2e/seed_ac010_tasks.py \
+    >"$TEMP_ARTIFACTS/ac010-seed.json"
+  ac010_control="$TEMP_ARTIFACTS/ac010-revision7"
+  ac010_browser_log="$TEMP_ARTIFACTS/ac010-browser.log"
+
+  cd "$PROJECT_DIR/frontend"
+  REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC010_SEED_PATH="$TEMP_ARTIFACTS/ac010-seed.json" \
+    AC010_REVISION7_SIGNAL="$ac010_control.signal" \
+    AC010_REVISION7_SIGNAL_READY="$ac010_control.ready" \
+    AC010_BROWSER_TRACE="$TEMP_ARTIFACTS/ac010-browser-result.json" \
+    run_frontend_playwright tests/e2e/upload-task-center-ac010-real-stack.spec.js \
+      --timeout "${AC010_REAL_STACK_TEST_TIMEOUT:-180000}" \
+      >"$ac010_browser_log" 2>&1 &
+  ac010_browser_pid=$!
+
+  ac010_wait=0
+  while [ ! -f "$ac010_control.signal" ] && [ "$ac010_wait" -lt 600 ]; do
+    if ! kill -0 "$ac010_browser_pid" >/dev/null 2>&1; then
+      wait "$ac010_browser_pid" || true
+      cat "$ac010_browser_log" >&2
+      exit 1
+    fi
+    ac010_wait=$((ac010_wait + 1))
+    sleep 0.2
+  done
+  if [ ! -f "$ac010_control.signal" ]; then
+    printf 'Timed out waiting for the real AC-010 revision 8 SSE frame.\n' >&2
+    kill "$ac010_browser_pid" >/dev/null 2>&1 || true
+    wait "$ac010_browser_pid" >/dev/null 2>&1 || true
+    cat "$ac010_browser_log" >&2
+    exit 1
+  fi
+
+  ac010_import_id=$(python3 - "$ac010_control.signal" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["import_id"])
+PY
+)
+  compose exec -T backend python /app/backend/e2e/prepare_ac010_tasks.py \
+    --revision "$ac010_import_id" 7 >"$TEMP_ARTIFACTS/ac010-revision7.json"
+  touch "$ac010_control.ready"
+
+  set +e
+  wait "$ac010_browser_pid"
+  ac010_browser_status=$?
+  set -e
+  cat "$ac010_browser_log"
+  if [ "$ac010_browser_status" -ne 0 ]; then
+    exit "$ac010_browser_status"
+  fi
+
+  read -r ac010_import_a ac010_import_b ac010_import_b_failed < <(
+    python3 - "$TEMP_ARTIFACTS/ac010-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(*(root["import_id"] for root in json.load(stream)["roots"]))
+PY
+  )
+  cd "$PROJECT_DIR"
+  compose exec -T backend python /app/backend/e2e/assert_ac010_task_trace.py \
+    "$ac010_import_a" "$ac010_import_b" "$ac010_import_b_failed" \
+    >"$TEMP_ARTIFACTS/ac010-db-trace.json"
+  exit 0
+fi
 
 # AC-001/002 and AC-022 normally run first in the shared candidate stack. The
 # focused AC-007 loop can skip them while iterating on the retry scenario.

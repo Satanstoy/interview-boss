@@ -692,6 +692,39 @@ test('切换账号后清除旧账号任务和本地活跃任务缓存', async ({
   expect(streamCalls).toBe(1)
 })
 
+test('切换账号后清除通用 GET 缓存中的旧用户私有数据', async ({ page }) => {
+  let serverUserId = 101
+  await mockApi(page)
+  await page.route('**/api/auth/me', (route) => route.fulfill({
+    json: { id: serverUserId, username: `u${serverUserId}` },
+  }))
+
+  await page.goto('/')
+  const firstRead = await page.evaluate(async () => {
+    const { get } = await import('/src/services/http.js')
+    return get('/api/auth/me')
+  })
+  expect(firstRead.id).toBe(101)
+
+  serverUserId = 102
+  await page.evaluate(async () => {
+    const { useAuth } = await import('/src/composables/useAuth.js')
+    useAuth().handleLoginSuccess({
+      id: 102,
+      username: 'u102',
+      is_admin: 0,
+      bank_mode: 'public',
+      current_position_id: 1,
+      current_position: '后端开发工程师',
+    })
+  })
+  const secondRead = await page.evaluate(async () => {
+    const { get } = await import('/src/services/http.js')
+    return get('/api/auth/me')
+  })
+  expect(secondRead.id).toBe(102)
+})
+
 test('375px 与 1440px 均可查看任务与恢复按钮', async ({ page }) => {
   await mockApi(page)
   for (const width of [375, 1440]) {
