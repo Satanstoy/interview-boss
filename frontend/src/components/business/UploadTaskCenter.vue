@@ -15,7 +15,12 @@ import {
   retryUploadTask,
 } from '@/composables/useSubmitJobs.js'
 import { getSSE } from '@/services/http.js'
-import { fetchInterviewLocation } from '@/services/dataApi.js'
+import {
+  fetchInterviewLocation,
+  fetchPersonalAnalysisFailures,
+  refreshPersonalAnalysisFailures,
+  retryPersonalAnalysisFailure,
+} from '@/services/dataApi.js'
 import { currentUser } from '@/composables/useAuth.js'
 
 const router = useRouter()
@@ -24,16 +29,44 @@ const open = ref(false)
 const loading = ref(false)
 const error = ref('')
 const tasks = ref([])
+const personalAnalysisFailures = ref([])
 const page = ref(1)
+const personalAnalysisFailurePage = ref(1)
+const personalAnalysisFailureLoadingMore = ref(false)
+const personalAnalysisFailureRefreshing = ref(false)
 const total = ref(0)
+const uploadTaskTotal = ref(0)
+const personalAnalysisFailureTotal = ref(0)
 const busyIds = ref(new Set())
 const announcement = ref('')
 const triggerButton = ref(null)
 const closeButton = ref(null)
 
 const PAGE_SIZE = 20
+const PERSONAL_FAILURE_PAGE_SIZE = 20
+const PERSONAL_FAILURE_REFRESH_BATCH_SIZE = 5000
 let pollTimer = null
 let activeUserId = null
+let refreshSequence = 0
+let personalFailureLoadMoreSequence = 0
+
+async function refreshPersonalFailureRange(loadedCount) {
+  const items = []
+  let total = 0
+  let cursor = null
+  while (items.length < loadedCount) {
+    const requestLimit = Math.min(
+      PERSONAL_FAILURE_REFRESH_BATCH_SIZE,
+      loadedCount - items.length,
+    )
+    const result = await refreshPersonalAnalysisFailures(requestLimit, cursor)
+    total = result.total || 0
+    items.push(...(result.items || []))
+    cursor = result.next_cursor || null
+    if (!cursor || !result.items?.length) break
+  }
+  return { items, total, page: 1, page_size: loadedCount }
+}
 
 const statusLabel = {
   queued: '排队中',
@@ -70,35 +103,93 @@ const actionLabel = {
 }
 
 const hasPendingWork = computed(() =>
-  tasks.value.some((task) => !isTerminalStatus(task.status)),
+  tasks.value.some((task) => !isTerminalStatus(task.status)) || personalAnalysisFailures.value.length > 0,
 )
 
 async function refresh({ silent = true } = {}) {
+  const requestedRefreshSequence = ++refreshSequence
+  personalFailureLoadMoreSequence += 1
+  personalAnalysisFailureLoadingMore.value = false
+  personalAnalysisFailureRefreshing.value = true
   const requestedUserId = currentUser.value?.id == null ? null : String(currentUser.value.id)
   if (!requestedUserId) {
     tasks.value = []
+    personalAnalysisFailures.value = []
+    personalAnalysisFailurePage.value = 1
+    personalFailureLoadMoreSequence += 1
+    personalAnalysisFailureLoadingMore.value = false
+    personalAnalysisFailureRefreshing.value = false
+    uploadTaskTotal.value = 0
+    personalAnalysisFailureTotal.value = 0
     total.value = 0
     return
   }
   if (!silent) loading.value = true
   try {
-    const data = await loadUploadTasks({ page: page.value, pageSize: PAGE_SIZE })
-    if (requestedUserId !== String(currentUser.value?.id ?? '')) return
-    tasks.value = data.items || []
-    total.value = data.total || 0
-    error.value = ''
-    const changed = tasks.value.filter((task) => isTerminalStatus(task.status))
-    if (changed.length) {
-      announcement.value = `任务状态更新：${changed
-        .map((task) => `${task.import_id} ${statusLabel[task.status] || task.status}`)
-        .join('；')}`
+    const requestedPersonalPage = personalAnalysisFailurePage.value
+    const loadedCount = Math.max(
+      PERSONAL_FAILURE_PAGE_SIZE,
+      requestedPersonalPage * PERSONAL_FAILURE_PAGE_SIZE,
+    )
+    const [dataResult, queueRangeResult] = await Promise.allSettled([
+      loadUploadTasks({ page: page.value, pageSize: PAGE_SIZE }),
+      refreshPersonalFailureRange(loadedCount),
+    ])
+    if (
+      requestedUserId !== String(currentUser.value?.id ?? '')
+      || requestedRefreshSequence !== refreshSequence
+    ) return
+    const errors = []
+    if (dataResult.status === 'fulfilled') {
+      const data = dataResult.value
+      tasks.value = data.items || []
+      uploadTaskTotal.value = data.total || 0
+      const changed = tasks.value.filter((task) => isTerminalStatus(task.status))
+      if (changed.length) {
+        announcement.value = `任务状态更新：${changed
+          .map((task) => `${task.import_id} ${statusLabel[task.status] || task.status}`)
+          .join('；')}`
+      }
+    } else {
+      errors.push(dataResult.reason?.message || '上传任务列表加载失败')
     }
+    if (queueRangeResult.status === 'fulfilled') {
+      if (requestedPersonalPage >= personalAnalysisFailurePage.value) {
+        const queueFailures = queueRangeResult.value.items || []
+        personalAnalysisFailures.value = queueFailures
+        personalAnalysisFailureTotal.value = queueRangeResult.value.total || 0
+        personalAnalysisFailurePage.value = Math.max(
+          1,
+          Math.ceil(queueFailures.length / PERSONAL_FAILURE_PAGE_SIZE),
+        )
+      }
+    } else {
+      errors.push(queueRangeResult.reason?.message || '个人失败任务列表加载失败')
+      personalAnalysisFailurePage.value = Math.max(
+        1,
+        Math.ceil(personalAnalysisFailures.value.length / PERSONAL_FAILURE_PAGE_SIZE),
+      )
+    }
+    total.value = uploadTaskTotal.value + personalAnalysisFailureTotal.value
+    error.value = errors.length
+      ? `${errors.join('；')}，已保留已加载任务`
+      : ''
   } catch (err) {
     // AC-010：恢复失败保留已有任务，不把失败当空列表
     error.value = err?.message || '任务列表加载失败，已保留本地状态'
+    if (requestedRefreshSequence === refreshSequence) {
+      personalAnalysisFailurePage.value = Math.max(
+        1,
+        Math.ceil(personalAnalysisFailures.value.length / PERSONAL_FAILURE_PAGE_SIZE),
+      )
+    }
   } finally {
-    loading.value = false
-    if (requestedUserId === String(currentUser.value?.id ?? '')) subscribePendingTasks()
+    if (requestedRefreshSequence === refreshSequence) {
+      loading.value = false
+      personalAnalysisFailureLoadingMore.value = false
+      personalAnalysisFailureRefreshing.value = false
+      if (requestedUserId === String(currentUser.value?.id ?? '')) subscribePendingTasks()
+    }
   }
 }
 
@@ -170,6 +261,13 @@ watch(
     stopTaskStreams()
     activeUserId = nextUserId
     tasks.value = []
+    personalAnalysisFailures.value = []
+    personalAnalysisFailurePage.value = 1
+    personalFailureLoadMoreSequence += 1
+    personalAnalysisFailureLoadingMore.value = false
+    personalAnalysisFailureRefreshing.value = false
+    uploadTaskTotal.value = 0
+    personalAnalysisFailureTotal.value = 0
     total.value = 0
     page.value = 1
     error.value = ''
@@ -224,6 +322,73 @@ async function onAction(task, action) {
       const next = new Set(busyIds.value)
       next.delete(task.import_id)
       busyIds.value = next
+    }
+  }
+}
+
+async function retryPersonalFailure(task) {
+  const busyId = `analysis-queue:${task.queue_id}`
+  busyIds.value = new Set([...busyIds.value, busyId])
+  try {
+    const result = await retryPersonalAnalysisFailure(task.queue_id)
+    personalAnalysisFailures.value = personalAnalysisFailures.value.filter(
+      (item) => item.queue_id !== task.queue_id,
+    )
+    await refresh({ silent: true })
+    announcement.value = result?.created === false
+      ? '该题目已在重新处理中'
+      : '失败题目已重新排队处理'
+  } catch (err) {
+    error.value = err?.message || '重试失败，请稍后重试'
+  } finally {
+    const next = new Set(busyIds.value)
+    next.delete(busyId)
+    busyIds.value = next
+  }
+}
+
+async function loadMorePersonalFailures() {
+  if (personalAnalysisFailureLoadingMore.value) return
+  if (personalAnalysisFailures.value.length >= personalAnalysisFailureTotal.value) return
+
+  const nextPage = personalAnalysisFailurePage.value + 1
+  const requestedUserId = currentUser.value?.id == null ? null : String(currentUser.value.id)
+  const requestedRefreshSequence = refreshSequence
+  const requestedLoadMoreSequence = ++personalFailureLoadMoreSequence
+  personalAnalysisFailureLoadingMore.value = true
+  personalAnalysisFailurePage.value = nextPage
+  try {
+    const result = await fetchPersonalAnalysisFailures({
+      page: nextPage,
+      page_size: PERSONAL_FAILURE_PAGE_SIZE,
+    })
+    if (
+      requestedUserId !== String(currentUser.value?.id ?? '')
+      || requestedRefreshSequence !== refreshSequence
+      || requestedLoadMoreSequence !== personalFailureLoadMoreSequence
+      || personalAnalysisFailurePage.value !== nextPage
+    ) return
+    const existing = new Map(personalAnalysisFailures.value.map((item) => [item.queue_id, item]))
+    for (const item of result.items || []) existing.set(item.queue_id, item)
+    personalAnalysisFailures.value = [...existing.values()]
+    personalAnalysisFailureTotal.value = result.total || 0
+  } catch (err) {
+    if (
+      requestedUserId === String(currentUser.value?.id ?? '')
+      && requestedRefreshSequence === refreshSequence
+      && requestedLoadMoreSequence === personalFailureLoadMoreSequence
+      && personalAnalysisFailurePage.value === nextPage
+    ) {
+      personalAnalysisFailurePage.value = nextPage - 1
+      error.value = err?.message || '更多个人失败任务加载失败'
+    }
+  } finally {
+    if (
+      requestedUserId === String(currentUser.value?.id ?? '')
+      && requestedRefreshSequence === refreshSequence
+      && requestedLoadMoreSequence === personalFailureLoadMoreSequence
+    ) {
+      personalAnalysisFailureLoadingMore.value = false
     }
   }
 }
@@ -385,7 +550,49 @@ onUnmounted(() => {
             </div>
           </li>
 
-          <li v-if="!tasks.length && !loading" class="px-3 py-6 text-center text-xs text-muted-foreground">
+          <li
+            v-for="task in personalAnalysisFailures"
+            :key="`analysis-queue-${task.queue_id}`"
+            class="rounded-lg border border-border/60 p-3"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate text-xs text-muted-foreground">
+                {{ task.company || '个人题库' }} · {{ task.job_position || '未指定岗位' }} · 私人队列
+              </span>
+              <span
+                role="status"
+                class="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive"
+              >
+                失败
+              </span>
+            </div>
+            <p class="mt-1 text-sm">{{ task.question }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-for="action in task.allowed_actions || []"
+                :key="action"
+                type="button"
+                class="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                :disabled="busyIds.has(`analysis-queue:${task.queue_id}`)"
+                @click="action === 'retry' && retryPersonalFailure(task)"
+              >
+                {{ action === 'retry' ? '重试' : action }}
+              </button>
+            </div>
+          </li>
+
+          <li v-if="personalAnalysisFailures.length < personalAnalysisFailureTotal" class="text-center">
+            <button
+              type="button"
+              class="rounded-md px-3 py-2 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+              :disabled="personalAnalysisFailureLoadingMore || personalAnalysisFailureRefreshing"
+              @click="loadMorePersonalFailures"
+            >
+              {{ personalAnalysisFailureLoadingMore ? '加载中…' : personalAnalysisFailureRefreshing ? '刷新中…' : `加载更多个人失败项（${personalAnalysisFailures.length}/${personalAnalysisFailureTotal}）` }}
+            </button>
+          </li>
+
+          <li v-if="!tasks.length && !personalAnalysisFailures.length && !loading" class="px-3 py-6 text-center text-xs text-muted-foreground">
             暂无上传任务
           </li>
         </ul>

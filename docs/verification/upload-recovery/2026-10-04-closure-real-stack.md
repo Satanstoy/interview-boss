@@ -68,7 +68,48 @@ bash -n scripts/real_stack_smoke.sh \
 - COMMIT 后丢通知：真实停止 disposable 队列 Redis，再调用真实 `_run_cluster_batch_in_background`。记录到一次 ARQ 连接失败；SQLite 中同一 durable job 保持 pending。Redis 重启后对真实 `scheduled_submit_job_dispatch_task` 连调两次，只得到一个 queued job/`arq_job_id`；两个 worker 恢复后完成该 job，未完成队列行数为 0。[故障种子](2026-10-04-real-stack/ac007-lost-dispatch-seed.json)、[故障后 outbox](2026-10-04-real-stack/ac007-lost-notification.json)、[dispatcher trace](2026-10-04-real-stack/ac007-dispatch-recovery.json)、[最终 worker 状态](2026-10-04-real-stack/ac007-lost-dispatch-final.json)。
 - 候选镜像：backend/worker `sha256:c42aa4a1afd9b8f70ccefa2c9595b55f02dca79160d0ad5500c7fbe4ef1d048c`；frontend `sha256:46a9c7decf6a46c0f8fb27c5bf5c9a9776380715537aced6e7cc801fe43a5767`；HTTP model stub `sha256:c454e2bb1c70ef31231bd8dda2524794e00b11ba6fdaff8b05a030d64b0c1891`；OAuth gateway `sha256:8e3c05c29a50481784cb5332c4347b1793d5ec3c8b0bf889f8f3085b85d21371`。
 - 上传根任务所有者重试另有真实浏览器/API/SQLite 证据：并发请求共用 attempt 2，U2 与管理员访问为 404，worker 重启后成功，checkpoint hash 保持不变，且浏览器实际打开了恢复后的私人面经。[浏览器 trace](2026-10-04-real-stack/ac007-owner-retry-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac007-owner-retry-db-trace.json)。
-- AC-007 仍为部分：上述所有者重试覆盖 `upload_import` 根任务；原审计缺口是终态 failed 的个人 rootless `analysis_queue` 项没有 owner retry 入口。这个队列项没有 upload attempt/checkpoint 根身份；范围决策已向项目所有者澄清，完成该项前不得将 AC-007 标为通过。
+- 当时的部分状态仅反映 rootless 私人失败项仍未验收；该历史结论已由下面同一当前候选镜像的 rootless owner retry 实测取代。
+
+## CL-AC-007 先前候选栈：所有者与 rootless 重试
+
+- 所有者浏览器/API/SQLite 命令：`REAL_STACK_ONLY_AC007=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_COMPLETION_TIMEOUT_MS=120000 ./scripts/real_stack_smoke.sh`。结果：退出码 `0`，Playwright `1 passed, 0 failed, 0 skipped`；一次性候选项目 `interview-boss-real-e2e-3236536-1791118288`。该测试覆盖 upload root 恢复和私人 rootless 队列项恢复。
+- rootless 浏览器实测：两个 U1 浏览器并发对同一 `queue_id=1` 重试，响应分别为 `202 created=true` 和 `200 created=false`；U2 与管理员请求均为 `404`。两个 U1 任务中心都显示原失败项，并在重试后从失败列表消失。upload root 并发恢复仍收敛到 attempt 2，worker 重启后完成，原成功 extraction checkpoint hash 保持不变，私人结果从任务卡成功打开。
+- SQLite 实测：rootless 原队列行为同一行 `id=1`，owner 为 U1，`root_import_id IS NULL`，最终 `status=done`；生成的问题出现在 U1 私人题库。该行未关联 upload root 或 attempt，也没有新建重复队列行；rootless job 的 `upload_attempt_id` 为 null。rootless 记录没有 upload checkpoint 或 upload resolution，数据库验收因此检查原 queue id、owner、root-null 和私人题库投影。
+- 证据：[浏览器/API trace](2026-10-04-real-stack/ac007-owner-rootless-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac007-owner-rootless-db-trace.json)、[fixture seed](2026-10-04-real-stack/ac007-owner-rootless-seed.json)。
+
+## CL-AC-007 先前候选栈：持续公共流量公平性与 Redis 丢通知
+
+- 命令：`REAL_STACK_ONLY_AC007_QUEUE=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_QUEUE_WORKER_REPLICAS=2 ./scripts/real_stack_smoke.sh`。结果：退出码 `0`；两个真实 worker 容器均健康；一次性候选项目 `interview-boss-real-e2e-3244753-1791118451`。此轮复用上一节的镜像 digest。
+- 公平性：两 worker 处理期间追加 9 波、45 个公共项；公共队列仍有 50 项 pending 时，U1 已完成 5 个私人项；其后队列全部排空，pending 和活跃 rootless job 均为 0，观测时间 6.866 秒。
+- 丢通知恢复：停止 disposable 队列 Redis 后，真实队列写入已提交，但 ARQ 通知失败；SQLite durable job 保持 pending。恢复 Redis 后 dispatcher 用原 idempotency key 恢复同一 job 一次，重复调用没有生成第二个 job；两个 worker 最终完成任务，未完成队列行数为 0。
+- 证据：[公平性 fixture](2026-10-04-real-stack/ac007-current-queue-seed.json)、[公平性 trace](2026-10-04-real-stack/ac007-current-queue-fairness.json)、[排空 trace](2026-10-04-real-stack/ac007-current-queue-idle.json)、[通知丢失 trace](2026-10-04-real-stack/ac007-current-lost-notification.json)、[dispatch 恢复 trace](2026-10-04-real-stack/ac007-current-dispatch-recovery.json)、[最终 worker trace](2026-10-04-real-stack/ac007-current-lost-dispatch-final.json)、[故障 seed](2026-10-04-real-stack/ac007-current-lost-dispatch-seed.json)。
+- 当前候选镜像：backend/worker `sha256:28302ff2c73e660d4a25e0c2c517e4243753e3b0fe23da80382499231189cd5f`；frontend `sha256:32daedbcf27e1b203d6bb73219b31e860f0f8c418e47a6bc50dc121ad3e29628`；本地 HTTP 模型 stub `sha256:1122700106d84200e8f63364781de818e204f0ddbb52bf93380e6bc2c3e4d4db`；OAuth gateway `sha256:fe3189121b56d653b6a886ee27ea9fe060808d9217d30c7072aa37c1253bbd0a`。
+- 边界：API、鉴权、SQLite、Redis、dispatcher、worker 和浏览器均运行真实候选服务；模型供应商边界由本地确定性 HTTP stub 替代。数据只写入 disposable SQLite/Redis，没有连接生产数据库。
+- 首次 rootless 候选运行发现两项验收问题：DB 断言错误地要求 rootless 队列生成 upload `question_resolutions`；runner 在 Playwright 等待逻辑后未恢复 `set -e`，导致断言失败时仍退出 `0`。该次运行不计通过。修正断言以核对 rootless 适用的 queue/owner/private projection 契约，并恢复 fail-fast 后，重新构建运行上面记录的候选栈并通过。
+
+## CL-AC-007 首轮候选栈：所有者、公共贡献隔离与双 worker 恢复
+
+- 所有者真实浏览器/API/SQLite 命令：`REAL_STACK_ONLY_AC007=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_COMPLETION_TIMEOUT_MS=120000 ./scripts/real_stack_smoke.sh`。结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`；候选项目 `interview-boss-real-e2e-3296780-1791120557`。
+- 上传 root：U1 两个浏览器并发重试收敛到 attempt 2，只有一个请求新建 attempt；U2 和管理员跨 owner 均为 `404`。worker 重启后 root 完成，成功 extraction hash 保持不变，浏览器打开同一 U1 私人结果。
+- rootless 私人队列：同一 `queue_id=1` 的并发重试返回 `202 created=true` 与 `200 created=false`；U2/管理员均 `404`。worker 处理后原行到达 `done` 并在 U1 私人题库可见，没有新 root、attempt 或重复 queue row。
+- 公共贡献隔离：真实浏览器打开 owner task center 后，公共贡献失败题不出现在个人失败列表；用个人 rootless retry 入口请求其 queue id 返回 `404`。SQLite 确认其 public interview owner、queue owner 和 root 均为空，queue、contribution request、item 状态仍为 `failed`。
+- 双 worker 命令：`REAL_STACK_ONLY_AC007_QUEUE=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_QUEUE_WORKER_REPLICAS=2 ./scripts/real_stack_smoke.sh`。结果：退出码 `0`；候选项目 `interview-boss-real-e2e-3304523-1791120705`；两个 worker 健康。持续公共到达期间 55 个 public 项仍 pending 时，U1 已完成 5 个私人项，公平性观测为 7.477 秒；随后队列排空。
+- 故障恢复：停止 disposable Redis 后，已提交 durable job 的 ARQ 通知失败；Redis 恢复后重复 dispatch 只产生同一个 job，两个 worker 完成工作。另模拟 rootless 行已提交 `failed→pending` 但 inline scheduler 未创建 job；周期 reconcile 创建/派发 job，worker 最终把原行处理为 `done`，没有 upload root/attempt。
+- 最终候选镜像：backend/worker `sha256:9168352adda986471786168f45ab9f7ccaafa9d54268edc0fc2c31f8cc2d73f0`；frontend `sha256:f4d65c2637b759cca795141e1609d1cc821c71f5776fdf4ffe206ec8ae7e0eb7`；本地确定性 HTTP 模型 stub `sha256:73f50066226905bb36b303bc80801cfa766c21edb505cd213e8d6c3bc3e6f4ee`；OAuth gateway `sha256:576850588d8076d6fcaf6a71f82533df9d406703f37885c3e5e1849abc6c414c`。
+- 持久证据：[所有者浏览器/API](2026-10-04-real-stack/ac007-final-owner-rootless-browser-result.json)、[所有者 SQLite](2026-10-04-real-stack/ac007-final-owner-rootless-db-trace.json)、[脱敏 fixture seed](2026-10-04-real-stack/ac007-final-owner-rootless-seed.json)、[队列公平性](2026-10-04-real-stack/ac007-final-queue-fairness.json)、[队列排空](2026-10-04-real-stack/ac007-final-queue-idle.json)、[丢通知及 dispatch 恢复](2026-10-04-real-stack/ac007-final-dispatch-recovery.json)、[最终 worker](2026-10-04-real-stack/ac007-final-lost-dispatch-final.json)、[rootless 周期对账恢复](2026-10-04-real-stack/ac007-final-rootless-reconcile-recovery.json)。
+- 边界：API、鉴权、SQLite、Redis、ARQ dispatcher、worker 和浏览器都使用候选服务；模型供应商由本地确定性 HTTP stub 替代。只使用 disposable SQLite/Redis，没有连接生产数据库。一次复用旧 backend 镜像的 fixture 运行因缺少新增 seed 字段退出码 `1`，未计入通过；重建镜像后以上两轮复跑均退出码 `0`。
+
+<a id="cl-ac-007-final"></a>
+## CL-AC-007 最终复核：连续范围刷新与队列恢复
+
+- RED→GREEN：固定每批 5000 上限前，`loaded_count=5001` 会返回 200；cursor 超出 SQLite signed-int64 时会触发 `OverflowError`；账号切换期间旧分页失败会清掉新用户的加载状态；范围刷新失败后下一次加载会跳到第 3 页；retry 超大 ID 会在 SQLite 绑定处返回 500。对应测试先复现这些失败，再由有界分页、keyset cursor、请求代次保护、失败后页码回算及 API/service 双层整数范围校验转绿。
+- GREEN 行为：`POST /api/personal-analysis-queue/failed/refresh` 只返回当前认证 owner 的连续失败范围，总量大于 5000 时按 `(created_at, queue_id)` cursor 分批续取。刷新会补足已消失的失败项并重算页码；账号切换、刷新和分页响应都用 user/refresh/load-more 代次校验，旧响应不能写入新状态。普通用户重试仍使用原 `analysis_queue.id`，不得创建 upload root 或 attempt。
+- 本地回归：后端 4 个相关 pipeline 文件 `34 passed, 1 warning`；任务中心完整 Playwright `32 passed`。Python compile、Node syntax check、shell syntax check、Compose config 和 `git diff --check` 均退出码 `0`。Mock UI 测试仅验证前端竞争状态，不代替以下真实候选栈证据。
+- owner 真实候选栈：命令 `REAL_STACK_ONLY_AC007=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_COMPLETION_TIMEOUT_MS=120000 ./scripts/real_stack_smoke.sh`；退出码 `0`，Playwright `1 passed`；项目 `interview-boss-real-e2e-3424878-1791125059`。构建镜像实际运行浏览器/API/鉴权/worker/SQLite 流程，断言 owner 可恢复原 rootless 行、公共贡献失败项不进入个人列表、跨 owner（含管理员）retry 为 `404`，并检查私人题库投影和 root-null 状态。
+- 双 worker 候选栈：命令 `REAL_STACK_ONLY_AC007_QUEUE=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 AC007_QUEUE_WORKER_REPLICAS=2 ./scripts/real_stack_smoke.sh`；退出码 `0`；项目 `interview-boss-real-e2e-3432587-1791125175`。公共队列持续有新任务时私人队列仍取得进展；Redis 通知中断后 durable job 只入队一次；已提交但未 inline 派发的 rootless pending 行由周期对账恢复并处理到 `done`，没有 upload root/attempt。
+- 最终候选镜像 digest：backend/worker `sha256:1932346e2245a5296c0590f0b888bbc6ce3ae79968e23494df3e511b1dc8f84f`；nginx/frontend `sha256:6ede448cada1fc23bc721ccdd062845e1b4cd01de744953d7117dd30679e6001`；本地 HTTP 模型 stub `sha256:b095f36f87d65e2e06239ef8afe549cbe26c913a2454b48dbf0bfd6b7db75fee`；OAuth gateway `sha256:b2c0843f517be61e11b9858b9f6f2dafc0a7931114d02a420f228f8fe4d71801`。
+- 证据：[owner 浏览器/API trace](2026-10-04-real-stack/ac007-range-owner-browser-result.json)、[owner SQLite trace](2026-10-04-real-stack/ac007-range-owner-db-trace.json)、[脱敏 seed](2026-10-04-real-stack/ac007-range-owner-seed.json)、[公平性](2026-10-04-real-stack/ac007-range-queue-fairness.json)、[排空状态](2026-10-04-real-stack/ac007-range-queue-idle.json)、[丢通知及派发恢复](2026-10-04-real-stack/ac007-range-dispatch-recovery.json)、[最终 worker 状态](2026-10-04-real-stack/ac007-range-lost-dispatch-final.json)、[rootless 周期对账恢复](2026-10-04-real-stack/ac007-range-rootless-reconcile-recovery.json)。
+- 边界：这两次是 disposable Docker Compose 候选部署，不是生产部署。API、鉴权、SQLite、Redis、dispatcher、worker 与浏览器使用构建后的候选镜像；模型供应商由本地确定性 HTTP stub 替代。没有连接生产数据库或外部模型。
 
 ## AC-010 独立候选栈验收
 
@@ -87,7 +128,7 @@ bash -n scripts/real_stack_smoke.sh \
 |---|---:|---|
 | `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js -g '私人结果没有岗位 ID 时不发送字面量 undefined 过滤条件'`（修复前） | 1 failed（预期红） | 捕获 location 请求把空岗位 ID 编码成字面量 `position_id=undefined`。 |
 | 同上（修复后） | 1 passed | `UploadTaskCenter.vue` 现在只在岗位 ID 存在时发送该参数。AC-028 的真实候选栈随后通过。 |
-| `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js --reporter=line` | 24 passed | 页面层测试通过 API mock 覆盖 EOF 重连、500 保留最后状态、revision 排序/心跳、账号切换、权限动作和切换账号清缓存；这是 mock UI 回归，不作为真实 SSE/候选栈证据。真实 API/SSE 证据见 AC-010 独立候选栈验收。 |
+| `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js --reporter=line`（本次收尾） | 32 passed | API mock 页面回归覆盖 EOF 重连、500 保留最后状态、revision 排序/心跳、账号切换、权限动作、个人 rootless retry、分页边界、旧账号分页竞态和刷新失败后不跳页；它不作为真实 API/队列证据。真实 owner/rootless API 证据见上面的 AC-007 最终候选栈验收，真实 SSE 证据见 AC-010 独立候选栈验收。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/pipeline/test_upload_snapshot_counts.py backend/tests/pipeline/test_upload_classify_checkpoint_recovery.py backend/tests/pipeline/test_upload_stage_recovery.py backend/tests/pipeline/test_upload_graph_recovery_regressions.py backend/tests/pipeline/test_upload_import_retry.py -q` | 35 passed, 1 warning | AC-007 checkpoint 恢复和 list/detail/by-key 答案计数回归。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/pipeline/test_upload_retry_family.py backend/tests/pipeline/test_upload_queue_reconciliation.py -q` | 12 passed | attempt 复用/并发、授权、work key 和调度公平性单测。 |
 | `PYTHONPATH=backend uv run pytest backend/tests/services/test_upload_status_projection.py backend/tests/services/test_upload_llm_accounting.py backend/tests/infra/test_upload_stream_contract.py -q` | 49 passed | 状态投影、调用账本 helper 和 stream DTO/contract 单测。 |
@@ -95,4 +136,4 @@ bash -n scripts/real_stack_smoke.sh \
 
 ## 尚未关闭的验收
 
-本次真实栈是增量证据，不代表 11 项全部对齐。当前状态表见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)：AC-024 尚未运行；AC-001/002/007/011/013/016/017/022 仍有表中列明的验收缺口。后续只在该 AC 完整 Given/When/Then 的真实候选栈证据齐备后标记通过。
+本次只关闭并标记 CL-AC-007 通过，不代表所有 spec 已对齐。当前其余未闭环项见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)；AC-024 尚未运行，其他标为“部分”的条目仍有各自列明的验收缺口。只有对应 Given/When/Then 的真实候选栈证据齐备后，才逐项标记通过。

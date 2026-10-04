@@ -6,6 +6,7 @@ const IMPORT_ID = 'imp-ac007-owner-retry-real-stack'
 const OWNER = 'ac007_owner'
 const OTHER = 'ac007_other'
 const PASSWORD = 'Ac007-owner-retry-real-stack-123!'
+const ROOTLESS_QUESTION = 'AC007 rootless retry question: explain an idempotent queue consumer.'
 
 function pathOf(value) {
   return new URL(value).pathname
@@ -58,6 +59,42 @@ async function retryAs(page, importId) {
     })
     return { status: response.status, body: await response.json() }
   }, importId)
+}
+
+async function retryPersonalQueueAs(page, queueId) {
+  return page.evaluate(async (id) => {
+    const refreshed = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+    if (!refreshed.ok) return { status: refreshed.status, body: null }
+    const { token } = await refreshed.json()
+    const response = await fetch(`/api/personal-analysis-queue/${encodeURIComponent(id)}/retry`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+    return { status: response.status, body: await response.json() }
+  }, queueId)
+}
+
+async function listPersonalQueueFailuresAs(page) {
+  return page.evaluate(async () => {
+    const refreshed = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
+    if (!refreshed.ok) return { status: refreshed.status, body: null }
+    const { token } = await refreshed.json()
+    const response = await fetch('/api/personal-analysis-queue/failed?page=1&page_size=100', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return { status: response.status, body: await response.json() }
+  })
 }
 
 test('owner retry is authorized, concurrent requests share one attempt, and worker resumes after restart', async ({ browser, page }) => {
@@ -154,6 +191,69 @@ test('owner retry is authorized, concurrent requests share one attempt, and work
     await ownerTask.getByRole('button', { name: '查看结果' }).click()
     await expect(page).toHaveURL(/\/interview(?:\?|$)/)
     await expect(page.getByText('AC007 checkpoint question', { exact: false })).toBeVisible({ timeout: 30000 })
+
+    const rootlessQueueId = Number(process.env.AC007_ROOTLESS_QUEUE_ID)
+    const publicContributionQueueId = Number(process.env.AC007_PUBLIC_CONTRIBUTION_QUEUE_ID)
+    const publicContributionQuestion = process.env.AC007_PUBLIC_CONTRIBUTION_QUESTION
+    expect(rootlessQueueId).toBeGreaterThan(0)
+    expect(publicContributionQueueId).toBeGreaterThan(0)
+    expect(publicContributionQuestion).toBeTruthy()
+    await page.goto('/')
+    await page.getByRole('button', { name: '上传任务中心' }).click()
+    const ownerTaskCenter = page.getByRole('region', { name: '上传任务中心' })
+    const rootlessTask = page.locator('li').filter({ hasText: ROOTLESS_QUESTION })
+    const owner2RootlessTask = owner2.locator('li').filter({ hasText: ROOTLESS_QUESTION })
+    await expect(rootlessTask).toBeVisible()
+    await expect(rootlessTask.getByRole('button', { name: '重试' })).toBeVisible()
+    await expect(owner2RootlessTask).toBeVisible()
+    await expect(page.locator('li').filter({ hasText: publicContributionQuestion })).toHaveCount(0)
+
+    const ownerFailureList = await listPersonalQueueFailuresAs(page)
+    expect(ownerFailureList.status).toBe(200)
+    expect(ownerFailureList.body.total).toBe(1)
+    expect(ownerFailureList.body.items.map((item) => item.queue_id)).toContain(rootlessQueueId)
+    expect(ownerFailureList.body.items.map((item) => item.queue_id)).not.toContain(publicContributionQueueId)
+    const loadedQueueRefreshResponsePromise = page.waitForResponse((response) =>
+      pathOf(response.url()) === '/api/personal-analysis-queue/failed/refresh'
+      && response.request().method() === 'POST',
+    )
+    await ownerTaskCenter.getByRole('button', { name: '刷新' }).click()
+    const loadedQueueRefreshResponse = await loadedQueueRefreshResponsePromise
+    const loadedQueueRefresh = await loadedQueueRefreshResponse.json()
+    expect(loadedQueueRefreshResponse.status(), JSON.stringify(loadedQueueRefresh)).toBe(200)
+    expect(loadedQueueRefresh.items.map((item) => item.queue_id)).toContain(rootlessQueueId)
+    const ownerPublicContributionRetry = await retryPersonalQueueAs(page, publicContributionQueueId)
+    expect(ownerPublicContributionRetry.status).toBe(404)
+
+    const otherRootlessRetry = await retryPersonalQueueAs(other, rootlessQueueId)
+    expect(otherRootlessRetry.status).toBe(404)
+    const adminRootlessRetry = await retryPersonalQueueAs(admin, rootlessQueueId)
+    expect(adminRootlessRetry.status).toBe(404)
+
+    const rootlessRetryPath = `/api/personal-analysis-queue/${rootlessQueueId}/retry`
+    const rootlessFirstResponsePromise = page.waitForResponse((response) =>
+      pathOf(response.url()) === rootlessRetryPath && response.request().method() === 'POST',
+    )
+    const rootlessSecondResponsePromise = owner2.waitForResponse((response) =>
+      pathOf(response.url()) === rootlessRetryPath && response.request().method() === 'POST',
+    )
+    await Promise.all([
+      rootlessTask.getByRole('button', { name: '重试' }).click(),
+      owner2RootlessTask.getByRole('button', { name: '重试' }).click(),
+    ])
+    const [rootlessFirstResponse, rootlessSecondResponse] = await Promise.all([
+      rootlessFirstResponsePromise,
+      rootlessSecondResponsePromise,
+    ])
+    const rootlessFirst = await rootlessFirstResponse.json()
+    const rootlessSecond = await rootlessSecondResponse.json()
+    expect([rootlessFirstResponse.status(), rootlessSecondResponse.status()].sort()).toEqual([200, 202])
+    expect(rootlessFirst.queue_id).toBe(rootlessQueueId)
+    expect(rootlessSecond.queue_id).toBe(rootlessQueueId)
+    expect([rootlessFirst.created, rootlessSecond.created].sort()).toEqual([false, true])
+    await expect(rootlessTask).toHaveCount(0)
+    await expect(owner2RootlessTask).toHaveCount(0)
+
     writeFileSync(tracePath, `${JSON.stringify({
       import_id: IMPORT_ID,
       owner_id: Number(process.env.AC007_EXPECTED_OWNER_ID),
@@ -167,6 +267,19 @@ test('owner retry is authorized, concurrent requests share one attempt, and work
       final_status: finished.body.status,
       result_interview_id: finished.body.result.interview_id,
       recovered_private_result_opened: true,
+      rootless_queue_id: rootlessQueueId,
+      rootless_owner_retries: [
+        { status: rootlessFirstResponse.status(), created: rootlessFirst.created },
+        { status: rootlessSecondResponse.status(), created: rootlessSecond.created },
+      ],
+      rootless_other_owner_retry_status: otherRootlessRetry.status,
+      rootless_admin_retry_status: adminRootlessRetry.status,
+      rootless_queue_removed_from_failed_list_after_retry: true,
+      public_contribution_queue_id: publicContributionQueueId,
+      public_contribution_question_excluded_from_owner_list: true,
+      owner_retry_public_contribution_status: ownerPublicContributionRetry.status,
+      loaded_queue_refresh_status: loadedQueueRefreshResponse.status(),
+      loaded_queue_refresh_queue_ids: loadedQueueRefresh.items.map((item) => item.queue_id),
       worker_restarted_after_retry: true,
     }, null, 2)}\n`, { flag: 'wx' })
     writeFileSync(finishSignal, 'owner retry completed\n', { flag: 'wx' })

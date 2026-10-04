@@ -33,6 +33,7 @@ from app.routers import (
     error_report,
     public_contributions,
     upload_imports,
+    personal_analysis_queue,
 )
 from app.routers.profile_pkg import router as profile_pkg_router
 from app.routers.questions_pkg import router as questions_pkg_router
@@ -240,6 +241,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(submit.router)
 app.include_router(upload_imports.router)
+app.include_router(personal_analysis_queue.router)
 app.include_router(data.router)
 app.include_router(questions.router)
 app.include_router(questions_pkg_router)

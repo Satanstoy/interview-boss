@@ -60,6 +60,7 @@ copy_success_artifacts() {
     ac007-lost-notification.json \
     ac007-dispatch-recovery.json \
     ac007-lost-dispatch-final.json \
+    ac007-rootless-reconcile-recovery.json \
     ac010-seed.json \
     ac010-revision7.json \
     ac010-browser-result.json \
@@ -309,6 +310,27 @@ with open(sys.argv[1], encoding="utf-8") as stream:
     print(json.load(stream)["owner_id"])
 PY
 )
+ac007_rootless_queue_id=$(python3 - "$TEMP_ARTIFACTS/ac007-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["rootless_queue_id"])
+PY
+)
+ac007_public_contribution_queue_id=$(python3 - "$TEMP_ARTIFACTS/ac007-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["public_contribution_queue_id"])
+PY
+)
+ac007_public_contribution_question=$(python3 - "$TEMP_ARTIFACTS/ac007-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["public_contribution_question"])
+PY
+)
 
 cd "$PROJECT_DIR/frontend"
 set +e
@@ -316,6 +338,9 @@ REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
   REAL_STACK_ADMIN_USERNAME=real_stack_admin \
   REAL_STACK_ADMIN_PASSWORD=real-stack-admin-password-123 \
   AC007_EXPECTED_OWNER_ID="$ac007_owner_id" \
+  AC007_ROOTLESS_QUEUE_ID="$ac007_rootless_queue_id" \
+  AC007_PUBLIC_CONTRIBUTION_QUEUE_ID="$ac007_public_contribution_queue_id" \
+  AC007_PUBLIC_CONTRIBUTION_QUESTION="$ac007_public_contribution_question" \
   AC007_BROWSER_TRACE="$TEMP_ARTIFACTS/ac007-browser-result.json" \
   AC007_WORKER_RESTART_SIGNAL="$ac007_control.restart" \
   run_frontend_playwright tests/e2e/upload-owner-retry-real-stack.spec.js \
@@ -327,18 +352,23 @@ if [ "$browser_status" -ne 0 ]; then
   exit "$browser_status"
 fi
 wait "$ac007_monitor_pid"
-read -r ac007_import_id ac007_checkpoint_hash < <(
+set -e
+read -r ac007_import_id ac007_checkpoint_hash ac007_rootless_queue_id \
+  ac007_rootless_interview_id ac007_public_contribution_queue_id < <(
   python3 - "$TEMP_ARTIFACTS/ac007-seed.json" <<'PY'
 import json
 import sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     seed = json.load(stream)
-print(seed["import_id"], seed["checkpoint_hash"])
+print(seed["import_id"], seed["checkpoint_hash"], seed["rootless_queue_id"],
+      seed["rootless_interview_id"], seed["public_contribution_queue_id"])
 PY
 )
 cd "$PROJECT_DIR"
 compose exec -T backend python /app/backend/e2e/assert_ac007_owner_retry_trace.py \
-  "$ac007_import_id" "$ac007_checkpoint_hash" >"$TEMP_ARTIFACTS/ac007-db-trace.json"
+  "$ac007_import_id" "$ac007_checkpoint_hash" "$ac007_rootless_queue_id" \
+  "$ac007_rootless_interview_id" "$ac007_public_contribution_queue_id" \
+  >"$TEMP_ARTIFACTS/ac007-db-trace.json"
 if [ "${REAL_STACK_ONLY_AC007:-0}" = "1" ]; then
   exit 0
 fi
@@ -421,6 +451,10 @@ PY
     wait-lost-dispatch "$ac007_lost_job" "$ac007_lost_interview" \
     --timeout "${AC007_QUEUE_WORKER_TIMEOUT:-120}" \
     >"$TEMP_ARTIFACTS/ac007-lost-dispatch-final.json"
+  compose exec -T backend python /app/backend/e2e/ac007_queue_real_stack.py \
+    recover-rootless-retry-gap "$ac007_queue_owner" \
+    --timeout "${AC007_QUEUE_WORKER_TIMEOUT:-120}" \
+    >"$TEMP_ARTIFACTS/ac007-rootless-reconcile-recovery.json"
   exit 0
 fi
 

@@ -276,20 +276,32 @@ async def scheduled_submit_job_dispatch_task(ctx):
 
 
 async def scheduled_upload_queue_reconcile_task(ctx):
-    """AC-007：v2 聚类队列对账 —— 有 pending 无活跃 job 的桶补单，孤儿转 blocked。
+    """AC-007：恢复有 durable queue row、但缺少待执行 job 的分析工作。
 
-    幂等：重复运行只补缺失的 job；同 root 同 work_key 至多一个活跃 job。
+    覆盖带 root 的 v2 桶以及私人 rootless 队列行。重复运行会复用/忽略
+    已有活跃 rootless job；缺失 job 时由 durable scheduler 补建。
     """
     from app.db.connection import get_db_connection
     from app.services.upload_queue import reconcile_pending_buckets
+    from app.services.personal_analysis_recovery import (
+        oldest_pending_personal_rootless_owner,
+    )
 
     def _run():
         with get_db_connection() as conn:
             report = reconcile_pending_buckets(conn)
+            rootless_owner_id = oldest_pending_personal_rootless_owner(conn)
             conn.commit()
-            return report
+            return report, rootless_owner_id
 
-    report = await asyncio.to_thread(_run)
+    report, rootless_owner_id = await asyncio.to_thread(_run)
+    if rootless_owner_id is not None:
+        from app.services.pipeline.queue import _run_cluster_batch_in_background
+
+        report["rootless_personal_owner_id"] = rootless_owner_id
+        report["rootless_personal_job_scheduled"] = bool(
+            await _run_cluster_batch_in_background(user_id=rootless_owner_id)
+        )
     logger.info("[上传队列] 对账完成: %s", report)
     return report
 

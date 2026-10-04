@@ -9,6 +9,17 @@
  */
 import { test, expect } from '@playwright/test'
 
+test.beforeEach(async ({ page }) => {
+  // Task center now reads both upload roots and personal rootless failures.
+  // Keep the additional API boundary isolated in this mock-only suite.
+  await page.route('**/api/personal-analysis-queue/failed?**', (route) =>
+    route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 20 } }),
+  )
+  await page.route('**/api/personal-analysis-queue/failed/refresh', (route) =>
+    route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 20 } }),
+  )
+})
+
 const MOCK_USER = {
   id: 101,
   username: 'u101',
@@ -44,6 +55,15 @@ const PUBLISHED_PUBLIC_TASK = {
 }
 
 const MOCK_TASKS = { items: [TASK], total: 1, page: 1, page_size: 20 }
+const ROOTLESS_FAILURE = {
+  queue_id: 2700,
+  interview_id: 700,
+  company: 'U1 私人公司',
+  job_position: '后端',
+  question: 'U1 私人失败题',
+  status: 'failed',
+  allowed_actions: ['retry'],
+}
 
 async function mockApi(page, { user = MOCK_USER, task = TASK } = {}) {
   await page.route('**/api/auth/**', (route) =>
@@ -51,6 +71,9 @@ async function mockApi(page, { user = MOCK_USER, task = TASK } = {}) {
   )
   await page.route('**/api/upload-imports?**', (route) =>
     route.fulfill({ json: { ...MOCK_TASKS, items: [task] } }),
+  )
+  await page.route('**/api/personal-analysis-queue/failed?**', (route) =>
+    route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 20 } }),
   )
   await page.route('**/api/upload-imports/imp-e2e-0001', (route) => route.fulfill({ json: task }))
   await page.route('**/api/data/interview/555/location?**', (route) =>
@@ -78,6 +101,447 @@ async function mockApi(page, { user = MOCK_USER, task = TASK } = {}) {
     })
   })
 }
+
+test('个人 rootless 失败项在任务中心由所有者重试原队列项', async ({ page }) => {
+  await mockApi(page)
+  let refreshCalls = 0
+  let retryRequest = null
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  await page.route('**/api/personal-analysis-queue/failed/refresh', (route) => {
+    refreshCalls += 1
+    return route.fulfill({
+      json: {
+        items: refreshCalls === 1 ? [ROOTLESS_FAILURE] : [],
+        total: refreshCalls === 1 ? 1 : 0,
+        page: 1,
+        page_size: 20,
+      },
+    })
+  })
+  await page.route('**/api/personal-analysis-queue/2700/retry', async (route) => {
+    retryRequest = route.request()
+    await route.fulfill({
+      status: 202,
+      json: { queue_id: 2700, status: 'pending', created: true },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  const failureCard = center.locator('li', { hasText: 'U1 私人失败题' })
+  await expect(failureCard).toBeVisible()
+  await expect(failureCard.getByRole('button', { name: '重试' })).toBeVisible()
+  await failureCard.getByRole('button', { name: '重试' }).click()
+
+  await expect.poll(() => retryRequest?.method()).toBe('POST')
+  await expect(failureCard).toHaveCount(0)
+  await expect(center.getByText('失败题目已重新排队处理')).toBeAttached()
+})
+
+test('任务中心可翻到超过首屏的个人 rootless 失败项', async ({ page }) => {
+  await mockApi(page)
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  const firstPage = Array.from({ length: 20 }, (_, index) => ({
+    ...ROOTLESS_FAILURE,
+    queue_id: 2800 + index,
+    question: `个人失败题 ${index + 1}`,
+  }))
+  await page.route('**/api/personal-analysis-queue/failed?**', (route) => {
+    const requestUrl = new URL(route.request().url())
+    if (requestUrl.searchParams.get('page') === '2') {
+      return route.fulfill({
+        json: {
+          items: [{ ...ROOTLESS_FAILURE, queue_id: 2820, question: '第二页个人失败题' }],
+          total: 21,
+          page: 2,
+          page_size: 20,
+        },
+      })
+    }
+    return route.fulfill({
+      json: { items: firstPage, total: 21, page: 1, page_size: 20 },
+    })
+  })
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  await page.route('**/api/personal-analysis-queue/failed/refresh', (route) => {
+    return route.fulfill({
+      json: { items: firstPage, total: 21, page: 1, page_size: 20 },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('个人失败题 20', { exact: true })).toBeVisible()
+  await expect(center.getByText('第二页个人失败题', { exact: true })).toHaveCount(0)
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect(center.getByText('第二页个人失败题', { exact: true })).toBeVisible()
+  await expect(center.getByRole('button', { name: /加载更多个人失败项/ })).toHaveCount(0)
+})
+
+test('任务中心刷新已展开的个人失败页时请求数保持固定', async ({ page }) => {
+  await mockApi(page)
+  const requests = []
+  const loadedItems = new Map()
+  for (let index = 0; index < 20; index += 1) {
+    const item = {
+      ...ROOTLESS_FAILURE,
+      queue_id: 3000 + index,
+      question: `个人失败题-1-${index}`,
+    }
+    loadedItems.set(item.queue_id, item)
+  }
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    const pageNumber = Number(requestUrl.searchParams.get('page') || 1)
+    requests.push({ method: 'GET', page: pageNumber })
+    const itemCount = pageNumber === 4 ? 1 : 20
+    const items = Array.from({ length: itemCount }, (_, index) => ({
+      ...ROOTLESS_FAILURE,
+      queue_id: 3000 + (pageNumber - 1) * 20 + index,
+      question: `个人失败题-${pageNumber}-${index}`,
+    }))
+    for (const item of items) loadedItems.set(item.queue_id, item)
+    return route.fulfill({
+      json: { items, total: 61, page: pageNumber, page_size: 20 },
+    })
+  })
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    const { loaded_count: loadedCount } = route.request().postDataJSON()
+    requests.push({ method: 'POST', loadedCount })
+    return route.fulfill({
+      json: {
+        items: [...loadedItems.values()].slice(0, loadedCount),
+        total: 61,
+        page: 1,
+        page_size: loadedCount,
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  for (let pageNumber = 2; pageNumber <= 4; pageNumber += 1) {
+    await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+    await expect(center.getByText(`个人失败题-${pageNumber}-0`, { exact: true })).toBeVisible()
+  }
+
+  requests.length = 0
+  await center.getByRole('button', { name: '刷新' }).click()
+  await page.waitForTimeout(100)
+
+  expect(requests.filter((request) => request.method === 'GET')).toHaveLength(0)
+  expect(requests.filter((request) => request.method === 'POST')).toEqual([
+    { method: 'POST', loadedCount: 80 },
+  ])
+  await expect(center.getByText('个人失败题-4-0', { exact: true })).toBeVisible()
+})
+
+test('刷新缩短个人失败范围后，加载更多继续请求紧邻页', async ({ page }) => {
+  await mockApi(page)
+  const requests = []
+  const loadedItems = new Map()
+  for (let index = 0; index < 20; index += 1) {
+    const item = {
+      ...ROOTLESS_FAILURE,
+      queue_id: 3000 + index,
+      question: `个人失败题-1-${index}`,
+    }
+    loadedItems.set(item.queue_id, item)
+  }
+  let listTotal = 61
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    const pageNumber = Number(requestUrl.searchParams.get('page') || 1)
+    requests.push(pageNumber)
+    const itemCount = pageNumber === 4 ? 1 : 20
+    const items = Array.from({ length: itemCount }, (_, index) => ({
+      ...ROOTLESS_FAILURE,
+      queue_id: 3000 + (pageNumber - 1) * 20 + index,
+      question: `个人失败题-${pageNumber}-${index}`,
+    }))
+    for (const item of items) loadedItems.set(item.queue_id, item)
+    return route.fulfill({
+      json: { items, total: listTotal, page: pageNumber, page_size: 20 },
+    })
+  })
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    loadedItems.delete(3060)
+    return route.fulfill({
+      json: {
+        items: [...loadedItems.values()].slice(0, 80),
+        total: 61,
+        page: 1,
+        page_size: 80,
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  for (let pageNumber = 2; pageNumber <= 4; pageNumber += 1) {
+    await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+    await expect(center.getByText(`个人失败题-${pageNumber}-0`, { exact: true })).toBeVisible()
+  }
+
+  await center.getByRole('button', { name: '刷新' }).click()
+  await expect(center.getByText('个人失败题-4-0', { exact: true })).toHaveCount(0)
+  const loadMore = center.getByRole('button', { name: /加载更多个人失败项/ })
+  await expect(loadMore).toContainText('60/61')
+  await loadMore.click()
+  await expect.poll(() => requests.filter((requestedPage) => requestedPage === 4).length).toBe(2)
+  await expect(center.getByText('个人失败题-4-0', { exact: true })).toBeVisible()
+})
+
+test('较新的刷新结果优先，旧响应不能恢复已消失的失败项', async ({ page }) => {
+  await mockApi(page)
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  const staleFailure = { ...ROOTLESS_FAILURE, queue_id: 3900, question: '过期的个人失败题' }
+  let refreshCalls = 0
+  let releaseStale
+  let staleCompleted = false
+  const staleResponse = new Promise((resolve) => { releaseStale = resolve })
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    refreshCalls += 1
+    if (refreshCalls === 1) {
+      await staleResponse
+      staleCompleted = true
+      return route.fulfill({ json: { items: [staleFailure], total: 1, page: 1, page_size: 20 } })
+    }
+    return route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 20 } })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect.poll(() => refreshCalls).toBe(1)
+  await center.getByRole('button', { name: '刷新' }).click()
+  await expect.poll(() => refreshCalls).toBe(2)
+  releaseStale()
+  await expect.poll(() => staleCompleted).toBe(true)
+  await page.waitForTimeout(100)
+  await expect(center.getByText('过期的个人失败题', { exact: true })).toHaveCount(0)
+})
+
+test('较新的范围刷新完成后，迟到的分页响应不能恢复旧失败项', async ({ page }) => {
+  await mockApi(page)
+  const firstPage = Array.from({ length: 20 }, (_, index) => ({
+    ...ROOTLESS_FAILURE,
+    queue_id: 4000 + index,
+    question: `个人失败范围项-${index + 1}`,
+  }))
+  const staleFailure = { ...ROOTLESS_FAILURE, queue_id: 4021, question: '过期的第二页失败项' }
+  let releasePageTwo
+  let pageTwoRequested = false
+  let pageTwoCompleted = false
+  const delayedPageTwo = new Promise((resolve) => { releasePageTwo = resolve })
+  let refreshCalls = 0
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    if (requestUrl.searchParams.get('page') === '2') {
+      pageTwoRequested = true
+      await delayedPageTwo
+      pageTwoCompleted = true
+      return route.fulfill({ json: { items: [staleFailure], total: 21, page: 2, page_size: 20 } })
+    }
+    return route.fulfill({ json: { items: firstPage, total: 21, page: 1, page_size: 20 } })
+  })
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    refreshCalls += 1
+    return route.fulfill({
+      json: {
+        items: firstPage,
+        total: refreshCalls === 1 ? 21 : 20,
+        page: 1,
+        page_size: 20,
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('个人失败范围项-20', { exact: true })).toBeVisible()
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect.poll(() => pageTwoRequested).toBe(true)
+  await center.getByRole('button', { name: '刷新' }).click()
+  await expect(center.getByRole('button', { name: /加载更多个人失败项/ })).toHaveCount(0)
+  releasePageTwo()
+  await expect.poll(() => pageTwoCompleted).toBe(true)
+  await page.waitForTimeout(100)
+  await expect(center.getByText('过期的第二页失败项', { exact: true })).toHaveCount(0)
+})
+
+test('切换账号后旧分页失败不能回滚新账号页码或清除加载状态', async ({ page }) => {
+  await mockApi(page)
+  const firstPage = (userId) => Array.from({ length: 20 }, (_, index) => ({
+    ...ROOTLESS_FAILURE,
+    queue_id: (userId === 101 ? 5000 : 6000) + index,
+    question: `用户${userId}个人失败项-${index + 1}`,
+  }))
+  let pageTwoRequests = 0
+  let firstPageTwoFinished = false
+  let releaseFirstPageTwo
+  let releaseSecondPageTwo
+  const firstPageTwoResponse = new Promise((resolve) => { releaseFirstPageTwo = resolve })
+  const secondPageTwoResponse = new Promise((resolve) => { releaseSecondPageTwo = resolve })
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    const requestedPage = Number(requestUrl.searchParams.get('page') || 1)
+    if (requestedPage === 1) {
+      const userId = Number((await page.evaluate(async () => {
+        const { currentUser } = await import('/src/composables/useAuth.js')
+        return currentUser.value?.id
+      })))
+      return route.fulfill({
+        json: { items: firstPage(userId), total: 21, page: 1, page_size: 20 },
+      })
+    }
+    pageTwoRequests += 1
+    if (pageTwoRequests === 1) {
+      await firstPageTwoResponse
+      await route.fulfill({ status: 400, json: { detail: '旧账号分页失败' } })
+      firstPageTwoFinished = true
+      return
+    }
+    await secondPageTwoResponse
+    return route.fulfill({
+      json: {
+        items: [{ ...ROOTLESS_FAILURE, queue_id: 6020, question: '用户102个人失败项-21' }],
+        total: 21,
+        page: 2,
+        page_size: 20,
+      },
+    })
+  })
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    const userId = Number((await page.evaluate(async () => {
+      const { currentUser } = await import('/src/composables/useAuth.js')
+      return currentUser.value?.id
+    })))
+    return route.fulfill({
+      json: { items: firstPage(userId), total: 21, page: 1, page_size: 20 },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('用户101个人失败项-20', { exact: true })).toBeVisible()
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect.poll(() => pageTwoRequests).toBe(1)
+
+  await page.evaluate(async () => {
+    const { useAuth } = await import('/src/composables/useAuth.js')
+    useAuth().handleLoginSuccess({
+      id: 102,
+      username: 'u102',
+      is_admin: 0,
+      bank_mode: 'public',
+      current_position_id: 1,
+      current_position: '后端开发工程师',
+    })
+  })
+  await expect(center.getByText('用户102个人失败项-20', { exact: true })).toBeVisible()
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect.poll(() => pageTwoRequests).toBe(2)
+
+  releaseFirstPageTwo()
+  await expect.poll(() => firstPageTwoFinished).toBe(true)
+  await page.waitForTimeout(100)
+  await expect(center.getByText('旧账号分页失败')).toHaveCount(0)
+  await expect(center.getByText('用户102个人失败项-21', { exact: true })).toHaveCount(0)
+  await expect(center.getByRole('button', { name: /加载中/ })).toBeVisible()
+  releaseSecondPageTwo()
+  await expect(center.getByText('用户102个人失败项-21', { exact: true })).toBeVisible()
+})
+
+test('范围刷新失败后下一次加载更多仍请求未加载的紧邻页', async ({ page }) => {
+  await mockApi(page)
+  const firstPage = Array.from({ length: 20 }, (_, index) => ({
+    ...ROOTLESS_FAILURE,
+    queue_id: 7000 + index,
+    question: `个人失败项-${index + 1}`,
+  }))
+  let pageTwoRequests = 0
+  let releaseStalePageTwo
+  const stalePageTwoResponse = new Promise((resolve) => { releaseStalePageTwo = resolve })
+  const requestedPages = []
+  let refreshCalls = 0
+  await page.unroute('**/api/personal-analysis-queue/failed?**')
+  await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
+    const requestUrl = new URL(route.request().url())
+    const requestedPage = Number(requestUrl.searchParams.get('page') || 1)
+    requestedPages.push(requestedPage)
+    if (requestedPage === 2) {
+      pageTwoRequests += 1
+      if (pageTwoRequests === 1) {
+        await stalePageTwoResponse
+        return route.fulfill({
+          json: {
+            items: [{ ...ROOTLESS_FAILURE, queue_id: 7099, question: '刷新前迟到的失败项' }],
+            total: 21,
+            page: 2,
+            page_size: 20,
+          },
+        })
+      }
+      return route.fulfill({
+        json: {
+          items: [{ ...ROOTLESS_FAILURE, queue_id: 7020, question: '紧邻页的失败项' }],
+          total: 21,
+          page: 2,
+          page_size: 20,
+        },
+      })
+    }
+    return route.fulfill({
+      json: {
+        items: [{ ...ROOTLESS_FAILURE, queue_id: 7120, question: '跳过一页返回的失败项' }],
+        total: 21,
+        page: requestedPage,
+        page_size: 20,
+      },
+    })
+  })
+  await page.unroute('**/api/personal-analysis-queue/failed/refresh')
+  await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
+    refreshCalls += 1
+    if (refreshCalls === 2) {
+      return route.fulfill({ status: 400, json: { detail: '范围刷新失败' } })
+    }
+    return route.fulfill({
+      json: { items: firstPage, total: 21, page: 1, page_size: 20 },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  const center = page.getByRole('region', { name: '上传任务中心' })
+  await expect(center.getByText('个人失败项-20', { exact: true })).toBeVisible()
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect.poll(() => pageTwoRequests).toBe(1)
+
+  await center.getByRole('button', { name: '刷新' }).click()
+  await expect.poll(() => refreshCalls).toBe(2)
+  await expect(center.getByText(/范围刷新失败/)).toBeVisible()
+  await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
+  await expect.poll(() => pageTwoRequests).toBe(2)
+  expect(requestedPages.slice(-1)).toEqual([2])
+
+  releaseStalePageTwo()
+  await expect(center.getByText('紧邻页的失败项', { exact: true })).toBeVisible()
+  await expect(center.getByText('刷新前迟到的失败项', { exact: true })).toHaveCount(0)
+})
 
 test('任务中心展示 allowed_actions 且不出现暂停按钮', async ({ page }) => {
   await mockApi(page)

@@ -9,15 +9,18 @@
 - 任务中心对本人可恢复的 `failed` 或 `partial_failed` 任务显示“重试失败步骤”。`needs_action` 只有在阻塞条件解除后才显示/允许对应恢复动作。
 - 根任务优先使用 `POST /api/upload-imports/{import_id}/retry`。兼容任务使用 `POST /api/submit-jobs/{job_id}/retry`，但必须解析到同一业务根/稳定 occurrence，并调用同一恢复服务；不得由兼容入口另启 graph。
 - 创建 attempt 返回 `202`；发现活跃 attempt 时返回 `200` 和 `created_attempt=false`；无权或不存在返回 `404`；终态不允许恢复、无法安全解析身份/来源或预算耗尽返回 `409` 及稳定错误 code。相同并发请求须拿到同一 attempt ID。
+- 私人 rootless `analysis_queue` 项使用其原 `queue_id` 作为稳定身份：`GET /api/personal-analysis-queue/failed` 只列出当前用户本人、未删除且已批准的私人面经中的 `status='failed'`、`root_import_id IS NULL`、非公共贡献队列行；题目 detail 必须属于该 queue 行关联的同一 interview，且没有 upload `import_id`。接口支持分页，任务中心能按页加载失败列表。任务中心刷新使用 owner-scoped `POST /api/personal-analysis-queue/failed/refresh`，请求 `loaded_count`（1–5000），响应当前仍可恢复的一页、总数和可选稳定游标 `(created_at, queue_id)`；超过一批时按游标续取，服务端不得一次物化无界失败列表。前端以已加载连续范围为目标重取页面，让已完成/删除项后的失败项补位，并按合并行数重算下一页，避免跳页；请求量最多按每 5000 行一批增长，不按 UI 页数增长。分页查询按稳定游标续取，避免状态变化导致 offset 位移漏行。`POST /api/personal-analysis-queue/{queue_id}/retry` 只把该行从 `failed` 原子改回 `pending`。新建恢复返回 `202`、`created=true`；重复请求看到同一行 `pending/processing` 时返回 `200`、`created=false`。响应不创建也不返回 upload root、upload attempt 或 checkpoint。
+- rootless retry 使用当前认证用户触发已有持久队列 scheduler；worker 按队列行 owner 选择个人模型配置。请求只重新排入指定 `queue_id`，不重新提交整条面经；批处理仍可按既有队列规则处理其他已经 pending 的项。本人之外（包括管理员跨 owner）、公共/贡献失败项、带 upload root 的行、已删除或未批准的面经均从 owner API 返回 `404`。公共贡献失败继续走管理员专用入口。
+- `failed→pending` 的 durable queue row 是恢复事实来源；若进程在状态提交后、inline job 创建前退出，定时对账必须发现符合 rootless 个人 scope 的 pending 行，并幂等地恢复/调度一个可执行 job。不能要求用户再次点击，也不能因重复对账创建重复 active job。
 - 普通用户只能恢复自己的任务。跨用户请求，包括管理员借普通用户入口请求他人私有任务，返回 404，不透露任务是否存在。操作审计中的 actor 必须是当前认证身份，不能伪装为任务 owner。
 - 身份映射不唯一、原始实体已删除、源不再有效、pipeline/input 版本无法复用时返回 409 `TASK_RECOVERY_BLOCKED`，包含稳定的 `reason_code` 和 `allowed_actions`，不派发任何 job。
 - 审核通过后的公共贡献失败仍由 `POST /api/admin/public-contributions/{id}/retry` 恢复失败 ordinal；所有者任务按钮不能替代管理员审核/公共处理权限，也不能改变 review projection。
 
 ### 1.2 幂等、预算和恢复范围
 
-- 响应包含根任务快照、当前 attempt、`created_attempt: boolean` 和可执行/阻塞动作。活跃 attempt 已存在时返回该 attempt 和 `created_attempt=false`。
-- 两个并发恢复请求在事务竞争下只能有一个新活跃 attempt。输家返回胜出的 attempt，不创建重复 attempt/job。
-- 新 attempt 只含失败、缺失或已失效步骤。成功且输入版本、pipeline 版本有效的 extraction/classification/persist/resolution/answer 结果必须沿用原 ID/hash。
+- upload root 恢复响应包含根任务快照、当前 attempt、`created_attempt: boolean` 和可执行/阻塞动作。活跃 attempt 已存在时返回该 attempt 和 `created_attempt=false`。rootless 响应包含原 `queue_id`、队列状态及 `created: boolean`，不伪造 attempt。
+- upload root 的两个并发恢复请求在事务竞争下只能有一个新活跃 attempt。输家返回胜出的 attempt，不创建重复 attempt/job。rootless 并发请求以同一原 `queue_id` 收敛：至多一个请求做 `failed→pending`，其余观察相同 `pending/processing` 行，不插入重复队列项。
+- 新 upload attempt 只含失败、缺失或已失效步骤。成功且输入版本、pipeline 版本有效的 extraction/classification/persist/resolution/answer 结果必须沿用原 ID/hash。rootless 行没有 upload checkpoint/current upload resolution；验收要求重排原失败行并在 owner 私人 scope 完成，使原问题可从该用户私人题库读取，不要求构造 upload checkpoint。
 - 单步自动重试总次数、每导入调用预算、用户日配额、系统日预算跨手动恢复累计。手动点击不能重置计数或把已记为 `unknown` 的外部调用当免费成功。超预算返回 409 `RETRY_BUDGET_EXHAUSTED`，保留成果并提供 `reset_at`（若适用）；不能排 job。
 - 用户模型配置修复后，恢复从正确的 user scope 重新预检。global/system 阻塞时保留 `wait_for_global_model` / `retry_after_configuration` 语义；不能改用个人 Key。
 - 已完成、已拒绝、已撤回、无失败工作或明确不可重试的任务不创建 attempt，返回 409 `RETRY_NOT_ALLOWED` 和可读原因。

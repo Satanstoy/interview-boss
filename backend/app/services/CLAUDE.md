@@ -65,6 +65,7 @@
 | `upload_repository.py` | upload recovery 事务内读写：`create_or_get_import`（同幂等键同 hash 复用/不同 hash `IdempotencyConflict`）、`create_attempt`（partial unique 兜底单 active）、`save_stage_result`/`get_stage_result`（UNIQUE(import,stage,unit,input_version)）；**一律不 commit** | — |
 | `upload_status.py` | 根任务状态聚合与操作白名单（AC-011）：running→queued→needs_action→partial_failed/failed→waiting_review→completed；`allowed_actions` 只返回服务端授权动作，无暂停能力绝不出现暂停；**scope 感知错误动作**（contracts §4.4）：needs_action+模型配置错误时 credential_scope=global → `configure_system_model`/`wait_for_global_model`，user → `configure_user_model` | — |
 | `upload_queue.py` | v2 聚类队列调度：桶=(root,scope,岗位) 选桶续调、60 秒对账补幂等 job、孤儿转 blocked 保留证据 | `db/connection` |
+| `personal_analysis_recovery.py` | 个人 rootless `analysis_queue` 失败行的 owner 列表和原行重排：校验 interview/detail 关系、approved/未删除、detail 无 upload import、root-null、非公共贡献；`failed→pending` 保留 queue ID，不创建 upload root/attempt；周期对账扫描 pending 私人 rootless 行补 durable job | SQLite |
 | `upload_retry_budget.py` | 统一错误分类与重试预算（AC-013）：错误码 → 是否自动重试/根状态/动作；物理尝试 3 次、30/60 秒退避；快照 SSE 事件构造 | `models/upload_contracts` |
 | `extraction_integrity.py` | 提取结果完整性（AC-019）：结构错误（null/数字/重复 ordinal）抛 `MODEL_OUTPUT_INVALID`；HR 表述只标记不删除；counts 守恒 | — |
 | `question_resolution.py` | 原题↔规范题关联（AC-005）：`record_resolution`（每 detail 一个当前 resolution，scope 自洽校验）、`invalidate_resolutions_for_canonical`、`list_mine_canonical_ids`（mine 视图 EXISTS 去重） | `db/connection` |

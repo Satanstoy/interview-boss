@@ -20,18 +20,21 @@
 
 ## 阶段 2：队列和所有者重试
 
-- [ ] 在 `backend/tests/pipeline/test_upload_queue_reconciliation.py` 加持续公共流量下私人桶有界执行、COMMIT 后通知丢失仅补一个 job 的失败测试。
+- [x] 为 rootless 私人失败项增加 API RED 用例：列表隔离、同一 queue_id 重排、并发幂等、U2/管理员跨 owner 404、公共/带 root 排除；先观察接口不存在时 4 项失败，再实现并通过 5 项服务/API 测试。
+- [x] 在 `personal_analysis_recovery.py`、`personal_analysis_queue.py` 和 `UploadTaskCenter.vue` 实现 owner-only rootless 重试；服务/API 测试及最终候选栈覆盖 owner、公共贡献排除/404、带 root/错配 detail、并发幂等、完整分页和 worker 恢复；浏览器/API/worker/SQLite 证据已归档。
+- [x] 修复已加载分页的刷新 fan-out 与状态移动漏项：改为 owner-scoped `loaded_count` 请求（每批最多 5000）和 `(created_at, queue_id)` 稳定游标，避免无界响应；4 页仍是单次请求，超过 5000 已加载项时按批次续取。范围移动后填补空位并重算页码；刷新失败不跳页、账号切换不受旧分页响应影响，cursor/retry ID 限于 SQLite signed-int64。后端、mock UI 和真实候选栈复验。
+- [x] 以双 worker 候选栈覆盖持续公共流量下私人桶有界执行、COMMIT 后 Redis 通知丢失只补一个 job；增加“failed→pending 已提交、inline scheduler 缺席”故障窗，由周期对账创建 durable job 并处理完成。证据见候选栈验证账。
 - [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 加本人 rootless 兼容失败恢复、跨用户/管理员越权、预算耗尽、重复点击和 active attempt 返回用例。
 - [ ] 在 `backend/app/services/upload_lifecycle.py` 收敛 attempt 创建/复用和预算判定，再运行 `./.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_retry_family.py backend/tests/pipeline/test_upload_queue_reconciliation.py`。
 - [ ] 在 `backend/app/routers/upload_imports.py` 和 `backend/app/routers/submit.py` 让新旧 retry adapter 调用同一恢复服务；验证认证、actor、404/409 和 `created_attempt` 响应。
 - [ ] 在 `frontend/src/components/business/UploadTaskCenter.vue` 对可重试终态显示所有者操作，并渲染预算/配置阻塞；验证并发点击不会产生第二条请求状态。
-- [ ] 增加实栈双浏览器恢复场景，重启 worker/reconciler 后核对 SQLite 的 attempt/job/checkpoint 数量。
+- [x] 增加实栈双浏览器恢复场景，核对 SQLite 的 attempt/job/checkpoint 数量；当前 AC-007 候选栈还验证了 worker 重启、rootless queue id/owner/root-null/私人题库投影、跨 owner 404 及 pending 无 job 的周期恢复。证据见候选栈验证账；A/B/C 多代 attempt 情形仍属于 AC-017 未完成范围。
 
 ## 阶段 3：并发、SSE 和跨代恢复
 
 - [ ] 在 `backend/tests/pipeline/test_upload_stage_recovery.py` 固定同秒时间，以 U1/U2 两个输入断言根、detail、resolution 和答案归属。
 - [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 用两个连接竞争恢复，并验证 A/B 旧 attempt 都返回 C active。
-- [x] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景；任务中心 24 项 mock 页面回归通过，真实边界另由下方 AC-010 候选栈验收。
+- [x] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景；任务中心 26 项 mock 页面回归通过，真实边界另由下方 AC-010 候选栈验收。
 - [x] 在 `frontend/src/composables/useSubmitJobs.js` 验证快照收敛、EOF 重连及身份变化清理；`cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js` 通过，真实 API/SSE 行为见 AC-010 证据。
 - [x] 在实栈场景启两个真实 worker、两个浏览器上下文，交错上传；固定同秒边界后检查跨用户 API 404、任务结果页、DB owner、work_key、resolution、canonical/source 和答案。证据见 `docs/verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json`。跨代并发 retry 仍待 AC-017 场景。
 - [x] 以一次性 SQLite/Redis 候选栈运行 AC-010，验证真实 SSE EOF、列表/详情 500、乱序 revision、心跳、延迟 401、登出切换 U2 与失败恢复保留；Playwright 1 passed，DB attempt/job 数未变。证据见 `docs/verification/upload-recovery/2026-10-04-real-stack/ac010-browser-result.json` 和 `ac010-db-trace.json`。

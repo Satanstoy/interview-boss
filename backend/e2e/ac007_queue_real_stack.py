@@ -393,6 +393,142 @@ def wait_lost_dispatch(job_id: int, interview_id: int, timeout: float) -> None:
     raise TimeoutError(f"recovered rootless job {job_id} did not complete")
 
 
+def recover_rootless_retry_gap(owner_id: int, timeout: float) -> None:
+    """Simulate a process exit after the queue-row commit but before dispatch."""
+    from app.services.personal_analysis_recovery import retry_personal_analysis_failure
+
+    question = "AC007 rootless reconciler recovery after committed retry"
+    with get_db_connection() as conn:
+        before_attempts = int(conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0])
+        before_jobs = int(
+            conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM jobs WHERE job_type = 'cluster_batch' "
+                "AND root_import_id IS NULL AND created_by = ?",
+                (owner_id,),
+            ).fetchone()[0]
+        )
+        interview_id = int(
+            conn.execute(
+                "INSERT INTO interview "
+                "(url, company, round, questions_list, owner_id, status, job_position) "
+                "VALUES ('https://ac007-queue.example/reconcile-gap', 'AC007 reconcile gap', "
+                "'一面', ?, ?, 'approved', ?) RETURNING id",
+                (question, owner_id, POSITION),
+            ).fetchone()["id"]
+        )
+        detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail "
+                "(interview_id, question, cat1, cat2, owner_id, status) "
+                "VALUES (?, ?, '后端', '调度', ?, 'approved') RETURNING id",
+                (interview_id, question, owner_id),
+            ).fetchone()["id"]
+        )
+        queue_id = int(
+            conn.execute(
+                "INSERT INTO analysis_queue "
+                "(interview_id, question_detail_id, owner_id, status, root_import_id) "
+                "VALUES (?, ?, ?, 'failed', NULL) RETURNING id",
+                (interview_id, detail_id, owner_id),
+            ).fetchone()["id"]
+        )
+        conn.commit()
+
+        retry = retry_personal_analysis_failure(
+            conn, queue_id=queue_id, owner_id=owner_id
+        )
+        if retry != {"queue_id": queue_id, "status": "pending", "created": True}:
+            raise AssertionError(f"owner retry did not commit the original row: {retry}")
+        pending = conn.execute(
+            "SELECT status FROM analysis_queue WHERE id = ?", (queue_id,)
+        ).fetchone()
+        jobs_after_retry = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE job_type = 'cluster_batch' "
+                "AND root_import_id IS NULL AND created_by = ? AND id > ?",
+                (owner_id, before_jobs),
+            ).fetchone()[0]
+        )
+        if not pending or pending["status"] != "pending" or jobs_after_retry != 0:
+            raise AssertionError("simulated crash gap was not established after row commit")
+
+    import app.services.pipeline.queue as cluster_queue
+    from app.worker_scheduled import scheduled_upload_queue_reconcile_task
+
+    original_delay = cluster_queue.CLUSTER_DELAY_SECONDS
+    cluster_queue.CLUSTER_DELAY_SECONDS = 0
+    try:
+        reconcile = asyncio.run(scheduled_upload_queue_reconcile_task({}))
+    finally:
+        cluster_queue.CLUSTER_DELAY_SECONDS = original_delay
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with get_db_connection() as conn:
+            queue_row = conn.execute(
+                "SELECT aq.status, aq.owner_id, aq.root_import_id, aq.interview_id, "
+                "i.owner_id AS interview_owner_id, qd.question, qd.import_id "
+                "FROM analysis_queue aq JOIN interview i ON i.id = aq.interview_id "
+                "JOIN questions_detail qd ON qd.id = aq.question_detail_id "
+                "WHERE aq.id = ?",
+                (queue_id,),
+            ).fetchone()
+            recovered_jobs = conn.execute(
+                "SELECT id, status, root_import_id, upload_attempt_id FROM jobs "
+                "WHERE job_type = 'cluster_batch' AND root_import_id IS NULL "
+                "AND created_by = ? AND id > ? ORDER BY id",
+                (owner_id, before_jobs),
+            ).fetchall()
+            private_result = conn.execute(
+                "SELECT id FROM question_bank WHERE owner_id = ? AND question = ?",
+                (owner_id, question),
+            ).fetchone()
+        if queue_row and queue_row["status"] == "done" and private_result:
+            break
+        time.sleep(0.5)
+
+    if not queue_row or queue_row["status"] != "done" or not private_result:
+        raise TimeoutError("periodic reconciliation did not recover the rootless retry")
+    if (
+        int(queue_row["owner_id"]) != owner_id
+        or int(queue_row["interview_owner_id"]) != owner_id
+        or queue_row["root_import_id"] is not None
+        or queue_row["import_id"] is not None
+        or len(recovered_jobs) != 1
+        or recovered_jobs[0]["status"] != "completed"
+        or recovered_jobs[0]["root_import_id"] is not None
+        or recovered_jobs[0]["upload_attempt_id"] is not None
+    ):
+        raise AssertionError(
+            f"reconciled rootless scope/job changed unexpectedly: "
+            f"queue={dict(queue_row)}, jobs={[dict(row) for row in recovered_jobs]}"
+        )
+
+    with get_db_connection() as conn:
+        linked_roots = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM upload_imports WHERE interview_id = ?",
+                (interview_id,),
+            ).fetchone()[0]
+        )
+        attempts_after = int(conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0])
+    if linked_roots or attempts_after != before_attempts:
+        raise AssertionError("periodic recovery created an upload root or attempt")
+
+    print(json.dumps({
+        "queue_id": queue_id,
+        "interview_id": interview_id,
+        "retry_committed_without_job": True,
+        "reconcile_report": reconcile,
+        "recovered_job": dict(recovered_jobs[0]),
+        "queue_row": dict(queue_row),
+        "private_question_bank_id": int(private_result["id"]),
+        "upload_roots_linked": linked_roots,
+        "upload_attempts_before": before_attempts,
+        "upload_attempts_after": attempts_after,
+    }, ensure_ascii=False, sort_keys=True))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -417,6 +553,9 @@ def main() -> None:
     wait_job.add_argument("job_id", type=int)
     wait_job.add_argument("interview_id", type=int)
     wait_job.add_argument("--timeout", type=float, default=90)
+    gap = sub.add_parser("recover-rootless-retry-gap")
+    gap.add_argument("owner_id", type=int)
+    gap.add_argument("--timeout", type=float, default=120)
     args = parser.parse_args()
 
     if args.command == "seed-fairness":
@@ -439,6 +578,8 @@ def main() -> None:
         assert_dispatched(args.job_id)
     elif args.command == "wait-lost-dispatch":
         wait_lost_dispatch(args.job_id, args.interview_id, args.timeout)
+    elif args.command == "recover-rootless-retry-gap":
+        recover_rootless_retry_gap(args.owner_id, args.timeout)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ PASSWORD = "Ac007-owner-retry-real-stack-123!"
 IMPORT_ID = "imp-ac007-owner-retry-real-stack"
 POSITION = "agent开发/大模型应用开发/大模型开发"
 CHECKPOINT_QUESTION = "AC007 checkpoint question: explain database transaction isolation."
+ROOTLESS_QUESTION = "AC007 rootless retry question: explain an idempotent queue consumer."
+PUBLIC_CONTRIBUTION_QUESTION = "AC007 public contribution failed question: explain queue isolation."
 
 
 def main() -> None:
@@ -45,6 +47,72 @@ def main() -> None:
                 "http://llm-stub:8080/v1",
                 "real-stack-stub",
             ),
+        )
+
+        rootless_interview_id = int(
+            conn.execute(
+                "INSERT INTO interview (url, company, owner_id, status, job_position) "
+                "VALUES ('internal://ac007-rootless-retry', 'AC007 rootless private company', "
+                "?, 'approved', ?) RETURNING id",
+                (user_ids[OWNER], POSITION),
+            ).fetchone()["id"]
+        )
+        rootless_detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail (interview_id, url, company, round, question, "
+                "cat1, cat2, owner_id, status, job_position) "
+                "VALUES (?, 'internal://ac007-rootless-retry', 'AC007 rootless private company', "
+                "'一面', ?, '后端', '队列', ?, 'approved', ?) "
+                "RETURNING id",
+                (rootless_interview_id, ROOTLESS_QUESTION, user_ids[OWNER], POSITION),
+            ).fetchone()["id"]
+        )
+        rootless_queue_id = int(
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, question_detail_id, owner_id, status) "
+                "VALUES (?, ?, ?, 'failed') RETURNING id",
+                (rootless_interview_id, rootless_detail_id, user_ids[OWNER]),
+            ).fetchone()["id"]
+        )
+
+        public_interview_id = int(
+            conn.execute(
+                "INSERT INTO interview (url, company, owner_id, status, job_position) "
+                "VALUES ('internal://ac007-public-contribution', 'AC007 public contribution', "
+                "NULL, 'approved', ?) RETURNING id",
+                (POSITION,),
+            ).fetchone()["id"]
+        )
+        public_detail_id = int(
+            conn.execute(
+                "INSERT INTO questions_detail (interview_id, url, company, round, question, "
+                "cat1, cat2, owner_id, status, job_position) "
+                "VALUES (?, 'internal://ac007-public-contribution', 'AC007 public contribution', "
+                "'一面', ?, '后端', '队列', NULL, 'approved', ?) RETURNING id",
+                (public_interview_id, PUBLIC_CONTRIBUTION_QUESTION, POSITION),
+            ).fetchone()["id"]
+        )
+        public_request_id = int(
+            conn.execute(
+                "INSERT INTO public_contribution_requests "
+                "(source_type, source_id, requester_id, status) "
+                "VALUES ('interview', ?, ?, 'failed') RETURNING id",
+                (public_interview_id, user_ids[OWNER]),
+            ).fetchone()["id"]
+        )
+        conn.execute(
+            "INSERT INTO public_contribution_items "
+            "(request_id, source_item_type, source_item_id, ordinal, status, public_detail_id) "
+            "VALUES (?, 'question', ?, 1, 'failed', ?)",
+            (public_request_id, public_detail_id, public_detail_id),
+        )
+        public_contribution_queue_id = int(
+            conn.execute(
+                "INSERT INTO analysis_queue (interview_id, question_detail_id, owner_id, "
+                "status, contribution_request_id) "
+                "VALUES (?, ?, NULL, 'failed', ?) RETURNING id",
+                (public_interview_id, public_detail_id, public_request_id),
+            ).fetchone()["id"]
         )
 
         payload = {
@@ -162,6 +230,13 @@ def main() -> None:
             "attempt_id": attempt_id,
             "checkpoint_hash": checkpoint_hash,
             "checkpoint_question": CHECKPOINT_QUESTION,
+            "rootless_question": ROOTLESS_QUESTION,
+            "rootless_interview_id": rootless_interview_id,
+            "rootless_detail_id": rootless_detail_id,
+            "rootless_queue_id": rootless_queue_id,
+            "public_contribution_question": PUBLIC_CONTRIBUTION_QUESTION,
+            "public_contribution_queue_id": public_contribution_queue_id,
+            "public_contribution_request_id": public_request_id,
         }, ensure_ascii=False))
 
 

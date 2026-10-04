@@ -2,13 +2,13 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-04，本地隔离候选栈已验证分页/已发布目标定位、multipart 拒绝与幂等、所有者并发重试、worker 重启后个人结果定位、公共审核失败项恢复，以及真实 SSE/快照故障和账号切换收敛。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-04，本地隔离候选栈已验证分页/已发布目标定位、multipart 拒绝与幂等、所有者并发重试、worker 重启后个人结果定位、公共审核失败项恢复、真实 SSE/快照故障和账号切换收敛，以及 AC-007 rootless 私人失败项恢复、持续公共流量公平性和 Redis 丢通知恢复。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
 | CL-AC-001 | 部分 | 真实栈定位了预置的已发布公共任务结果；尚未在同一浏览器流程验证 share→review→publish 后从该任务卡点击定位。 |
 | CL-AC-002 | 部分 | 真实 SQLite 分页、排序、隔离和目标 lookup 已过；JD 共享 DataTable 的未启用 server mode 回归尚未验证。 |
-| CL-AC-007 | 部分 | 两个真实 worker 下的持续公共流量公平性、停掉真实队列 Redis 后的 COMMIT→dispatcher→worker 恢复，以及 upload_import 所有者恢复已过；个人 rootless 队列项的所有者重试入口尚未实现和验收，故不满足完整 AC。 |
+| CL-AC-007 | 通过 | 最终候选镜像的真实浏览器/API/worker/SQLite 验收覆盖 upload root 和 rootless 私人失败行：并发请求收敛到同一 attempt/queue_id，成功 checkpoint 保留，U2/管理员越权为 404，公共贡献失败项不进入个人列表且个人 retry 为 404，rootless 行保持 root-null 并进入 owner 私人题库；分页与固定请求量刷新、双 worker 公平性、COMMIT 后 Redis 通知丢失恢复及状态提交后缺 job 的 rootless 周期对账恢复均通过。命令、最终镜像 digest 和 trace 见[AC-007 最终复核](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-007-final)。 |
 | CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
 | CL-AC-011 | 部分 | 状态投影单测通过；8/10 成功、2/10 失败后真实 worker 仅恢复两题的浏览器/API/DB 验收尚未运行。 |
@@ -51,13 +51,13 @@
 <a id="cl-ac-007"></a>
 ### CL-AC-007（原 AC-007）：公平续调与所有者恢复
 
-**Given** 至少 3 个独立 root：U1 私人 pending 7 项、公共 pending 11 项、另一个持续有新公共工作进入的 root；batch size=5。另准备一个 U1 自己的 rootless/兼容任务，执行后进入 `failed`，保留一个已成功检查点和一个失败步骤；再准备 U2 私人任务及公共审核申请。
+**Given** 建立公平性 fixture：U1 私人 pending 7 项、公共 pending 11 项、另一个持续有新公共工作进入的 root，batch size=5。另建立两种相互独立的失败身份：一个 U1 的 upload root，含一个成功检查点和一个失败步骤；一个 U1 的 rootless 私人 `analysis_queue` 项，`root_import_id IS NULL` 且队列行处于 `failed`。再准备 U2 私人任务及公共贡献失败项。
 
-**When** 两个以上 worker 和 reconciler 在隔离 Redis/真实 SQLite 上处理多个批次，期间阻断一次 COMMIT 后的 ARQ 通知；随后 U1 从浏览器重试自己的可恢复失败任务，并让两个浏览器上下文并发点击同一任务；U2 和 A 尝试使用 U1 的私有任务标识。
+**When** 两个以上 worker 和 reconciler 在隔离 Redis/真实 SQLite 上处理多个批次，期间阻断一次 COMMIT 后的 ARQ 通知。随后 U1 从浏览器分别重试 upload root 和 rootless 私人失败项；两个 U1 浏览器上下文并发重试同一个 rootless `queue_id`，U2 和 A 使用 U1 私有标识尝试两个 owner retry 入口。
 
-**Then** 每个合法 pending 桶在有界轮次内取得 job，连续公共流量不能饿死 U1 私人桶；reconciler 恰好补齐一次缺失 dispatch。所有者重试以同一稳定任务/业务身份创建最多一个新 active attempt，只排失败/缺失步骤；成功 checkpoint 和其数据库 ID/hash 不变。并发请求都观察同一个 active attempt，失败方返回 `created_attempt=false`。跨用户和管理员跨 owner 请求为 404，数据库无新增 attempt/job；actor 记当前用户。没有唯一安全根映射、配置未修复、不可重试状态或预算耗尽时返回契约中的明确阻塞，不制造新 root。
+**Then** 每个合法 pending 桶在有界轮次内取得 job，连续公共流量不能饿死 U1 私人桶；reconciler 恰好补齐一次缺失 dispatch。另将一条 rootless 失败行提交为 `pending` 后阻断 inline scheduler，确认周期对账发现该行并创建/派发一个 durable job，最终由 worker 处理完成。upload root 重试以原 root 创建至多一个 active attempt，只排失败/缺失步骤，成功 checkpoint 及其数据库 ID/hash 不变。rootless retry 以原 `queue_id` 原子执行 `failed→pending`，并发响应都指向同一行，至多一个 `created=true`；处理后该行仍 `root_import_id IS NULL`、属于 U1 私人面经并到达 `done`，原问题可在 U1 私人题库看到；数据库没有为它新建 upload root、upload attempt 或重复 queue row。任务中心对已加载个人失败页的刷新以最多 5000 项的 `loaded_count` 分页，按稳定游标续取当前失败项；4 页场景只需一个范围请求，超过一批时请求数按 5000 行批次增长而非按 UI 页增长。已完成项移出后后续行补位、下一页游标与返回范围一致；新范围刷新完成后迟到的分页/刷新响应不能恢复已消失项。U2 和管理员跨 owner 请求均为 404，且没有写入。两个入口的 actor 都是当前认证用户。
 
-公共贡献已经批准后的失败 item 仍只能由管理员专用 retry 入口恢复；owner retry 不改 review 状态、不发未批准公共工作。实际容器重启 Redis 通知路径，确认恢复后的私有结果可打开、公共结果只有满足审核/发布门槛后才公开。
+公共/公共贡献失败项不出现在个人 rootless 列表，也不能经个人 retry 入口恢复；公共贡献仍只能由管理员专用入口处理。owner retry 不改 review 状态、不发未批准公共工作。实际容器重启 Redis 通知路径，确认 upload root 恢复后的私人结果可打开、公共结果只有满足审核/发布门槛后才公开。rootless 项没有 upload attempt/checkpoint/current upload resolution；验收核对原 queue_id、owner、root-null 和最终私人题库投影，不能套用 upload root 的 attempt/hash 断言。
 
 <a id="cl-ac-009"></a>
 ### CL-AC-009（原 AC-009）：并发上传不串单

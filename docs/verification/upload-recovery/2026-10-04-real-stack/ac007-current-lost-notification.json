@@ -1,0 +1,1 @@
+{"active_rootless_job_count": 1, "enqueue_attempt_returned": true, "failure_log_count": 1, "idempotency_key": "cluster-window:2:75d93312e1044badbad64e0c6dd39b74", "job_id": 127, "post_commit_enqueue_failure_observed": true, "queue_redis_container_stopped": true, "status_after_lost_notification": "pending"}

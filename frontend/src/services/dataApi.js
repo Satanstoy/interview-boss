@@ -58,6 +58,12 @@ export const fetchUploadImportByKey = (idempotencyKey) =>
   get(`${API}/upload-imports/by-key/${encodeURIComponent(idempotencyKey)}`, { noCache: true })
 export const retryUploadImport = (importId) =>
   post(`${API}/upload-imports/${encodeURIComponent(importId)}/retry`, {})
+export const fetchPersonalAnalysisFailures = (params = {}) =>
+  get(`${API}/personal-analysis-queue/failed?${new URLSearchParams(params)}`, { noCache: true })
+export const refreshPersonalAnalysisFailures = (loadedCount = 20, cursor = null) =>
+  post(`${API}/personal-analysis-queue/failed/refresh`, { loaded_count: loadedCount, cursor })
+export const retryPersonalAnalysisFailure = (queueId) =>
+  post(`${API}/personal-analysis-queue/${encodeURIComponent(queueId)}/retry`, {})
 export const fetchInterviewLocation = (interviewId, params = {}) =>
   get(`${API}/data/interview/${encodeURIComponent(interviewId)}/location?${new URLSearchParams(params)}`, { noCache: true })
 
