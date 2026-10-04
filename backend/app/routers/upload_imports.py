@@ -426,7 +426,12 @@ async def list_upload_imports(
             ).fetchall()
             return {
                 "items": [
-                    _snapshot(row, conn=conn, actor_is_admin=bool(user.get("is_admin")))
+                    _snapshot(
+                        row,
+                        counts=_stage_counts(conn, str(row["id"])),
+                        conn=conn,
+                        actor_is_admin=bool(user.get("is_admin")),
+                    )
                     for row in rows
                 ],
                 "total": total,
@@ -447,7 +452,12 @@ async def get_upload_import_by_key(idempotency_key: str, user: dict = Depends(ge
                 (user["id"], idempotency_key),
             ).fetchone()
             return (
-                _snapshot(row, conn=conn, actor_is_admin=bool(user.get("is_admin")))
+                _snapshot(
+                    row,
+                    counts=_stage_counts(conn, str(row["id"])),
+                    conn=conn,
+                    actor_is_admin=bool(user.get("is_admin")),
+                )
                 if row is not None
                 else None
             )
@@ -464,6 +474,7 @@ async def get_upload_import(import_id: str, user: dict = Depends(get_current_use
         with get_db_connection() as conn:
             return _snapshot(
                 _load_owned(conn, import_id, user["id"]),
+                counts=_stage_counts(conn, import_id),
                 conn=conn,
                 actor_is_admin=bool(user.get("is_admin")),
             )

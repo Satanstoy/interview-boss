@@ -240,12 +240,14 @@ async function openResult(task) {
     const sort = appData?.interviewSortOrder?.value === 'asc'
       ? 'created_at_asc'
       : 'created_at_desc'
-    const location = await fetchInterviewLocation(interviewId, {
+    const locationParams = {
       sort,
       page_size: pageSize,
-      position_id: task.position_id || task.result?.position_id || undefined,
       scope: 'all',
-    })
+    }
+    const positionId = task.position_id ?? task.result?.position_id
+    if (positionId != null && positionId !== '') locationParams.position_id = positionId
+    const location = await fetchInterviewLocation(interviewId, locationParams)
     // 只在用户主动“查看结果”时切换筛选与页码
     if (appData?.filterSeason) appData.filterSeason.value = ''
     router.push({

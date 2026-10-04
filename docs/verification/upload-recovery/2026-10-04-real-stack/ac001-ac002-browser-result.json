@@ -1,0 +1,109 @@
+{
+  "user_id": 2,
+  "p1_position_id": "1",
+  "p2_position_id": 2,
+  "p1_total": 121,
+  "equal_timestamp_first_page_ids": [
+    121,
+    120,
+    119,
+    118,
+    117,
+    116,
+    115,
+    114,
+    113,
+    112,
+    111,
+    110,
+    109,
+    108,
+    107,
+    106,
+    105,
+    104,
+    103,
+    102
+  ],
+  "p1_page_two_ids": [
+    101,
+    100,
+    99,
+    98,
+    97,
+    96,
+    95,
+    94,
+    93,
+    92,
+    91,
+    90,
+    89,
+    88,
+    87,
+    86,
+    85,
+    84,
+    83,
+    82
+  ],
+  "season_total": 61,
+  "ascending_first_page_ids": [
+    1,
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15,
+    17,
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31,
+    33,
+    35,
+    37,
+    39
+  ],
+  "hidden_u2_marker_present": false,
+  "hidden_p2_marker_in_p1_list": false,
+  "target_location": {
+    "interview_id": 124,
+    "rank": 0,
+    "page_size": 20,
+    "page": 1,
+    "position_id": 2,
+    "position_name": "AC001 数据 P2"
+  },
+  "clicked_task_location": {
+    "interview_id": 124,
+    "rank": 1,
+    "page_size": 20,
+    "page": 1,
+    "position_id": 2,
+    "position_name": "AC001 数据 P2"
+  },
+  "task_result_target": {
+    "entity_type": "interview",
+    "entity_id": 124,
+    "scope": "public"
+  },
+  "jd_legacy_response": {
+    "status": 200,
+    "query": {
+      "page": "1",
+      "page_size": "100"
+    },
+    "body": {
+      "items": [],
+      "total": 0,
+      "page": 1,
+      "page_size": 100
+    }
+  }
+}

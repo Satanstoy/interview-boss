@@ -132,6 +132,29 @@ test('已发布分享任务定位公共结果并沿用当前每页数量', async
   await expect(page).toHaveURL(/highlight=777/)
 })
 
+test('私人结果没有岗位 ID 时不发送字面量 undefined 过滤条件', async ({ page }) => {
+  const taskWithoutPosition = {
+    ...TASK,
+    position_id: null,
+    result: { interview_id: 555, position_id: null },
+  }
+  await mockApi(page, { task: taskWithoutPosition })
+  let locationQuery
+  await page.route('**/api/data/interview/555/location?**', async (route) => {
+    locationQuery = new URL(route.request().url()).searchParams
+    await route.fulfill({
+      json: { interview_id: 555, page: 1, page_size: 20, rank: 0, position_id: null },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '上传任务中心' }).click()
+  await page.getByRole('button', { name: '查看结果' }).click()
+
+  await expect.poll(() => locationQuery?.has('position_id')).toBe(false)
+  await expect.poll(() => locationQuery?.get('scope')).toBe('all')
+})
+
 test('恢复接口 500 时保留已有任务', async ({ page }) => {
   await mockApi(page)
   await page.route('**/api/upload-imports/imp-e2e-0001/retry', (route) =>

@@ -141,7 +141,88 @@ class StubHandler(BaseHTTPRequestHandler):
             self._send_json(503, {"error": {"message": "stub provider failure"}})
             return
 
-        if "AC029_PUBLIC_SHARE_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
+        if "AC007_OWNER_RETRY_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC007_OWNER_RETRY_REAL_STACK 公司",
+                        "面试轮次": "一面",
+                        "考察重点": "数据库事务与隔离级别",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {
+                                "ordinal": 1,
+                                "question": "AC007 checkpoint question: explain database transaction isolation.",
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        elif (
+            "AC007_OWNER_RETRY_REAL_STACK" in prompt_text
+            and "一级大类" in prompt_text
+            and "请为以下题目列表标记" in prompt_text
+        ):
+            content = json.dumps(
+                {
+                    "questions": [
+                        {
+                            "id": 0,
+                            "题目": "AC007 checkpoint question: explain database transaction isolation.",
+                            "一级大类": "C.基础工程能力",
+                            "二级子类": "C3.数据库基础",
+                            "考点标签": "事务隔离",
+                            "难度标签": "L2-中等",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        elif "AC009_USER_A_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC009_USER_A 公司",
+                        "面试轮次": "A 用户一面",
+                        "考察重点": "A 用户隔离验收",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {"ordinal": 101, "question": "AC009_USER_A 专属问题：解释事务隔离。"}
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        elif "AC009_USER_B_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC009_USER_B 公司",
+                        "面试轮次": "B 用户二面",
+                        "考察重点": "B 用户隔离验收",
+                        "难易程度": "困难",
+                        "具体题目清单": [
+                            {"ordinal": 202, "question": "AC009_USER_B 专属问题：解释消息幂等。"}
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        elif "AC009_USER_A_REAL_STACK" in prompt_text and "请为以下题目列表标记" in prompt_text:
+            content = json.dumps(
+                {"questions": [{"id": 0, "题目": "AC009_USER_A 专属问题：解释事务隔离。", "一级大类": "C.基础工程能力", "二级子类": "C3.数据库基础", "考点标签": "事务隔离", "难度标签": "L2-中等"}]},
+                ensure_ascii=False,
+            )
+        elif "AC009_USER_B_REAL_STACK" in prompt_text and "请为以下题目列表标记" in prompt_text:
+            content = json.dumps(
+                {"questions": [{"id": 0, "题目": "AC009_USER_B 专属问题：解释消息幂等。", "一级大类": "C.基础工程能力", "二级子类": "C3.数据库基础", "考点标签": "消息幂等", "难度标签": "L3-困难"}]},
+                ensure_ascii=False,
+            )
+        elif "AC029_PUBLIC_SHARE_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
             content = json.dumps(
                 {
                     "type": "interview",
@@ -248,6 +329,19 @@ class StubHandler(BaseHTTPRequestHandler):
                 content = json.dumps({"matches": []}, ensure_ascii=False)
         elif "面试题聚类专家" in prompt_text:
             content = json.dumps({"clusters": []}, ensure_ascii=False)
+        elif "AC009_USER_A 专属问题" in prompt_text:
+            content = (
+                "AC009_USER_A_ANSWER：按照隔离级别解释可见性边界，并指出并发事务的校验步骤。"
+            )
+        elif "AC009_USER_B 专属问题" in prompt_text:
+            content = (
+                "AC009_USER_B_ANSWER：使用幂等键约束重复消息，并说明如何验证重试结果。"
+            )
+        elif "AC009_USER_A_REAL_STACK" in prompt_text or "AC009_USER_B_REAL_STACK" in prompt_text:
+            content = (
+                "该答案只属于当前上传人的隔离测试记录。请结合题目逐步说明依据、"
+                "关键边界和验证方法，不引用另一位用户的数据。"
+            )
         else:
             content = json.dumps(
                 {

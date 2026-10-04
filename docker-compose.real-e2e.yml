@@ -127,6 +127,42 @@ services:
       retries: 20
       start_period: 15s
 
+  worker-ac009-a:
+    profiles: ["ac009-real"]
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "arq", "e2e.worker_settings_ac009.WorkerSettings"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+
+  worker-ac009-b:
+    profiles: ["ac009-real"]
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "arq", "e2e.worker_settings_ac009.WorkerSettings"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+
   oauth-gateway:
     build:
       context: ./oauth-gateway

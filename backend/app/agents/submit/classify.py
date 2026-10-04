@@ -85,7 +85,7 @@ async def complete_node(state: SubmitState) -> dict:
     }
 
 
-@upload_llm_stage("classify", unit_key="question-batch")
+@upload_llm_stage("classify", unit_key="question-batch", checkpoint_result=True)
 async def classify_node(state: SubmitState) -> dict:
     """分类标注节点 -- 调用现有 tag_questions_batch + 质量检查（F08：支持复用检查点）"""
     from app.services.submit_service import tag_questions_batch

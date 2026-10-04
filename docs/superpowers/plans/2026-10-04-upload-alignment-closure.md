@@ -33,7 +33,7 @@
 - [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 用两个连接竞争恢复，并验证 A/B 旧 attempt 都返回 C active。
 - [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景。
 - [ ] 在 `frontend/src/composables/useSubmitJobs.js` 修复快照收敛、EOF 重连及身份变化清理，再运行 `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js`。
-- [ ] 在实栈场景启两个真实 worker、两个浏览器上下文，交错上传及并发 retry；检查 API、SSE、DB owner 和 work_key。
+- [x] 在实栈场景启两个真实 worker、两个浏览器上下文，交错上传；固定同秒边界后检查跨用户 API 404、任务结果页、DB owner、work_key、resolution、canonical/source 和答案。证据见 `docs/verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json`。跨代并发 retry 仍待 AC-017 场景。
 
 ## 阶段 4：答案状态和错误预算
 

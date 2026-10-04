@@ -1,0 +1,32 @@
+{
+  "username": "ac022_1791107146967978",
+  "idempotency_key": "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+  "rejected_statuses": [
+    400,
+    400,
+    413
+  ],
+  "accepted_import_id": "80293292-c481-45c7-af6c-b55653d51583",
+  "accepted_created": true,
+  "replay_import_id": "80293292-c481-45c7-af6c-b55653d51583",
+  "replay_created": false,
+  "changed_hash_status": 409,
+  "submit_request_keys": [
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696",
+    "a49dc76b-aba0-47e5-b46f-5ae1f8cc4696"
+  ],
+  "by_key_lookup_statuses": [
+    404,
+    404,
+    404,
+    404,
+    404,
+    404,
+    404
+  ],
+  "draft_preserved_after_rejection": true
+}

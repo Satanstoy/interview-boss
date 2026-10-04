@@ -1,0 +1,20 @@
+{
+  "users": [
+    "ac009_a_1791110037372439",
+    "ac009_b_1791110037372439"
+  ],
+  "imports": [
+    "4589a461-a48c-482d-9ca7-cb6feae126f0",
+    "9af6ed6e-3a58-4b6d-a69a-fde23956594b"
+  ],
+  "interviews": [
+    1,
+    2
+  ],
+  "fixed_same_second": true,
+  "cross_owner_snapshot_statuses": [
+    404,
+    404
+  ],
+  "own_results_opened": true
+}

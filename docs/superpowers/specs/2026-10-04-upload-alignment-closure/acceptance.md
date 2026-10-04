@@ -1,6 +1,22 @@
 # 剩余 11 项的验收矩阵
 
-属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。以下均为验收要求，不代表目前已运行或已通过。
+属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
+
+截至 2026-10-04，本地隔离候选栈已验证分页/已发布目标定位、multipart 拒绝与幂等、所有者并发重试、worker 重启后个人结果定位，以及公共审核失败项恢复。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+
+| 闭环 AC | 当前状态 | 未闭环证据 |
+|---|---|---|
+| CL-AC-001 | 部分 | 真实栈定位了预置的已发布公共任务结果；尚未在同一浏览器流程验证 share→review→publish 后从该任务卡点击定位。 |
+| CL-AC-002 | 部分 | 真实 SQLite 分页、排序、隔离和目标 lookup 已过；JD 共享 DataTable 的未启用 server mode 回归尚未验证。 |
+| CL-AC-007 | 部分 | 所有者并发恢复、越权 404、保留成功检查点和 worker 重启已过；持续公共流量公平性及 COMMIT 后丢通知的真实恢复尚未联测。 |
+| CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
+| CL-AC-010 | 部分 | 任务中心 23 项前端测试通过；真实 API/SSE 代理故障和账号切换全链路尚未运行。 |
+| CL-AC-011 | 部分 | 状态投影单测通过；8/10 成功、2/10 失败后真实 worker 仅恢复两题的浏览器/API/DB 验收尚未运行。 |
+| CL-AC-013 | 部分 | 调用预算与 stream contract 单测通过；本地 HTTP provider 的 401/429/超时真实请求计数和旧入口联测尚未运行。 |
+| CL-AC-016 | 部分 | 公共审核、失败子项恢复的候选栈回归通过；相同 URL 两份 contribution 加同 URL 私人面经的完整累计投影验收尚未运行。 |
+| CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
+| CL-AC-022 | 部分 | 真实 MIME/空文件/超限拒绝、草稿保留、重提和幂等已过；后端读取字节数/临时文件在超限前的断言尚未验证。 |
+| CL-AC-024 | 未运行 | 尚无真实 JD 兼容 retry→审核发布和历史 approved 数据不重放验收。 |
 
 ## 1. 共享验收环境
 

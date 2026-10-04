@@ -1,0 +1,24 @@
+{
+  "import_id": "imp-ac007-owner-retry-real-stack",
+  "owner_id": 2,
+  "initially_allowed_actions": [
+    "retry_failed_steps"
+  ],
+  "owner_retries": [
+    {
+      "status": 200,
+      "attempt_no": 2,
+      "created_attempt": false
+    },
+    {
+      "status": 200,
+      "attempt_no": 2,
+      "created_attempt": true
+    }
+  ],
+  "other_owner_retry_status": 404,
+  "admin_retry_status": 404,
+  "final_status": "completed",
+  "result_interview_id": 1,
+  "worker_restarted_after_retry": true
+}

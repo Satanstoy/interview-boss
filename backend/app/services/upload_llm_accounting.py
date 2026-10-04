@@ -107,25 +107,34 @@ def upload_llm_stage(
                 result = await function(state, *args, **kwargs)
 
             if checkpoint_result and root_import_id:
-                data = result.get("extracted_data") or state.get("extracted_data")
                 job_id = state.get("job_id")
                 lease_generation = state.get("_lease_generation")
-                if data and job_id is not None and lease_generation is not None:
+                checkpoint_stage = canonical_upload_stage(stage)
+                checkpoint = None
+                if checkpoint_stage == "extract":
+                    data = result.get("extracted_data") or state.get("extracted_data")
+                    if data:
+                        checkpoint = {
+                            "doc_type": result.get("doc_type")
+                            or state.get("doc_type", ""),
+                            "data": data,
+                            "url": result.get("saved_url") or state.get("url", ""),
+                        }
+                elif checkpoint_stage == "classify":
+                    tagged_rows = result.get("tagged_rows")
+                    if tagged_rows is None:
+                        tagged_rows = state.get("tagged_rows")
+                    if tagged_rows is not None:
+                        checkpoint = {"tagged_rows": tagged_rows}
+
+                if checkpoint is not None and job_id is not None and lease_generation is not None:
                     import json
 
                     from app.services.upload_repository import (
                         persist_succeeded_stage_checkpoint,
                     )
 
-                    checkpoint = json.dumps(
-                        {
-                            "doc_type": result.get("doc_type")
-                            or state.get("doc_type", ""),
-                            "data": data,
-                            "url": result.get("saved_url") or state.get("url", ""),
-                        },
-                        ensure_ascii=False,
-                    )
+                    checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
 
                     def _persist_checkpoint():
                         from app.db.connection import get_db_connection
@@ -136,9 +145,9 @@ def upload_llm_stage(
                             saved = persist_succeeded_stage_checkpoint(
                                 conn,
                                 import_id=str(root_import_id),
-                                stage="extract",
-                                unit_key="document",
-                                result_json=checkpoint,
+                                stage=checkpoint_stage,
+                                unit_key=unit_key or "document",
+                                result_json=checkpoint_json,
                                 job_id=int(job_id),
                                 lease_generation=int(lease_generation),
                             )
