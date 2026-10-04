@@ -1,0 +1,65 @@
+# 剩余上传恢复对齐实施计划
+
+对应规格：[闭环规格](../specs/2026-10-04-upload-alignment-closure/README.md)、[验收矩阵](../specs/2026-10-04-upload-alignment-closure/acceptance.md)、[契约](../specs/2026-10-04-upload-alignment-closure/contracts.md)。本计划只覆盖 AC-001/002/007/009/010/011/013/016/017/022/024。每个 checkbox 是独立的小步骤；实现按 TDD 先证伪旧行为，再最小修复。
+
+## 文件职责
+
+- 修改 `backend/app/routers/upload_imports.py`、`backend/app/routers/submit.py`、`backend/app/services/upload_lifecycle.py`、`backend/app/services/upload_queue.py`、`backend/app/services/upload_status.py`、`backend/app/services/public_contributions.py`：恢复权限/预算、队列续调、任务状态及 JD/追加贡献兼容。
+- 修改相关前端 `frontend/src/components/business/UploadTaskCenter.vue`、`frontend/src/composables/useSubmitJobs.js`、`frontend/src/composables/useMasterBankData.js`、`frontend/src/views/InterviewView.vue`、`frontend/src/components/common/DataTable.vue`、`frontend/src/services/dataApi.js`：结果定位、分页、恢复操作和连接状态。
+- 扩展 `backend/tests/integration/test_upload_recovery_stack.py` 与 `frontend/tests/e2e/upload-recovery-real-stack.spec.js`，并按需求扩展现有 focused backend tests；更新 `scripts/real_stack_smoke.sh` 以执行新增场景和保留 trace。
+- 每阶段更新 `docs/verification/upload-recovery/` 的新验证账，不覆盖既有审计历史。
+
+## 阶段 1：接口契约和分页/定位
+
+- [ ] 在 `backend/tests/pipeline/test_interview_server_pagination.py` 增加 P1 121 条、同时间戳稳定排序、U2/P2 隔离断言；先运行确认缺失断言能失败。
+- [ ] 在 `backend/app/routers/data.py` 实现/校正同授权条件下的 COUNT、items、排序、target lookup；运行 `./.venv/bin/python -m pytest -q backend/tests/pipeline/test_interview_server_pagination.py`。
+- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 增加任务完成不自动跳转、用户点击才清筛选并定位目标的浏览器契约。
+- [ ] 在 `frontend/tests/e2e/upload-recovery-real-stack.spec.js` 用真实上传、公共审核发布和列表 API 验证公共结果定位；断言路由、目标 row ID 与岗位。
+- [ ] 在 `frontend/src/services/dataApi.js`、`frontend/src/composables/useMasterBankData.js` 及 `backend/app/routers/data.py` 统一 page_size 默认值和 location 参数；运行 focused pagination test 确认实际 query 与响应一致。
+- [ ] 首次验收用 `REAL_STACK_REUSE_BUILT_IMAGES=0 ./scripts/real_stack_smoke.sh` 从当前代码构建候选镜像，并确认新 AC-001/002 trace 与镜像 digest 落盘后再关闭 CL-001/002。
+
+## 阶段 2：队列和所有者重试
+
+- [ ] 在 `backend/tests/pipeline/test_upload_queue_reconciliation.py` 加持续公共流量下私人桶有界执行、COMMIT 后通知丢失仅补一个 job 的失败测试。
+- [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 加本人 rootless 兼容失败恢复、跨用户/管理员越权、预算耗尽、重复点击和 active attempt 返回用例。
+- [ ] 在 `backend/app/services/upload_lifecycle.py` 收敛 attempt 创建/复用和预算判定，再运行 `./.venv/bin/python -m pytest -q backend/tests/pipeline/test_upload_retry_family.py backend/tests/pipeline/test_upload_queue_reconciliation.py`。
+- [ ] 在 `backend/app/routers/upload_imports.py` 和 `backend/app/routers/submit.py` 让新旧 retry adapter 调用同一恢复服务；验证认证、actor、404/409 和 `created_attempt` 响应。
+- [ ] 在 `frontend/src/components/business/UploadTaskCenter.vue` 对可重试终态显示所有者操作，并渲染预算/配置阻塞；验证并发点击不会产生第二条请求状态。
+- [ ] 增加实栈双浏览器恢复场景，重启 worker/reconciler 后核对 SQLite 的 attempt/job/checkpoint 数量。
+
+## 阶段 3：并发、SSE 和跨代恢复
+
+- [ ] 在 `backend/tests/pipeline/test_upload_stage_recovery.py` 固定同秒时间，以 U1/U2 两个输入断言根、detail、resolution 和答案归属。
+- [ ] 在 `backend/tests/pipeline/test_upload_retry_family.py` 用两个连接竞争恢复，并验证 A/B 旧 attempt 都返回 C active。
+- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写 EOF、快照 500、乱序 revision、心跳不进度和登出切 U2 场景。
+- [ ] 在 `frontend/src/composables/useSubmitJobs.js` 修复快照收敛、EOF 重连及身份变化清理，再运行 `cd frontend && npx playwright test tests/e2e/upload-task-center.spec.js`。
+- [ ] 在实栈场景启两个真实 worker、两个浏览器上下文，交错上传及并发 retry；检查 API、SSE、DB owner 和 work_key。
+
+## 阶段 4：答案状态和错误预算
+
+- [ ] 在 `backend/tests/services/test_upload_status_projection.py` 写 8/10 答案成功、2 失败的状态聚合红测和精确失败集合断言。
+- [ ] 在 `backend/tests/services/test_upload_llm_accounting.py` 用本地 HTTP provider 固定 401 一次、429/结构修复合计至多三次、unknown 超时入账的调用数。
+- [ ] 修正 `backend/app/services/upload_status.py`、worker answer/job 路由或 LLM accounting 中被红测指出的缺口；运行 `./.venv/bin/python -m pytest -q backend/tests/services/test_upload_status_projection.py backend/tests/services/test_upload_llm_accounting.py backend/tests/infra/test_upload_stream_contract.py`。
+- [ ] 实栈跑 8/2 浏览器流程，核对任务卡、结果页、SSE snapshot、call ledger 和只重跑 2 项；同时让旧 SSE consumer 订阅并断言没有重复 graph。
+
+## 阶段 5：追加贡献和 JD 兼容
+
+- [ ] 在 `backend/tests/services/test_public_contribution_recovery.py` 增加同 URL A/B 两次贡献、B 失败及恢复后 A/B 投影累积断言。
+- [ ] 在 `backend/tests/pipeline/test_upload_legacy_compat.py` 增加 JD legacy retry 后不进入题目 pipeline、旧 approved 数据读取不 replay 的反例。
+- [ ] 修正 `backend/app/services/public_contributions.py` 与 `backend/app/routers/submit.py` 中由红测证明的 projection/legacy routing 问题；运行 `./.venv/bin/python -m pytest -q backend/tests/services/test_public_contribution_recovery.py backend/tests/pipeline/test_upload_legacy_compat.py`。
+- [ ] 实栈执行两份同 URL contribution、worker stop/restart、JD legacy retry→review→publish；逐实体核对公共清单、历史记录及私人 marker。
+
+## 阶段 6：文件拒绝和草稿保留
+
+- [ ] 在 `backend/tests/security/test_upload_size_guard.py` 扩展真实 multipart 计数测试，断言大文件拒绝前未被完整读取、未创建 root/job/key。
+- [ ] 在 `frontend/tests/e2e/upload-task-center.spec.js` 写坏 MIME/413 后输入与文件草稿保留、纠正后相同 key 首次有效接受的浏览器测试。
+- [ ] 修正前后端由失败测试证明的校验/幂等行为；运行 `./.venv/bin/python -m pytest -q backend/tests/security/test_upload_size_guard.py backend/tests/pipeline/test_upload_submit_api.py`。
+- [ ] 在 disposable API+worker+browser 栈实际传 multipart，再用 DB/Redis 与浏览器断言没有幽灵任务及 key 污染。
+
+## 阶段 7：汇总验收与交付证据
+
+- [ ] 将新增 real-stack 场景接入 `scripts/real_stack_smoke.sh`；每个 AC 输出独立 trace，并让任一失败使总命令非零退出。
+- [ ] 运行上述 focused backend commands、受影响前端 `npx playwright test`，记录精确 pass/fail/skip；不得通过 skip/降断言清红。
+- [ ] 构建 backend/worker/frontend 候选镜像，在隔离 Compose 临时 SQLite/Redis 上运行全部 11 AC；保存 image digest、场景结果和 trace。
+- [ ] 逐项核对 `acceptance.md` 并更新验证账：只有 11 项都有通过证据才改为通过；生产只读检查单独记载。
+- [ ] 执行 `git diff --check`、审核 task-owned diff 和 `git status --short`；只提交本计划拥有的代码、测试和验证证据，保留 baseline 中未跟踪路径不变。
