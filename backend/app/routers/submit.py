@@ -16,6 +16,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, StreamingResponse
 from app.core.config import MAX_FILE_SIZE, MAX_TOTAL_UPLOAD_SIZE
+from app.core.multipart_limits import UploadSubmissionRoute
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"}
 from app.core.auth import get_current_user
@@ -36,7 +37,7 @@ from app.services.upload_repository import IdempotencyConflict
 
 logger = logging.getLogger("interview-boss")
 
-router = APIRouter()
+router = APIRouter(route_class=UploadSubmissionRoute)
 
 
 def _mark_job_dispatched(job_id: int, arq_job_id: str, marker) -> None:

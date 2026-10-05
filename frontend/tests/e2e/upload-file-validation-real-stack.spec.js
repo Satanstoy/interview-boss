@@ -20,6 +20,8 @@ test('real multipart file rejection preserves draft and does not claim its idemp
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1sAAAAASUVORK5CYII=',
     'base64',
   )
+  const fileLimitBytes = 10 * 1024 * 1024
+  const oversizedFileBytes = 20 * 1024 * 1024 + 1
   const postResults = []
   const byKeyResponses = []
 
@@ -74,9 +76,9 @@ test('real multipart file rejection preserves draft and does not claim its idemp
     )
     await page.getByRole('button', { name: '提交解析' }).click()
     const response = await responsePromise
-    const body = await response.json()
+    const body = response.status() === 413 ? null : await response.json()
     expect(response.status(), JSON.stringify(body)).toBe(status)
-    expect(body.detail).toContain(detail)
+    if (body) expect(body.detail).toContain(detail)
     await expect(page.getByTestId('submit-error')).toContainText(detail)
     await expect(textarea).toHaveValue(text)
     await expect(page.getByText(name, { exact: true })).toBeVisible()
@@ -113,13 +115,32 @@ test('real multipart file rejection preserves draft and does not claim its idemp
   await assertKeyUnclaimed()
 
   await page.getByRole('button', { name: '移除图片 1' }).click()
-  await submitRejectedFile({
+  const oversized = await submitRejectedFile({
     name: 'oversized.png',
     mimeType: 'image/png',
-    buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 0x41),
+    buffer: Buffer.alloc(oversizedFileBytes, 0x41),
     status: 413,
     detail: '超过大小限制',
   })
+  const oversizedHeaders = oversized.response.headers()
+  const oversizedMeasurements = {
+    limit_bytes: Number(oversizedHeaders['x-ac022-limit-bytes']),
+    file_bytes_observed: Number(oversizedHeaders['x-ac022-file-bytes-observed']),
+    file_bytes_buffered: Number(oversizedHeaders['x-ac022-file-bytes-buffered']),
+    parser_spool_rolled: oversizedHeaders['x-ac022-parser-spool-rolled'],
+    parser_spool_closed: oversizedHeaders['x-ac022-parser-spool-closed'],
+    endpoint_file_read_bytes: Number(oversizedHeaders['x-ac022-endpoint-file-read-bytes']),
+  }
+  expect(oversizedMeasurements.limit_bytes).toBe(fileLimitBytes)
+  expect(oversizedMeasurements.file_bytes_observed).toBeGreaterThan(fileLimitBytes)
+  expect(oversizedMeasurements.file_bytes_observed).toBeLessThan(oversizedFileBytes)
+  expect(oversizedMeasurements.file_bytes_buffered).toBeLessThanOrEqual(fileLimitBytes)
+  expect(oversizedMeasurements.file_bytes_buffered).toBeLessThan(
+    oversizedMeasurements.file_bytes_observed,
+  )
+  expect(oversizedMeasurements.parser_spool_rolled).toBe('true')
+  expect(oversizedMeasurements.parser_spool_closed).toBe('true')
+  expect(oversizedMeasurements.endpoint_file_read_bytes).toBe(0)
   await assertKeyUnclaimed()
 
   await page.getByRole('button', { name: '移除图片 1' }).click()
@@ -187,6 +208,7 @@ test('real multipart file rejection preserves draft and does not claim its idemp
     username,
     idempotency_key: idempotencyKey,
     rejected_statuses: [unsupported.response.status(), 400, 413],
+    oversized_request_measurements: oversizedMeasurements,
     accepted_import_id: accepted.import_id,
     accepted_created: accepted.created,
     replay_import_id: replay.body.import_id,

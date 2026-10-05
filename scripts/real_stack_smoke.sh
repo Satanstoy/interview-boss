@@ -414,6 +414,8 @@ fi
 if [ "${REAL_STACK_ONLY_AC007:-0}" != "1" ] \
   && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ] \
   && [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ]; then
+# AC-022 can run alone without the heavier AC-001/002 browser scenario.
+if [ "${REAL_STACK_ONLY_AC022:-0}" != "1" ]; then
 # AC-001/002: real API + SQLite + browser pagination and authorized target lookup.
 compose exec -T backend python /app/backend/e2e/seed_ac001_ac002.py \
   >"$TEMP_ARTIFACTS/ac001-ac002-seed.json"
@@ -429,6 +431,7 @@ compose exec -T backend python /app/backend/e2e/assert_ac001_ac002_trace.py - \
   >"$TEMP_ARTIFACTS/ac001-ac002-db-trace.json"
 if [ "${REAL_STACK_ONLY_AC001_AC002:-0}" = "1" ]; then
   exit 0
+fi
 fi
 
 # AC-022: send unsupported, empty, oversized, corrected, replayed, and changed
@@ -458,7 +461,8 @@ fi
 # AC-007: two owner sessions race a real retry while worker delivery is stopped.
 # Restart the same worker only after both API requests and cross-owner 404 checks.
 if [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ] \
-  && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ]; then
+  && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ] \
+  && [ "${REAL_STACK_ONLY_AC022:-0}" != "1" ]; then
 cd "$PROJECT_DIR"
 compose exec -T backend python /app/backend/e2e/seed_ac007_owner_retry.py \
   >"$TEMP_ARTIFACTS/ac007-seed.json"

@@ -34,7 +34,7 @@ bash -n scripts/real_stack_smoke.sh \
 | 场景 | 结果 | 关键实测断言 | Evidence |
 |---|---:|---|---|
 | AC-001/002（历史运行） | 1 passed | 当次只定位预置已发布目标，未覆盖 share→review→publish 后点击任务卡；该部分缺口已由 2026-10-05 的闭环验收补齐，见文末新记录。 | [历史浏览器/接口 trace](2026-10-04-real-stack/ac001-ac002-browser-result.json) |
-| AC-022 | 1 passed | 真实 multipart 不支持 MIME、空文件、超限均返回 `400/400/413`；草稿保留，拒绝 key 查 `404`；修正后同 key 接受一次、同 hash 重放返回同 root、异 hash `409`。SQLite 只留一个已接受 root/attempt。文件读取字节计数尚未观测。 | [浏览器/API trace](2026-10-04-real-stack/ac022-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac022-db-trace.json) |
+| AC-022（历史运行） | 1 passed | 当次覆盖 MIME/空文件/超限状态、草稿和幂等，但未观测 multipart 解析器字节计数与 spool 生命周期；缺口由 2026-10-05 闭环验收补齐，见文末新记录。 | [历史浏览器/API trace](2026-10-04-real-stack/ac022-browser-result.json)、[历史 SQLite trace](2026-10-04-real-stack/ac022-db-trace.json) |
 | AC-007 | 1 passed | 两个所有者浏览器并发 retry 返回同一 attempt，仅一个 `created_attempt=true`；U2/管理员访问均 `404`；worker 重启后任务完成；SQLite 确认成功 extraction hash 不变、失败 classify checkpoint 被成功输出替换、attempt 2 的 job 全部完成。当前镜像另有针对性复跑，详情见下节。 | [浏览器 trace](2026-10-04-real-stack/ac007-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac007-db-trace.json) |
 | 基础真实栈回归 | 2 passed | 真实认证、排队/持久化、浏览器渲染，以及响应丢失后通过幂等键恢复同一上传。 | Playwright 结果见原始脚本输出目录 |
 | AC-028 回归 | 1 passed | worker 停机期间真实浏览器提交个人面经；worker 恢复后任务完成，点击“查看结果”成功定位同一私人 interview 并显示题目。 | [浏览器结果](2026-10-04-real-stack/ac028-browser-result.json) |
@@ -179,3 +179,17 @@ bash -n scripts/real_stack_smoke.sh \
 - 候选 image digest：backend/worker `sha256:7c1fd9dcf8c8724724405b7d8177fc6667ee5a50d8b07f6615b83d027c48a471`；nginx/frontend `sha256:07f7cf83bed49dffede4c0a681331704db8c91d69dd210d3db9989c28ff0c44d`；本地 HTTP 模型 stub `sha256:e4991a7110fe127508f9bc619421d629662258566d5f993039971cfec16e2874`；OAuth gateway `sha256:5b1d9af808104182248833ac7a4392c12c3781e9c7e983f2ecbefecf15162104`。
 - 持久证据：[真实浏览器/API trace](2026-10-05-real-stack/ac001-ac002-browser-result.json)、[SQLite 关系 trace](2026-10-05-real-stack/ac001-ac002-db-trace.json)。
 - 状态：CL-AC-001 和 CL-AC-002 的本补充 Given/When/Then 均有浏览器/API/SQLite 证据，验收矩阵更新为通过。其余开放 AC 仍按矩阵状态处理。
+
+## CL-AC-022 候选栈闭环验收
+
+- 日期：2026-10-05。基线提交 `b2622bbb`；候选镜像来自该提交上的当前 AC-022 工作树，包含 multipart 限额解析器、Nginx 流式转发和真实测量断言。
+- 命令：`REAL_STACK_ONLY_AC022=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`；隔离 SQLite 断言通过。候选项目：`interview-boss-real-e2e-643382-1791211543`。解析器单测 `1 passed`。
+- 环境边界：真实浏览器→Nginx→FastAPI multipart parser→SQLite/Redis/outbox。Nginx `/api/` 关闭 request buffering；multipart parser 测试边界在后端容器真实执行。SQLite 和 Redis 均为一次性候选栈资源；provider stub 未参与拒绝路径，没有连接生产数据库或外部模型。
+- 文件拒绝：不支持 MIME、空文件和超大文件分别返回 `400/400/413`；错误页面保持原文字和文件选择。三个拒绝期间同一幂等 key 的 owner lookup 均为 `404`，所以没有先接受 root。
+- 解析早停：浏览器发出 `20 MiB+1` oversized 文件。测试栈响应头显示上限 `10,485,760` 字节，parser 观察到 `10,650,039` 字节即拒绝；spool 已写入 `10,387,895` 字节（低于上限），底层已滚动到临时 spool 并在返回前关闭，提交端 `UploadFile.read()` 为 `0`。观测字节小于请求文件长度，证明拒绝早于完整文件写入。
+- 修正与幂等：替换为有效 PNG 后，原幂等 key 首次请求返回 `202 created=true`；相同 key/hash 再提交返回同一 import ID 且 `created=false`；修改文本后同 key 返回 `409`。SQLite 最终仅有一个 root、一个 attempt 和其 durable preflight job。
+- 候选 image digest：backend/worker `sha256:c7df959a53451c1407119e8c5beb29a3151d3ce6795d1c2ef32b15e54ca660e7`；nginx/frontend `sha256:25c83e00c3cb96c3f59680efea545fb323be8c344771bfbe5e58329504e6b3c4`；本地 HTTP 模型 stub `sha256:96fc29d1acf4a7691fd49905426d4eec76007ce098b7e02ea93dd68c545dea48`；OAuth gateway `sha256:331bf50645f41ff154ba9afaddd024b072ff5c7848d944678d7952b735b40571`。
+- 持久证据：[真实浏览器/API 与 parser measurement](2026-10-05-real-stack/ac022-browser-result.json)、[SQLite root/attempt/job trace](2026-10-05-real-stack/ac022-db-trace.json)。
+- 红绿根因：原 handler 在 `UploadFile.size` 上拒绝，但 Starlette 已先把整段 multipart 文件解析到 spooled temp file。bounded parser 在 file-part 回调中按 chunk 计数，跨过单文件/总量上限立即中止；解析器关闭已滚动的 spool。真实 HTTP 首次还发现 `MultiPartException.__str__()` 为空，导致 413 失去具体正文；转换时改用 `.message` 后浏览器显示具体文件限制。
+- 状态：CL-AC-022 的 Given/When/Then 有真实 HTTP、浏览器、parser byte/spool 和 SQLite 证据，验收矩阵更新为通过。

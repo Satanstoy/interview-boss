@@ -19,6 +19,7 @@ x-e2e-environment: &e2e-environment
   EMBEDDING_BACKEND: hash
   EMBEDDING_OFFLINE: "1"
   E2E_STUB_PROVIDER: "1"
+  AC022_E2E_AUDIT: "1"
   CLUSTER_BATCH_SIZE: "1"
   PYTHONUNBUFFERED: "1"
 

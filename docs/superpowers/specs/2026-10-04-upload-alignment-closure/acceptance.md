@@ -2,7 +2,7 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-05，本地隔离候选栈已验证 AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，及 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位，以及 AC-013 的真实 HTTP 错误、共享物理调用预算、旧 retry/SSE 兼容和日志脱敏。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-05，本地隔离候选栈已验证 AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，AC-011 的 8/2 答案部分失败与仅恢复失败题，AC-013 的真实 HTTP 错误与共享物理调用预算，以及 AC-022 的 multipart 超限早停、spool 清理和幂等重提。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
@@ -15,10 +15,12 @@
 | CL-AC-013 | 通过 | 隔离候选栈真实浏览器/API/SSE/worker/SQLite/provider HTTP 验证了 401/403 单次失败、429 三次预算后经旧 retry 完成、格式错误三次预算及超时账本；旧 SSE 只读且日志脱敏通过。详见[AC-013 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-013-独立候选栈验收)。 |
 | CL-AC-016 | 部分 | 公共审核、失败子项恢复的候选栈回归通过；相同 URL 两份 contribution 加同 URL 私人面经的完整累计投影验收尚未运行。 |
 | CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
-| CL-AC-022 | 部分 | 真实 MIME/空文件/超限拒绝、草稿保留、重提和幂等已过；后端读取字节数/临时文件在超限前的断言尚未验证。 |
+| CL-AC-022 | 通过 | 真实浏览器上传 20 MiB+1 文件；10 MiB 限额在解析器观察到 10,650,039 字节时拒绝，spool 只写入 10,387,895 字节、已关闭，端点文件读取为 0。真实 HTTP 400/400/413、页面草稿保留、拒绝 key 的 by-key 为 404、修正后只建一个 root/attempt/job、同 key/hash 重放原 root、异 hash 409 均通过。 |
 | CL-AC-024 | 未运行 | 尚无真实 JD 兼容 retry→审核发布和历史 approved 数据不重放验收。 |
 
 AC-001/002 本次通过证据：候选项目 `interview-boss-real-e2e-579948-1791209764`，浏览器与 SQLite trace、命令及镜像 digest 见[2026-10-05 AC-001/002 候选栈记录](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-001002-候选栈闭环验收)。
+
+AC-022 本次通过证据：候选项目 `interview-boss-real-e2e-643382-1791211543`，浏览器/API measurement 与 SQLite trace、命令及镜像 digest 见[2026-10-05 AC-022 候选栈记录](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-022-候选栈闭环验收)。
 
 ## 1. 共享验收环境
 
