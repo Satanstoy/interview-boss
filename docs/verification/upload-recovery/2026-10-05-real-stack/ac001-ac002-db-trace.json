@@ -1,0 +1,31 @@
+{
+  "upload_import": {
+    "id": "f6c0c765-da38-4429-94a2-f7aa4742b659",
+    "requester_id": 2,
+    "target_intent": "share",
+    "status": "completed",
+    "private_interview_id": 125,
+    "contribution_request_id": 2
+  },
+  "private_interview": {
+    "id": 125,
+    "owner_id": 2,
+    "job_position": "AC001 数据 P2",
+    "question_detail_id": 1
+  },
+  "contribution": {
+    "id": 2,
+    "status": "published",
+    "source_interview_id": 125,
+    "public_interview_id": 126
+  },
+  "public_interview": {
+    "id": 126,
+    "owner_id": null,
+    "job_position": "AC001 数据 P2",
+    "public_detail_id": 2,
+    "status": "approved",
+    "publish_status": "published"
+  },
+  "task_target_matches_public_interview": true
+}

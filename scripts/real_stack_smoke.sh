@@ -51,6 +51,7 @@ copy_success_artifacts() {
     ac028-browser-result.png \
     ac028-browser-result.json \
     ac001-ac002-browser-result.json \
+    ac001-ac002-db-trace.json \
     ac022-browser-result.json \
     ac022-db-trace.json \
     ac007-seed.json \
@@ -419,8 +420,13 @@ compose exec -T backend python /app/backend/e2e/seed_ac001_ac002.py \
 cd "$PROJECT_DIR/frontend"
 REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
   AC001_AC002_BROWSER_TRACE="$TEMP_ARTIFACTS/ac001-ac002-browser-result.json" \
+  AC001_AC002_DB_TRACE="$TEMP_ARTIFACTS/ac001-ac002-db-trace.json" \
   run_frontend_playwright tests/e2e/interview-pagination-real-stack.spec.js \
-  --timeout "${AC001_AC002_REAL_STACK_TEST_TIMEOUT:-180000}"
+  --timeout "${AC001_AC002_REAL_STACK_TEST_TIMEOUT:-780000}"
+cd "$PROJECT_DIR"
+compose exec -T backend python /app/backend/e2e/assert_ac001_ac002_trace.py - \
+  <"$TEMP_ARTIFACTS/ac001-ac002-browser-result.json" \
+  >"$TEMP_ARTIFACTS/ac001-ac002-db-trace.json"
 if [ "${REAL_STACK_ONLY_AC001_AC002:-0}" = "1" ]; then
   exit 0
 fi

@@ -483,6 +483,47 @@ class StubHandler(BaseHTTPRequestHandler):
                 "### 设计原因\n"
                 "双向确认可以降低旧连接报文造成错误建连的可能，并让双方确认对方的初始序列号。"
             )
+        elif (
+            "AC001_TASK_LOCATOR_REAL_STACK" in prompt_text
+            and "请分析以下联合内容" in prompt_text
+        ):
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC001_TASK_LOCATOR_REAL_STACK 公司",
+                        "面试轮次": "AC001 P2 一面",
+                        "考察重点": "异步任务幂等恢复",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {
+                                "ordinal": 1,
+                                "question": "AC001_TASK_LOCATOR_REAL_STACK：系统怎样验证异步任务的幂等恢复？",
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        elif (
+            "AC001_TASK_LOCATOR_REAL_STACK" in prompt_text
+            and "请为以下题目列表标记" in prompt_text
+        ):
+            content = json.dumps(
+                {
+                    "questions": [
+                        {
+                            "id": 0,
+                            "题目": "AC001_TASK_LOCATOR_REAL_STACK：系统怎样验证异步任务的幂等恢复？",
+                            "一级大类": "Fixture",
+                            "二级子类": "Fixture",
+                            "考点标签": "AC001_TASK_LOCATOR_REAL_STACK",
+                            "难度标签": "L2-中等",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
         elif "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "面试题聚类专家" in serialized:
             content = json.dumps({"clusters": []}, ensure_ascii=False)
         elif "AC028_UPLOAD_RECOVERY_REAL_STACK" in serialized and "面试题去重专家" in serialized:

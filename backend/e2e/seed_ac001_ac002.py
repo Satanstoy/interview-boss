@@ -36,7 +36,8 @@ def main() -> None:
             conn.execute(
                 "INSERT OR IGNORE INTO taxonomy "
                 "(position_name, categories_json, tags_json, source, owner_id, is_default, is_public) "
-                "VALUES (?, '[\"Fixture\"]', '[\"Fixture\"]', 'system', NULL, 0, 0)",
+                "VALUES (?, '[{\"cat1\":\"Fixture\",\"children\":[\"Fixture\"]}]', "
+                "'[\"Fixture\"]', 'system', NULL, 0, 0)",
                 (position,),
             )
 
@@ -60,6 +61,16 @@ def main() -> None:
                     "SELECT id FROM users WHERE username = ?", (username,)
                 ).fetchone()
             user_ids[username] = int(row["id"])
+
+        admin = conn.execute(
+            "SELECT id, is_admin FROM users WHERE username = 'real_stack_admin'"
+        ).fetchone()
+        if admin is None or not admin["is_admin"]:
+            raise RuntimeError("the disposable real-stack administrator is missing")
+        conn.execute(
+            "UPDATE users SET email = COALESCE(NULLIF(email, ''), ?) WHERE id = ?",
+            ("real_stack_admin@example.test", int(admin["id"])),
+        )
 
         marker = "AC001_AC002_FIXTURE"
         existing = conn.execute(
@@ -135,6 +146,30 @@ def main() -> None:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
+        jd_marker = "AC002_JD_CLIENT_PAGINATION"
+        existing_jd = conn.execute(
+            "SELECT COUNT(*) FROM jd WHERE company LIKE ?", (f"{jd_marker}%",)
+        ).fetchone()[0]
+        if existing_jd:
+            raise RuntimeError(f"unexpected existing JD fixture rows: {existing_jd}")
+        conn.executemany(
+            "INSERT INTO jd (url, company, job_title, salary, tech_stack, bonus, season, "
+            "owner_id, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?)",
+            [
+                (
+                    f"https://ac001.example/jd/{index}",
+                    f"{jd_marker}_{index:03d}",
+                    f"{jd_marker} engineer {index:03d}",
+                    "20k-30k",
+                    "Python, SQLite",
+                    "fixture",
+                    "2026春招",
+                    user_ids[U1],
+                    P1,
+                )
+                for index in range(1, 46)
+            ],
+        )
         private_p2_source_id = int(
             conn.execute(
                 "SELECT id FROM interview WHERE company = ?",
@@ -153,24 +188,6 @@ def main() -> None:
             "VALUES ('interview', ?, ?, 'partially_published', '{}', ?)",
             (private_p2_source_id, user_ids[U1], public_p2_target_id),
         )
-        import_id = "imp-ac001-ac002-public-result"
-        conn.execute(
-            "INSERT INTO upload_imports "
-            "(id, requester_id, idempotency_key, request_hash, target_intent, source_type, "
-            "resolved_type, position_id, position_name, pipeline_version, policy_json, payload_json, "
-            "status, current_attempt_no, interview_id, contribution_request_id, revision, completed_at) "
-            "VALUES (?, ?, 'ac001-ac002-result-key', 'ac001-ac002-result-hash', 'share', 'interview', "
-            "'interview', ?, ?, 'upload-pipeline-v1', '{}', '{\"raw_text\":\"fixture snapshot\"}', "
-            "'completed', 1, ?, ?, 4, CURRENT_TIMESTAMP)",
-            (
-                import_id,
-                user_ids[U1],
-                position_ids[P2],
-                P2,
-                private_p2_source_id,
-                int(contribution_cursor.lastrowid),
-            ),
-        )
         conn.commit()
         print(
             json.dumps(
@@ -183,9 +200,9 @@ def main() -> None:
                     "p1": {"id": position_ids[P1], "name": P1},
                     "p2": {"id": position_ids[P2], "name": P2},
                     "u1_interviews": 121,
-                    "result_import_id": import_id,
-                    "result_private_interview_id": private_p2_source_id,
-                    "result_public_interview_id": public_p2_target_id,
+                    "u1_jds": 45,
+                    "lookup_private_p2_interview_id": private_p2_source_id,
+                    "lookup_public_p2_interview_id": public_p2_target_id,
                     "fixture_marker": marker,
                 },
                 ensure_ascii=False,

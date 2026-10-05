@@ -33,7 +33,7 @@ bash -n scripts/real_stack_smoke.sh \
 
 | 场景 | 结果 | 关键实测断言 | Evidence |
 |---|---:|---|---|
-| AC-001/002 | 1 passed | 浏览器经真实 API/SQLite 检查 121 条分页、同时间排序、岗位/季节、U1/U2 隔离及 task target location。target 为预置已发布实体，故不关闭完整 share→review→publish 任务点击验收。 | [浏览器/接口 trace](2026-10-04-real-stack/ac001-ac002-browser-result.json) |
+| AC-001/002（历史运行） | 1 passed | 当次只定位预置已发布目标，未覆盖 share→review→publish 后点击任务卡；该部分缺口已由 2026-10-05 的闭环验收补齐，见文末新记录。 | [历史浏览器/接口 trace](2026-10-04-real-stack/ac001-ac002-browser-result.json) |
 | AC-022 | 1 passed | 真实 multipart 不支持 MIME、空文件、超限均返回 `400/400/413`；草稿保留，拒绝 key 查 `404`；修正后同 key 接受一次、同 hash 重放返回同 root、异 hash `409`。SQLite 只留一个已接受 root/attempt。文件读取字节计数尚未观测。 | [浏览器/API trace](2026-10-04-real-stack/ac022-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac022-db-trace.json) |
 | AC-007 | 1 passed | 两个所有者浏览器并发 retry 返回同一 attempt，仅一个 `created_attempt=true`；U2/管理员访问均 `404`；worker 重启后任务完成；SQLite 确认成功 extraction hash 不变、失败 classify checkpoint 被成功输出替换、attempt 2 的 job 全部完成。当前镜像另有针对性复跑，详情见下节。 | [浏览器 trace](2026-10-04-real-stack/ac007-browser-result.json)、[SQLite trace](2026-10-04-real-stack/ac007-db-trace.json) |
 | 基础真实栈回归 | 2 passed | 真实认证、排队/持久化、浏览器渲染，以及响应丢失后通过幂等键恢复同一上传。 | Playwright 结果见原始脚本输出目录 |
@@ -166,3 +166,16 @@ bash -n scripts/real_stack_smoke.sh \
 - 候选 image ID：backend/worker `sha256:4ada6281fd90b43afc3227f8b58aea698aded1ce9128966a1aa5e656affbbb19`；nginx/frontend `sha256:ba89d90a9beaf9da738ce570886fd420bce057de4af4bb1cb16648d9f3a01964`；本地 HTTP 模型 stub `sha256:176660801baf2be16c9e7e2fe18fb250491fc14bd34aab649a39ffbfe875b8bf`；OAuth gateway `sha256:474d033b80a863243f1a8ff72d56f2bab12b9044fd15908bd983be3d83a3eb84`。
 - 持久证据：[浏览器/API/SSE trace](2026-10-05-real-stack/ac013-browser-result.json)、[401 SQLite trace](2026-10-05-real-stack/ac013-auth_401-db-trace.json)、[403 SQLite trace](2026-10-05-real-stack/ac013-permission_403-db-trace.json)、[429 与旧 retry SQLite trace](2026-10-05-real-stack/ac013-rate_429-db-trace.json)、[格式错误 SQLite trace](2026-10-05-real-stack/ac013-format_invalid-db-trace.json)、[超时 SQLite trace](2026-10-05-real-stack/ac013-timeout_once-db-trace.json)、[日志脱敏结果](2026-10-05-real-stack/ac013-log-redaction.json)。
 - 红绿根因：实际 stack 暴露 Tenacity `RetryError` 未被统一分类、legacy retry 把 `credential_preflight` 错投到 submit worker，以及 fixture 协议自动探测调用污染了 extract 物理调用断言。三者分别以 wrapper 异常单测、legacy retry job-type 回归和显式 Chat 的隔离 provider 配置修复；最终候选栈已转绿。
+
+## CL-AC-001/002 候选栈闭环验收
+
+- 日期：2026-10-05。基线提交 `002ae5c0090ed8b1ed67588c7bed03b6fbb56778`；候选镜像由其上的当前工作树构建，包含 AC-001/002 E2E fixture、浏览器断言和 SQLite 关系核验改动。
+- 命令：`REAL_STACK_ONLY_AC001_AC002=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（3.5 分钟）；后端 SQLite 交叉核验通过。项目：`interview-boss-real-e2e-579948-1791209764`。
+- 环境边界：候选 frontend/Nginx、FastAPI、鉴权、Redis、ARQ dispatcher、worker、SQLite 和浏览器走真实调用；SQLite volume 与 Redis namespace 一次性隔离并随 runner 清理。模型 HTTP 边界使用本地确定性 stub；未接生产数据库或外部模型。
+- AC-001：U1 在 P1 第 2 页并带季节筛选时，由另一会话提交真实 share 上传；任务到达待审后由管理员真实批准，worker 发布公共投影。原会话未被后台发布改变路由；任务卡点击调用真实 target location API，定位 P2 的公共 interview `126`，页面显示 P2 并高亮目标。U2 可读公共 interview，读取私人 root 为 `404`。SQLite trace 验证 share root `f6c0c765-da38-4429-94a2-f7aa4742b659` → U1 私有 interview `125` → contribution request `2` → 已发布公共 interview `126`，task result target 与公共 interview ID 一致。
+- AC-002：121 条 P1 记录经真实服务端分页，断言总数、created_at 相同记录按 ID 稳定排序、翻页不重复、季节筛选、排序切换、page size 变化回到第一页、P1/P2/U2 隔离以及 target lookup 使用相同分页大小并打开正确行。JD DataTable 保持旧客户端模式：真实接口一次返回 45 行，浏览器本地分页为 3 页，切页不产生新 API 请求。
+- 隐私断言：真实私有面经保留合成公司名；管理员 review 对 company 的确认值是 null，公共投影 company 为空，U2 公共列表不包含私有公司 marker。
+- 候选 image digest：backend/worker `sha256:7c1fd9dcf8c8724724405b7d8177fc6667ee5a50d8b07f6615b83d027c48a471`；nginx/frontend `sha256:07f7cf83bed49dffede4c0a681331704db8c91d69dd210d3db9989c28ff0c44d`；本地 HTTP 模型 stub `sha256:e4991a7110fe127508f9bc619421d629662258566d5f993039971cfec16e2874`；OAuth gateway `sha256:5b1d9af808104182248833ac7a4392c12c3781e9c7e983f2ecbefecf15162104`。
+- 持久证据：[真实浏览器/API trace](2026-10-05-real-stack/ac001-ac002-browser-result.json)、[SQLite 关系 trace](2026-10-05-real-stack/ac001-ac002-db-trace.json)。
+- 状态：CL-AC-001 和 CL-AC-002 的本补充 Given/When/Then 均有浏览器/API/SQLite 证据，验收矩阵更新为通过。其余开放 AC 仍按矩阵状态处理。

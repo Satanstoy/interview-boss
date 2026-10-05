@@ -2,12 +2,12 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-05，本地隔离候选栈已验证 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位，以及 AC-013 的真实 HTTP 错误、共享物理调用预算、旧 retry/SSE 兼容和日志脱敏。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-05，本地隔离候选栈已验证 AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，及 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位，以及 AC-013 的真实 HTTP 错误、共享物理调用预算、旧 retry/SSE 兼容和日志脱敏。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
-| CL-AC-001 | 部分 | 真实栈定位了预置的已发布公共任务结果；尚未在同一浏览器流程验证 share→review→publish 后从该任务卡点击定位。 |
-| CL-AC-002 | 部分 | 真实 SQLite 分页、排序、隔离和目标 lookup 已过；JD 共享 DataTable 的未启用 server mode 回归尚未验证。 |
+| CL-AC-001 | 通过 | 真实浏览器执行 share→review→publish 后，从仍停留在 P1 第 2 页/季节筛选的任务卡打开已发布公共面经；U2 可读公共目标、不能读私有 root；核对真实 location API、P2 提示、高亮 ID 和 SQLite 公私实体关联。来源字段公司名未获公开同意，私有源保留、公共投影为空。 |
+| CL-AC-002 | 通过 | 真实浏览器/API/SQLite 验证 121 条 P1 服务端分页、同 created_at 稳定排序、跨页无重复、total/filter/page-size reset、P1/P2/U2 隔离和真实 target lookup；JD DataTable 仍一次请求 45 条并在客户端分页，翻页无新增 API 请求。 |
 | CL-AC-007 | 通过 | 最终候选镜像的真实浏览器/API/worker/SQLite 验收覆盖 upload root 和 rootless 私人失败行：并发请求收敛到同一 attempt/queue_id，成功 checkpoint 保留，U2/管理员越权为 404，公共贡献失败项不进入个人列表且个人 retry 为 404，rootless 行保持 root-null 并进入 owner 私人题库；分页与固定请求量刷新、双 worker 公平性、COMMIT 后 Redis 通知丢失恢复及状态提交后缺 job 的 rootless 周期对账恢复均通过。命令、最终镜像 digest 和 trace 见[AC-007 最终复核](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-007-final)。 |
 | CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
@@ -17,6 +17,8 @@
 | CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
 | CL-AC-022 | 部分 | 真实 MIME/空文件/超限拒绝、草稿保留、重提和幂等已过；后端读取字节数/临时文件在超限前的断言尚未验证。 |
 | CL-AC-024 | 未运行 | 尚无真实 JD 兼容 retry→审核发布和历史 approved 数据不重放验收。 |
+
+AC-001/002 本次通过证据：候选项目 `interview-boss-real-e2e-579948-1791209764`，浏览器与 SQLite trace、命令及镜像 digest 见[2026-10-05 AC-001/002 候选栈记录](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-001002-候选栈闭环验收)。
 
 ## 1. 共享验收环境
 
