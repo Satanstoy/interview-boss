@@ -1,0 +1,17 @@
+{
+  "request_id": 2,
+  "request_status_before_retry": "failed",
+  "failed_item_id": 2,
+  "failed_source_item_id": 3,
+  "failed_public_detail_id": 4,
+  "failure_error_message": "AC016_PUBLIC_ITEM_FAILURE detail_id=4",
+  "b_resolution_exists_before_retry": false,
+  "b_canonical_exists_before_retry": false,
+  "public_interview_id": 2,
+  "public_questions_before_retry": [
+    "1. AC016 question A: how does a distributed lock prevent stale writes?"
+  ],
+  "published_a_item_id": 1,
+  "published_a_detail_id": 2,
+  "published_a_question_before_retry": "AC016 question A: how does a distributed lock prevent stale writes?"
+}

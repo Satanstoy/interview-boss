@@ -20,31 +20,40 @@ def _cluster_batch_user_id(payload, batch, *, root_import_id):
 
 
 async def maybe_inject_e2e_public_failure(ctx, batch, *, root_import_id):
-    """Fail one marked public item in the disposable AC-029 stack.
+    """Fail one marked public item in a disposable real-stack scenario.
 
     The Redis NX marker survives an ARQ worker restart. Failed contribution
     queue rows are held out of reconciliation until the explicit retry API
     moves their item back to ``queued``.
     """
-    if os.environ.get("E2E_STUB_PROVIDER") != "1" or not root_import_id:
+    if os.environ.get("E2E_STUB_PROVIDER") != "1":
         return
     redis = ctx.get("redis") if isinstance(ctx, dict) else None
     if redis is None:
         return
     for item in batch or []:
+        question = str(item.get("question") or "")
+        ac016_marker = "AC016_FAIL_PUBLIC_" in question
+        ac029_marker = "AC029_FAIL_PUBLIC_ORDINAL_" in question
         if (
             item.get("owner_id") is not None
             or not item.get("contribution_request_id")
-            or "AC029_FAIL_PUBLIC_ORDINAL_" not in str(item.get("question") or "")
+            or not (ac016_marker or (ac029_marker and root_import_id))
         ):
             continue
         detail_id = item.get("qd_id")
         if detail_id is None:
             continue
-        key = f"e2e:ac029:public-failure:{root_import_id}:{int(detail_id)}"
+        request_id = int(item["contribution_request_id"])
+        if ac016_marker:
+            key = f"e2e:ac016:public-failure:{request_id}:{int(detail_id)}"
+            failure_code = "AC016_PUBLIC_ITEM_FAILURE"
+        else:
+            key = f"e2e:ac029:public-failure:{root_import_id}:{int(detail_id)}"
+            failure_code = "AC029_PUBLIC_ITEM_FAILURE"
         armed = await redis.set(key, "injected", ex=86400, nx=True)
         if armed:
-            raise RuntimeError(f"AC029_PUBLIC_ITEM_FAILURE detail_id={int(detail_id)}")
+            raise RuntimeError(f"{failure_code} detail_id={int(detail_id)}")
 
 
 async def _schedule_cluster_continuation(

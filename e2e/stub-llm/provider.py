@@ -547,6 +547,27 @@ class StubHandler(BaseHTTPRequestHandler):
                 },
                 ensure_ascii=False,
             )
+        elif (
+            ("AC016 question A:" in prompt_text or "AC016_FAIL_PUBLIC_B:" in prompt_text)
+            and "请为以下题目列表标记" in prompt_text
+        ):
+            questions = []
+            for question in (
+                "AC016 question A: how does a distributed lock prevent stale writes?",
+                "AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?",
+            ):
+                if question in prompt_text:
+                    questions.append(
+                        {
+                            "id": 0,
+                            "题目": question,
+                            "一级大类": "C.基础工程能力",
+                            "二级子类": "C3.分布式基础",
+                            "考点标签": "幂等与并发控制",
+                            "难度标签": "L2-中等",
+                        }
+                    )
+            content = json.dumps({"questions": questions}, ensure_ascii=False)
         elif "AC029_FAIL_PUBLIC_ORDINAL_40" in prompt_text and "一级大类" in prompt_text:
             content = json.dumps(
                 {

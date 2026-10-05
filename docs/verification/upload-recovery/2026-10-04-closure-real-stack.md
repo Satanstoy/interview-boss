@@ -193,3 +193,18 @@ bash -n scripts/real_stack_smoke.sh \
 - 持久证据：[真实浏览器/API 与 parser measurement](2026-10-05-real-stack/ac022-browser-result.json)、[SQLite root/attempt/job trace](2026-10-05-real-stack/ac022-db-trace.json)。
 - 红绿根因：原 handler 在 `UploadFile.size` 上拒绝，但 Starlette 已先把整段 multipart 文件解析到 spooled temp file。bounded parser 在 file-part 回调中按 chunk 计数，跨过单文件/总量上限立即中止；解析器关闭已滚动的 spool。真实 HTTP 首次还发现 `MultiPartException.__str__()` 为空，导致 413 失去具体正文；转换时改用 `.message` 后浏览器显示具体文件限制。
 - 状态：CL-AC-022 的 Given/When/Then 有真实 HTTP、浏览器、parser byte/spool 和 SQLite 证据，验收矩阵更新为通过。
+
+## CL-AC-016 候选栈闭环验收
+
+- 日期：2026-10-06。分支：`codex/frontend-ui-hierarchy-cleanup`；本次候选基于 AC-016 变更后的工作树构建。
+- 命令：`REAL_STACK_ONLY_AC016=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（43.3 秒）；worker stop/restart 闸门和后端 SQLite 交叉断言均通过。候选项目：`interview-boss-real-e2e-827683-1791216502`。
+- 环境：一次性 SQLite volume、隔离 Redis、真实 frontend/Nginx/FastAPI/API 鉴权、ARQ dispatcher、worker 和浏览器。模型供应商边界由本地确定性 HTTP provider stub 提供；没有 mock 业务 API、worker 或数据库，没有连接生产数据库或外部模型。
+- 验收顺序：首份 contribution 发布题 A；第二份同来源 contribution 新增 B。worker 在 B 的 resolution 前按标记失败，SQLite 证据显示 request 为 `failed`、B 尚无 resolution/canonical、公共列表只有 A。runner 随后停止并重启 worker，再由管理员调用真实 retry API；浏览器在 worker 重启之后再次确认 B 仍失败且公共列表仍只有 A，之后才发出 retry。
+- 最终投影：两个 request/item 均为 `published`；A/B 分别保留其 detail ID，公共面经清单顺序为 A、B，各出现一次；两条公共 resolution 指向独立 canonical，来源计数各为 1。个人原稿仍保留 A、B、原 URL 与私有公司 marker，未被公共清理覆盖。browser trace 明确记录 `worker_restarted_before_admin_retry=true`。
+- 边界红绿：独立复审补出普通面经与 contribution 使用同 URL、但 interview ID 不同的情况；回归先因旧 canonical 被清除而失败，修复后仅清理不与 contribution 共 URL 的普通面经。部分发布失败项不应重复提交的回归继续通过；新增 withdrawn/rejected item 重分享回归先失败，修复后撤回请求释放未发布来源项供新 request 使用。
+- runner 红绿：第一轮真实业务处理已完成，但 runner 闸门因共享 `cluster-window` job 在轮询前终态完成而误报 `missing`，该次退出 130，不计验收通过。新增终态 `completed` 闸门回归（修复前 1 failed，修复后相关 helper 4 passed），重建镜像并重跑完整浏览器流程后通过。
+- 后端相关回归：`67 passed, 1 warning`，覆盖 contribution materialization/transitions/admin retry、upload leases、public/personal scope、AC-016 worker failure gate 与 retry dispatch gate。
+- 候选镜像 image ID：backend/worker `sha256:577b5edc9ff51a39bac674397cb306165604acfc00dcd35e63b408917b4c7c31`；nginx/frontend `sha256:1e05fae4919ac1581d9c4ab5b2509d1d6be9fd110012f151c78b6607bcd06d23`；本地 HTTP 模型 stub `sha256:0b6c52eeb18479fc4b614b2ec8176fd32e3f8162b986e2d33a3b877cf1c97aab`；OAuth gateway `sha256:108ce4919327ae078f91da540d0fd78fa9f9dbcc4efe08f3ed8491fb488da45b`。
+- 持久证据：[seed](2026-10-04-real-stack/ac016-seed.json)、[source append](2026-10-04-real-stack/ac016-source-update.json)、[浏览器/API trace](2026-10-04-real-stack/ac016-browser-result.json)、[失败边界 SQLite trace](2026-10-04-real-stack/ac016-first-pass-db-trace.json)、[最终 SQLite 关系 trace](2026-10-04-real-stack/ac016-db-trace.json)。完整 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-827683-1791216502/`。
+- 状态：CL-AC-016 的 Given/When/Then 已由真实候选栈闭环，验收矩阵更新为通过。

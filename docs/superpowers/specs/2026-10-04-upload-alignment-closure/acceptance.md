@@ -2,7 +2,7 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-05，本地隔离候选栈已验证 AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，AC-011 的 8/2 答案部分失败与仅恢复失败题，AC-013 的真实 HTTP 错误与共享物理调用预算，以及 AC-022 的 multipart 超限早停、spool 清理和幂等重提。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-06，本地隔离候选栈还验证了 AC-016 的追加贡献累计、worker 重启后恢复和私人同 URL 来源保护。AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，AC-011 的 8/2 答案部分失败与仅恢复失败题，AC-013 的真实 HTTP 错误与共享物理调用预算，以及 AC-022 的 multipart 超限早停、spool 清理和幂等重提也已通过。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
@@ -13,7 +13,7 @@
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
 | CL-AC-011 | 通过 | 独立候选栈真实浏览器/API/SSE/worker/SQLite/provider 调用账本验证了首轮 8/2、仅重试题 9/10、8 个成功答案 hash 与 10 个 resolution ID/规范映射稳定，完成后 6 秒仍可从历史打开结果。证据见[AC-011 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-011-独立候选栈验收)。 |
 | CL-AC-013 | 通过 | 隔离候选栈真实浏览器/API/SSE/worker/SQLite/provider HTTP 验证了 401/403 单次失败、429 三次预算后经旧 retry 完成、格式错误三次预算及超时账本；旧 SSE 只读且日志脱敏通过。详见[AC-013 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-013-独立候选栈验收)。 |
-| CL-AC-016 | 部分 | 公共审核、失败子项恢复的候选栈回归通过；相同 URL 两份 contribution 加同 URL 私人面经的完整累计投影验收尚未运行。 |
+| CL-AC-016 | 通过 | 全新候选栈真实浏览器/API/worker/SQLite 验收了同 URL 两次 contribution 累计、B 失败期间不提前公开、worker 重启后再管理员恢复、A/B 各一次且顺序稳定，以及 U1 同 URL 私人原稿完整保留；两个复审边界也由红绿回归和独立复审闭合。证据见[AC-016 候选栈验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-016-候选栈闭环验收)。 |
 | CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
 | CL-AC-022 | 通过 | 真实浏览器上传 20 MiB+1 文件；10 MiB 限额在解析器观察到 10,650,039 字节时拒绝，spool 只写入 10,387,895 字节、已关闭，端点文件读取为 0。真实 HTTP 400/400/413、页面草稿保留、拒绝 key 的 by-key 为 404、修正后只建一个 root/attempt/job、同 key/hash 重放原 root、异 hash 409 均通过。 |
 | CL-AC-024 | 未运行 | 尚无真实 JD 兼容 retry→审核发布和历史 approved 数据不重放验收。 |

@@ -1,0 +1,26 @@
+{
+  "source_interview_id": 1,
+  "source_detail_a_id": 1,
+  "first_request_id": 1,
+  "first_item_id": 1,
+  "first_public_detail_id": 2,
+  "second_request_id": 2,
+  "second_item_id": 2,
+  "second_source_item_id": 3,
+  "second_public_detail_id": 4,
+  "public_interview_id": 2,
+  "source_url": "https://ac016.example/interview/shared",
+  "question_a": "AC016 question A: how does a distributed lock prevent stale writes?",
+  "question_b": "AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?",
+  "public_questions_before_retry": "1. AC016 question A: how does a distributed lock prevent stale writes?",
+  "public_questions_after_worker_restart": "1. AC016 question A: how does a distributed lock prevent stale writes?",
+  "public_questions_after_retry": "1. AC016 question A: how does a distributed lock prevent stale writes?\n2. AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?",
+  "private_questions_after_retry": "1. AC016 question A: how does a distributed lock prevent stale writes?\n2. AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?",
+  "failed_before_retry": true,
+  "injected_failure_error_message": "AC016_PUBLIC_ITEM_FAILURE detail_id=4",
+  "worker_restarted_before_admin_retry": true,
+  "final_request_statuses": [
+    "published",
+    "published"
+  ]
+}

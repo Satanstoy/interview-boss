@@ -157,6 +157,29 @@ def create_public_contribution_request(
         return _serialize_request(existing)
 
     snapshot = _source_snapshot(conn, source_type, source_id, requester_id)
+    if source_type == "interview":
+        previously_projected = {
+            int(row["source_item_id"])
+            for row in conn.execute(
+                "SELECT DISTINCT item.source_item_id "
+                "FROM public_contribution_items item "
+                "JOIN public_contribution_requests request "
+                "ON request.id = item.request_id "
+                "WHERE request.source_type = 'interview' AND request.source_id = ? "
+                "AND request.requester_id = ? AND item.source_item_type = 'question' "
+                "AND item.source_item_id IS NOT NULL "
+                "AND (item.status = 'published' OR (item.public_detail_id IS NOT NULL "
+                "AND request.status != 'withdrawn'))",
+                (source_id, requester_id),
+            ).fetchall()
+        }
+        snapshot["items"] = [
+            item
+            for item in snapshot.get("items", [])
+            if int(item.get("id") or 0) not in previously_projected
+        ]
+        if not snapshot["items"]:
+            raise ValueError("该面经没有新增的可提交题目")
     cursor = conn.execute(
         "INSERT INTO public_contribution_requests "
         "(source_type, source_id, requester_id, status, snapshot_json) "

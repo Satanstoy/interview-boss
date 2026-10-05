@@ -58,3 +58,28 @@ async def test_public_failure_gate_ignores_private_or_unmarked_work(monkeypatch)
         root_import_id="imp-ac029",
     )
     assert redis.values == {}
+
+
+@pytest.mark.asyncio
+async def test_public_failure_gate_supports_rootless_ac016_contribution_retry(monkeypatch):
+    from app.worker_cluster_tasks import maybe_inject_e2e_public_failure
+
+    monkeypatch.setenv("E2E_STUB_PROVIDER", "1")
+    redis = MemoryRedis()
+    ctx = {"redis": redis}
+    batch = [{
+        "queue_id": 82,
+        "qd_id": 405,
+        "question": "AC016_FAIL_PUBLIC_B: explain idempotent queue delivery",
+        "owner_id": None,
+        "contribution_request_id": 100,
+    }]
+
+    with pytest.raises(RuntimeError, match="AC016_PUBLIC_ITEM_FAILURE"):
+        await maybe_inject_e2e_public_failure(ctx, batch, root_import_id=None)
+
+    # A restarted worker sees the same Redis one-shot marker, so only the
+    # explicit admin retry can make this item eligible for successful work.
+    restarted_ctx = {"redis": redis}
+    await maybe_inject_e2e_public_failure(restarted_ctx, batch, root_import_id=None)
+    assert len(redis.values) == 1

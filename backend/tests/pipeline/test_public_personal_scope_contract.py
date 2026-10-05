@@ -661,3 +661,167 @@ def test_public_contribution_failed_queue_can_close_after_retry(test_db):
     assert test_db.execute(
         "SELECT status FROM public_contribution_requests WHERE id = ?", (request["id"],)
     ).fetchone()[0] == "published"
+
+
+@pytest.mark.asyncio
+async def test_incremental_public_contribution_does_not_clean_existing_public_sources(
+    test_db, monkeypatch
+):
+    """AC-016: processing appended public items must preserve earlier URL contributions."""
+    source_url = "https://ac016.example/interview/shared"
+    question_a = "AC016 question A: existing public canonical"
+    question_b = "AC016 question B: appended public item"
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (71, ?, NULL, 'approved', '后端开发')",
+        (source_url,),
+    )
+    test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, url, question, cat1, cat2, "
+        "owner_id, status, job_position) VALUES "
+        "(711, 71, ?, ?, '后端', '系统设计', NULL, 'approved', '后端开发')",
+        (source_url, question_b),
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, sources, original_questions, "
+        "original_question_sources, owner_id, status, job_position) VALUES "
+        "(801, ?, 1, ?, ?, ?, NULL, 'approved', '后端开发')",
+        (
+            question_a,
+            '[{"url": "https://ac016.example/interview/shared"}]',
+            '["AC016 question A: existing public canonical"]',
+            '[{"question":"AC016 question A: existing public canonical",'
+            '"sources":[{"url":"https://ac016.example/interview/shared"}]}]',
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (801, ?)",
+        (source_url,),
+    )
+    ordinary_url = "https://ac016.example/interview/ordinary"
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (72, ?, NULL, 'approved', '后端开发')",
+        (ordinary_url,),
+    )
+    # A normal interview can coexist with a contributed interview at the same
+    # URL. Its ordinary cleanup must not erase the shared public projection.
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (73, ?, NULL, 'approved', '后端开发')",
+        (source_url,),
+    )
+    test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, url, question, cat1, cat2, "
+        "owner_id, status, job_position) VALUES "
+        "(712, 72, ?, 'ordinary public replacement', '后端', '系统设计', NULL, 'approved', '后端开发'), "
+        "(713, 73, ?, 'same URL ordinary replacement', '后端', '系统设计', NULL, 'approved', '后端开发')",
+        (ordinary_url, source_url),
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, sources, original_questions, "
+        "original_question_sources, owner_id, status, job_position) VALUES "
+        "(802, 'ordinary old public canonical', 1, ?, ?, ?, NULL, 'approved', '后端开发')",
+        (
+            '[{"url": "https://ac016.example/interview/ordinary"}]',
+            '["ordinary old public canonical"]',
+            '[{"question":"ordinary old public canonical",'
+            '"sources":[{"url":"https://ac016.example/interview/ordinary"}]}]',
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (802, ?)",
+        (ordinary_url,),
+    )
+    test_db.commit()
+
+    batch = [
+        {
+            "queue_id": 9901,
+            "qd_id": 711,
+            "interview_id": 71,
+            "question": question_b,
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": source_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": 900,
+            "root_import_id": None,
+        },
+        {
+            "queue_id": 9902,
+            "qd_id": 712,
+            "interview_id": 72,
+            "question": "ordinary public replacement",
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": ordinary_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": None,
+            "root_import_id": None,
+        },
+        {
+            "queue_id": 9903,
+            "qd_id": 713,
+            "interview_id": 73,
+            "question": "same URL ordinary replacement",
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": source_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": None,
+            "root_import_id": None,
+        },
+    ]
+
+    async def _cluster_new_item(_rows, _existing, user_id=None):
+        assert user_id is None
+        return {"matched_to_existing": [], "new_clusters": []}
+
+    monkeypatch.setattr(
+        "app.services.pipeline.batch.process_incremental_batch",
+        AsyncMock(side_effect=_cluster_new_item),
+    )
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.pipeline.batch.get_index_manager",
+        lambda: SimpleNamespace(
+            invalidate=lambda *_args: None,
+            get_all_by_cat2=lambda *_args: {},
+        ),
+    )
+
+    from app.services.pipeline.batch import cluster_batch
+
+    await cluster_batch(batch, user_id=1)
+
+    canonical = test_db.execute(
+        "SELECT deleted_at, frequency FROM question_bank WHERE id = 801"
+    ).fetchone()
+    source = test_db.execute(
+        "SELECT deleted_at FROM question_sources WHERE question_bank_id = 801 AND url = ?",
+        (source_url,),
+    ).fetchone()
+    ordinary_canonical = test_db.execute(
+        "SELECT deleted_at FROM question_bank WHERE id = 802"
+    ).fetchone()
+    assert canonical["deleted_at"] is None
+    assert canonical["frequency"] == 1
+    assert source["deleted_at"] is None
+    assert ordinary_canonical["deleted_at"] is not None

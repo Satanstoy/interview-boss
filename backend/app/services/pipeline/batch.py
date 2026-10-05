@@ -419,6 +419,29 @@ async def cluster_batch(
         }
     )
     batch_urls = list({item["url"] for item in batch if item.get("url")})
+    contribution_interview_ids = {
+        int(item["interview_id"])
+        for item in batch
+        if item.get("contribution_request_id") is not None
+        and item.get("interview_id") is not None
+    }
+    contribution_urls = {
+        item["url"]
+        for item in batch
+        if item.get("contribution_request_id") is not None and item.get("url")
+    }
+    interview_urls = {
+        int(item["interview_id"]): item.get("url")
+        for item in batch
+        if item.get("interview_id") is not None
+    }
+    cleanup_interview_ids = [
+        interview_id
+        for interview_id in batch_interview_ids
+        if interview_id not in contribution_interview_ids
+        and interview_urls.get(interview_id) not in contribution_urls
+    ]
+    cleanup_urls = [url for url in batch_urls if url not in contribution_urls]
     t0 = _time.time()
 
     # ── Step 0: 保存旧 AI 答案 + 清理旧贡献 ──
@@ -443,7 +466,9 @@ async def cluster_batch(
                 pass
         del rows
 
-    if not skip_clean:
+    if not skip_clean and (
+        cleanup_interview_ids if batch_interview_ids else cleanup_urls
+    ):
 
         def _pre_clean():
             c = get_db_connection()
@@ -456,14 +481,14 @@ async def cluster_batch(
                 )
 
                 if batch_interview_ids:
-                    for interview_id in batch_interview_ids:
+                    for interview_id in cleanup_interview_ids:
                         cleanup_interview_question_bank_sources(
                             c.cursor(), interview_id, job_position=job_position
                         )
                 else:
                     # Compatibility for legacy callers that construct queue
                     # items without interview_id; keep the owner boundary.
-                    for url in batch_urls:
+                    for url in cleanup_urls:
                         _cleanup_old_sources_txn_v2(
                             c.cursor(), url, job_position, owner_id=owner_id
                         )

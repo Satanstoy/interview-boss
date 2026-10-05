@@ -82,6 +82,11 @@ copy_success_artifacts() {
     ac013-timeout_once-db-trace.json \
     ac013-stub-access.json \
     ac013-log-redaction.json \
+    ac016-seed.json \
+    ac016-source-update.json \
+    ac016-browser-result.json \
+    ac016-first-pass-db-trace.json \
+    ac016-db-trace.json \
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
@@ -294,6 +299,110 @@ run_ac013_real_stack() {
     >"$TEMP_ARTIFACTS/ac013-log-redaction.json"
 }
 
+run_ac016_real_stack() {
+  local control_prefix="$TEMP_ARTIFACTS/ac016-worker"
+  local browser_log="$TEMP_ARTIFACTS/ac016-browser.log"
+  local monitor_log="$TEMP_ARTIFACTS/ac016-worker-monitor.log"
+  local browser_pid
+  local monitor_pid
+
+  compose exec -T backend python /app/backend/e2e/seed_ac016_append_projection.py \
+    >"$TEMP_ARTIFACTS/ac016-seed.json"
+
+  control_ac016_worker() {
+    local attempt=0
+    local interview_id
+    while [ "$attempt" -lt "${AC016_REAL_STACK_DRIVER_POLLS:-7200}" ]; do
+      if [ -f "$control_prefix.append-b" ] && [ ! -f "$control_prefix.source-updated" ]; then
+        interview_id=$(python3 - "$TEMP_ARTIFACTS/ac016-seed.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["interview_id"])
+PY
+)
+        compose exec -T backend python /app/backend/e2e/append_ac016_question_b.py \
+          "$interview_id" >"$TEMP_ARTIFACTS/ac016-source-update.json"
+        touch "$control_prefix.source-updated"
+      fi
+
+      if [ -f "$control_prefix.stop" ] && [ ! -f "$control_prefix.stopped" ]; then
+        local failed_request_id
+        failed_request_id=$(cat "$control_prefix.stop")
+        compose stop worker >>"$monitor_log" 2>&1
+        compose exec -T backend python /app/backend/e2e/assert_ac016_failure_boundary.py \
+          "$failed_request_id" >"$TEMP_ARTIFACTS/ac016-first-pass-db-trace.json"
+        touch "$control_prefix.stopped"
+        compose up -d --wait --wait-timeout 120 worker >>"$monitor_log" 2>&1
+        touch "$control_prefix.restarted"
+      fi
+
+      if [ -f "$control_prefix.restart" ] && [ ! -f "$control_prefix.done" ]; then
+        local request_id
+        local dispatch_attempt=0
+        local dispatch_state
+        request_id=$(cat "$control_prefix.restart")
+        while [ "$dispatch_attempt" -lt 120 ]; do
+          dispatch_state=$(compose exec -T backend python \
+            /app/backend/e2e/ac016_retry_dispatch_gate.py "$request_id")
+          if [ "$dispatch_state" = "dispatched" ] || [ "$dispatch_state" = "completed" ]; then
+            break
+          fi
+          compose exec -T backend python -c \
+            'import asyncio; from app.worker_scheduled import scheduled_submit_job_dispatch_task; print(asyncio.run(scheduled_submit_job_dispatch_task({})))' \
+            >>"$monitor_log" 2>&1
+          dispatch_attempt=$((dispatch_attempt + 1))
+          sleep 1
+        done
+        if [ "$dispatch_attempt" -ge 120 ]; then
+          printf 'Timed out dispatching the retried AC-016 contribution job.\n' >"$monitor_log"
+          return 1
+        fi
+        touch "$control_prefix.done"
+        return 0
+      fi
+
+      attempt=$((attempt + 1))
+      sleep 0.25
+    done
+    printf 'Timed out driving the AC-016 source append or worker restart.\n' >"$monitor_log"
+    return 1
+  }
+
+  control_ac016_worker &
+  monitor_pid=$!
+  cd "$PROJECT_DIR/frontend"
+  set +e
+  REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC016_SEED_PATH="$TEMP_ARTIFACTS/ac016-seed.json" \
+    AC016_WORKER_CONTROL_PREFIX="$control_prefix" \
+    AC016_BROWSER_RESULT_TRACE="$TEMP_ARTIFACTS/ac016-browser-result.json" \
+    run_frontend_playwright tests/e2e/public-contribution-ac016-real-stack.spec.js \
+      --timeout "${AC016_REAL_STACK_TEST_TIMEOUT:-1440000}" \
+      >"$browser_log" 2>&1
+  local browser_status=$?
+  set -e
+  if [ "$browser_status" -ne 0 ]; then
+    kill "$monitor_pid" >/dev/null 2>&1 || true
+    wait "$monitor_pid" >/dev/null 2>&1 || true
+    cat "$browser_log"
+    return "$browser_status"
+  fi
+  wait "$monitor_pid"
+  cat "$browser_log"
+
+  local backend_container
+  backend_container=$(compose ps -q backend)
+  docker cp "$TEMP_ARTIFACTS/ac016-seed.json" "$backend_container:/tmp/ac016-seed.json" >/dev/null
+  docker cp "$TEMP_ARTIFACTS/ac016-browser-result.json" "$backend_container:/tmp/ac016-browser-result.json" >/dev/null
+  docker cp "$TEMP_ARTIFACTS/ac016-first-pass-db-trace.json" "$backend_container:/tmp/ac016-first-pass-db-trace.json" >/dev/null
+  compose exec -T backend python /app/backend/e2e/assert_ac016_append_projection.py \
+    /tmp/ac016-seed.json \
+    /tmp/ac016-browser-result.json \
+    /tmp/ac016-first-pass-db-trace.json \
+    >"$TEMP_ARTIFACTS/ac016-db-trace.json"
+}
+
 compose config --quiet
 if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
   for image in \
@@ -315,6 +424,11 @@ fi
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/api/health" >/dev/null
+
+if [ "${REAL_STACK_ONLY_AC016:-0}" = "1" ]; then
+  run_ac016_real_stack
+  exit 0
+fi
 
 if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ] \
   || {

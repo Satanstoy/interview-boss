@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 
 import pytest
@@ -402,4 +401,175 @@ def test_v2_materialize_reuses_same_url_public_interview():
     ).fetchone()
     assert detail is not None
     assert detail["company"] == "某公司"
+    conn.close()
+
+
+def test_second_contribution_from_same_source_only_snapshots_new_questions():
+    """AC-016: a later contribution must add new source items without re-publishing old ones."""
+
+    from app.services.public_contributions import create_public_contribution_request
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status) "
+        "VALUES (80, 'https://shared.example.com/i/2', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (81, 80, 'AC016 question A', 101, 'approved')"
+    )
+    conn.commit()
+
+    first = create_public_contribution_request(conn, "interview", 80, 101)
+    first_item = conn.execute(
+        "SELECT id FROM public_contribution_items WHERE request_id = ?",
+        (first["id"],),
+    ).fetchone()
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published' WHERE id = ?",
+        (first_item["id"],),
+    )
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'published' WHERE id = ?",
+        (first["id"],),
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (82, 80, 'AC016 question B', 101, 'approved')"
+    )
+    conn.commit()
+
+    second = create_public_contribution_request(conn, "interview", 80, 101)
+    second_items = conn.execute(
+        "SELECT id, source_item_id, snapshot_json FROM public_contribution_items "
+        "WHERE request_id = ? ORDER BY ordinal",
+        (second["id"],),
+    ).fetchall()
+
+    assert second["id"] != first["id"]
+    assert second["summary"]["item_count"] == 1
+    assert len(second_items) == 1
+    assert int(second_items[0]["id"]) != int(first_item["id"])
+    assert int(second_items[0]["source_item_id"]) == 82
+    assert "AC016 question B" in second_items[0]["snapshot_json"]
+    conn.close()
+
+
+def test_partially_published_items_are_not_resubmitted_as_new_contribution():
+    """A failed item with an existing public detail must use admin retry, not a duplicate request."""
+
+    from app.services.public_contributions import create_public_contribution_request
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status) "
+        "VALUES (80, 'https://shared.example.com/i/3', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (81, 80, 'AC016 published A', 101, 'approved'), "
+        "(82, 80, 'AC016 failed B', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status) "
+        "VALUES (90, 'https://shared.example.com/i/3', NULL, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (91, 90, 'AC016 published A', NULL, 'approved'), "
+        "(92, 90, 'AC016 failed B', NULL, 'approved')"
+    )
+    conn.commit()
+
+    previous = create_public_contribution_request(conn, "interview", 80, 101)
+    item_a, item_b = conn.execute(
+        "SELECT id, source_item_id FROM public_contribution_items "
+        "WHERE request_id = ? ORDER BY ordinal",
+        (previous["id"],),
+    ).fetchall()
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'published', public_detail_id = 91 "
+        "WHERE id = ?",
+        (item_a["id"],),
+    )
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'failed', public_detail_id = 92 "
+        "WHERE id = ?",
+        (item_b["id"],),
+    )
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'partially_published' WHERE id = ?",
+        (previous["id"],),
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (83, 80, 'AC016 new C', 101, 'approved')"
+    )
+    conn.commit()
+
+    next_request = create_public_contribution_request(conn, "interview", 80, 101)
+    next_items = conn.execute(
+        "SELECT source_item_id FROM public_contribution_items WHERE request_id = ?",
+        (next_request["id"],),
+    ).fetchall()
+
+    assert next_request["id"] != previous["id"]
+    assert [int(row["source_item_id"]) for row in next_items] == [83]
+    assert int(item_b["source_item_id"]) == 82
+    conn.close()
+
+
+def test_withdrawn_rejected_item_can_be_shared_again():
+    """AC-016: withdrawal releases unpublished source items for a later request."""
+
+    from app.services.public_contributions import create_public_contribution_request
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO users (id, username, password_hash) VALUES (101, 'u101', 'x')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status) "
+        "VALUES (80, 'https://shared.example.com/i/withdrawn', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (81, 80, 'AC016 withdrawn question', 101, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO interview (id, url, owner_id, status) "
+        "VALUES (90, 'https://shared.example.com/i/withdrawn', NULL, 'approved')"
+    )
+    conn.execute(
+        "INSERT INTO questions_detail (id, interview_id, question, owner_id, status) "
+        "VALUES (91, 90, 'AC016 withdrawn question', NULL, 'approved')"
+    )
+    conn.commit()
+
+    withdrawn = create_public_contribution_request(conn, "interview", 80, 101)
+    conn.execute(
+        "UPDATE public_contribution_items SET status = 'rejected', public_detail_id = 91 "
+        "WHERE request_id = ?",
+        (withdrawn["id"],),
+    )
+    conn.execute(
+        "UPDATE public_contribution_requests SET status = 'withdrawn' WHERE id = ?",
+        (withdrawn["id"],),
+    )
+    conn.commit()
+
+    next_request = create_public_contribution_request(conn, "interview", 80, 101)
+    next_items = conn.execute(
+        "SELECT source_item_id FROM public_contribution_items WHERE request_id = ?",
+        (next_request["id"],),
+    ).fetchall()
+
+    assert next_request["id"] != withdrawn["id"]
+    assert [int(row["source_item_id"]) for row in next_items] == [81]
     conn.close()
