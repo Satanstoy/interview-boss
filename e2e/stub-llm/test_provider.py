@@ -1,4 +1,21 @@
-from provider import _match_exact_questions
+from provider import _match_exact_questions, _StubCallLedger
+
+
+def test_stub_call_ledger_releases_only_the_requested_question_marker():
+    ledger = _StubCallLedger(fail_markers={"AC011_QUESTION_09", "AC011_QUESTION_10"})
+
+    assert ledger.record("AC011_QUESTION_09") is True
+    assert ledger.record("AC011_QUESTION_10") is True
+    assert ledger.record("AC011_QUESTION_08") is False
+    assert ledger.counts() == {
+        "AC011_QUESTION_09": 1,
+        "AC011_QUESTION_10": 1,
+        "AC011_QUESTION_08": 1,
+    }
+
+    ledger.release("AC011_QUESTION_09")
+    assert ledger.record("AC011_QUESTION_09") is False
+    assert ledger.record("AC011_QUESTION_10") is True
 
 
 def test_match_exact_questions_reuses_existing_canonical_and_reports_unmatched():

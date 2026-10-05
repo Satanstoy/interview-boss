@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -103,6 +104,41 @@ def _match_exact_questions(prompt_text: str) -> dict:
     return {"matches": matches, "unmatched": unmatched}
 
 
+class _StubCallLedger:
+    """Thread-safe call counter with per-marker fault release for real-stack tests."""
+
+    def __init__(self, fail_markers=()):
+        self._fail_markers = set(fail_markers)
+        self._released = set()
+        self._counts = {}
+        self._lock = threading.Lock()
+
+    def record(self, marker: str) -> bool:
+        """Count one physical HTTP request and return whether it should fail."""
+        with self._lock:
+            self._counts[marker] = self._counts.get(marker, 0) + 1
+            return marker in self._fail_markers and marker not in self._released
+
+    def release(self, marker: str) -> None:
+        with self._lock:
+            self._released.add(marker)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._released.clear()
+            self._counts.clear()
+
+    def counts(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._counts)
+
+
+_AC011_MARKERS = tuple(f"AC011_QUESTION_{ordinal:02d}" for ordinal in range(1, 11))
+_CALL_LEDGER = _StubCallLedger(
+    fail_markers={"AC011_QUESTION_09", "AC011_QUESTION_10"}
+)
+
+
 class StubHandler(BaseHTTPRequestHandler):
     server_version = "InterviewBossE2EStub/1.0"
 
@@ -115,6 +151,9 @@ class StubHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/__e2e/calls":
+            self._send_json(200, {"counts": _CALL_LEDGER.counts()})
+            return
         if self.path == "/health":
             self._send_json(200, {"status": "ok", "provider": "stub"})
             return
@@ -127,6 +166,11 @@ class StubHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": {"message": "not found"}})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/__e2e/reset":
+            _CALL_LEDGER.reset()
+            self._send_json(200, {"status": "reset"})
+            return
+
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -137,6 +181,66 @@ class StubHandler(BaseHTTPRequestHandler):
         messages = payload.get("messages") or []
         serialized = json.dumps(messages, ensure_ascii=False)
         prompt_text = "\n".join(_collect_message_text(messages))
+
+        if "公共参考答案" in prompt_text:
+            answer_marker = next((item for item in _AC011_MARKERS if item in prompt_text), None)
+            if answer_marker:
+                if _CALL_LEDGER.record(answer_marker):
+                    self._send_json(503, {"error": {"message": "AC011 temporary answer failure"}})
+                    return
+                content = f"{answer_marker}_ANSWER：这是可复核的隔离候选答案。"
+                self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+                return
+
+        if "AC011_ANSWER_PARTIAL_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC011 部分答案恢复演练",
+                        "面试轮次": "一面",
+                        "考察重点": "仅恢复失败答案",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {"ordinal": index, "question": f"AC011_QUESTION_{index:02d} 题目 {index}"}
+                            for index in range(1, 11)
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
+
+        if "AC011_ANSWER_PARTIAL_REAL_STACK" in prompt_text and "请为以下题目列表标记" in prompt_text:
+            content = json.dumps(
+                {
+                    "questions": [
+                        {
+                            "id": index,
+                            "题目": f"AC011_QUESTION_{index + 1:02d} 题目 {index + 1}",
+                            "一级大类": "C.基础工程能力",
+                            "二级子类": "C1.系统设计",
+                            "考点标签": "失败恢复",
+                            "难度标签": "L2-中等",
+                        }
+                        for index in range(10)
+                    ]
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
+
+        if self.path == "/__e2e/release":
+            marker = str(payload.get("marker") or "")
+            if marker not in _AC011_MARKERS:
+                self._send_json(400, {"error": {"message": "unknown marker"}})
+                return
+            _CALL_LEDGER.release(marker)
+            self._send_json(200, {"status": "released", "marker": marker})
+            return
+
         if "E2E_FAIL_PROVIDER" in serialized:
             self._send_json(503, {"error": {"message": "stub provider failure"}})
             return

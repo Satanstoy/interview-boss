@@ -8,6 +8,7 @@ ARQ Worker 配置
 import os
 import time
 import json
+import re
 import base64
 import asyncio
 import logging
@@ -503,6 +504,8 @@ def _normalize_error_code(message: str) -> str:
         return "UPSTREAM_RATE_LIMIT"
     if "timeout" in text or "超时" in text:
         return "UPSTREAM_TIMEOUT"
+    if re.search(r"\b5\d{2}\b", text):
+        return "UPSTREAM_UNAVAILABLE"
     if "api key" in text or "model_config" in text or "配置" in text:
         return "MODEL_CONFIG_MISSING"
     return (message or "UNKNOWN_ERROR")[:64]
@@ -1475,10 +1478,11 @@ async def _generate_answer_job(ctx, job_id: int):
                 ),
             )
             if outcome["status"] != "stale":
+                error_code = _normalize_error_code(error)
                 _sync_upload_root(
                     conn,
                     "failed" if outcome["status"] == "failed" else "pending",
-                    error_code="ANSWER_GENERATION_FAILED" if outcome["status"] == "failed" else None,
+                    error_code=error_code,
                 )
             conn.commit()
             return outcome

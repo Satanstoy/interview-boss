@@ -151,6 +151,54 @@ def test_link_records_created_for_unmatched_new_question():
     conn.close()
 
 
+def test_retry_relink_keeps_existing_successful_resolution_when_match_is_recomputed():
+    """AC-011 retry may resume answer jobs, but keeps successful question identity."""
+
+    conn = _db()
+    conn.execute(
+        "INSERT INTO question_bank (id, question, cat1, cat2, owner_id, status) "
+        "VALUES (900, '解释 TCP 三次握手', '网络', 'tcp', 101, 'approved')"
+    )
+    conn.commit()
+    link_details_to_import(
+        conn,
+        import_id="imp-1",
+        detail_ids=[11],
+        ordinals={11: 1},
+        actor_id=101,
+        matches={11: {"canonical_id": 900, "canonical_scope": "private", "status": "created"}},
+    )
+    before = dict(
+        conn.execute(
+            "SELECT id, canonical_id, canonical_scope, status, invalidated_at "
+            "FROM question_resolutions WHERE detail_id = 11 AND invalidated_at IS NULL"
+        ).fetchone()
+    )
+
+    # A resumed submit graph can recompute a direct match instead of passing an
+    # empty map. That must not replace the already committed identity.
+    link_details_to_import(
+        conn,
+        import_id="imp-1",
+        detail_ids=[11],
+        ordinals={11: 1},
+        actor_id=101,
+        matches={11: {"canonical_id": 900, "canonical_scope": "private", "status": "matched"}},
+    )
+
+    after = dict(
+        conn.execute(
+            "SELECT id, canonical_id, canonical_scope, status, invalidated_at "
+            "FROM question_resolutions WHERE detail_id = 11 AND invalidated_at IS NULL"
+        ).fetchone()
+    )
+    assert after == before
+    assert conn.execute(
+        "SELECT COUNT(*) FROM question_resolutions WHERE detail_id = 11"
+    ).fetchone()[0] == 1
+    conn.close()
+
+
 def test_link_without_match_persists_failed_not_new_question():
     """R05：一笔匹配失败持久化为 failed，不生成 phantom canonical。"""
 

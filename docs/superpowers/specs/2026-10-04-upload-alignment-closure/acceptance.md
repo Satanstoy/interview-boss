@@ -2,7 +2,7 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-04，本地隔离候选栈已验证分页/已发布目标定位、multipart 拒绝与幂等、所有者并发重试、worker 重启后个人结果定位、公共审核失败项恢复、真实 SSE/快照故障和账号切换收敛，以及 AC-007 rootless 私人失败项恢复、持续公共流量公平性和 Redis 丢通知恢复。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-05，本地隔离候选栈还验证了 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
@@ -11,7 +11,7 @@
 | CL-AC-007 | 通过 | 最终候选镜像的真实浏览器/API/worker/SQLite 验收覆盖 upload root 和 rootless 私人失败行：并发请求收敛到同一 attempt/queue_id，成功 checkpoint 保留，U2/管理员越权为 404，公共贡献失败项不进入个人列表且个人 retry 为 404，rootless 行保持 root-null 并进入 owner 私人题库；分页与固定请求量刷新、双 worker 公平性、COMMIT 后 Redis 通知丢失恢复及状态提交后缺 job 的 rootless 周期对账恢复均通过。命令、最终镜像 digest 和 trace 见[AC-007 最终复核](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-007-final)。 |
 | CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
-| CL-AC-011 | 部分 | 状态投影单测通过；8/10 成功、2/10 失败后真实 worker 仅恢复两题的浏览器/API/DB 验收尚未运行。 |
+| CL-AC-011 | 通过 | 独立候选栈真实浏览器/API/SSE/worker/SQLite/provider 调用账本验证了首轮 8/2、仅重试题 9/10、8 个成功答案 hash 与 10 个 resolution ID/规范映射稳定，完成后 6 秒仍可从历史打开结果。证据见[AC-011 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-011-独立候选栈验收)。 |
 | CL-AC-013 | 部分 | 调用预算与 stream contract 单测通过；本地 HTTP provider 的 401/429/超时真实请求计数和旧入口联测尚未运行。 |
 | CL-AC-016 | 部分 | 公共审核、失败子项恢复的候选栈回归通过；相同 URL 两份 contribution 加同 URL 私人面经的完整累计投影验收尚未运行。 |
 | CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |

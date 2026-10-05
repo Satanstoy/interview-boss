@@ -136,4 +136,18 @@ bash -n scripts/real_stack_smoke.sh \
 
 ## 尚未关闭的验收
 
-本次只关闭并标记 CL-AC-007 通过，不代表所有 spec 已对齐。当前其余未闭环项见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)；AC-024 尚未运行，其他标为“部分”的条目仍有各自列明的验收缺口。只有对应 Given/When/Then 的真实候选栈证据齐备后，才逐项标记通过。
+2026-10-04 的 AC-007 验收只关闭并标记了 CL-AC-007；当时没有据此声称所有 spec 已对齐。后续 AC-011 的独立结果见下节；当前其余未闭环项见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)。只有对应 Given/When/Then 的真实候选栈证据齐备后，才逐项标记通过。
+
+## CL-AC-011 独立候选栈验收
+
+- 日期：2026-10-05。
+- 命令：`REAL_STACK_ONLY_AC011=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_PORT=18081 scripts/real_stack_smoke.sh`。
+- 结果：脚本退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`；最终 SQLite/provider trace 交叉断言通过。候选 Compose 项目：`interview-boss-real-e2e-208242-1791200138`。
+- 环境：一次性 SQLite volume 和 Redis namespace；真实前端、Nginx、FastAPI、登录鉴权、SSE、ARQ dispatcher、worker 和数据库。LLM provider 边界使用本地 HTTP stub，记录实际 HTTP 请求；业务 API、任务状态、授权、worker 和数据库没有用 mock 代替。没有连接生产数据库，也没有调用模型供应商。
+- 镜像 image ID：backend/worker `sha256:8ef19693b9a52c75ab84664a90bf5622d6eb80c381133494b123bf5f2a8edda0`；frontend/Nginx `sha256:48c68ffbc5f63de6da72fd1209d0082b9e68f912c320813f2dbcd14d2bcd672a`；LLM stub `sha256:56863d8dd1d78037a98878272adf8652614b98b5cdba51440f03c2bc43dc62cf`；OAuth gateway `sha256:2c8056aae6dfef454d781aabc54e2e30a4715030c11fccec2a7ac878eafd1078`。
+- 首轮实际状态：任务卡、API snapshot 和 SSE 均为 `partial_failed`，10 题中 8 答案成功、2 失败；错误为 `UPSTREAM_UNAVAILABLE` 且 `retryable=true`，所有者动作包含 `retry_failed_steps`；结果可打开。
+- 恢复后实际状态：attempt 2 只为题目 ID 9、10 创建 answer job，worker 仅对此两题各新增 1 次实际 HTTP provider 请求；题目 1–8 的答案、结果 hash、job ID 均未变；10 个 detail 的 resolution ID 均保持 `1..10`。最终 snapshot 为 `completed`、10 成功、0 失败；结果页在终态 6 秒后仍能从任务历史重新打开。
+- focused backend 回归：答案错误分类与进度测试 `7 passed`；resolution link 相关用例 `6 passed`；遗漏 match 时保留身份测试 `1 passed`。完整 `test_upload_resolution_link.py` 中另有一个与本 AC 无关的贡献模块导入用例被本机 `.env` 上游 URL SSRF guard 阻断；该用例未进入断言。
+- 长期证据：[browser/API/SSE trace](2026-10-04-real-stack/ac011-browser-result.json)、[首轮 SQLite/provider trace](2026-10-04-real-stack/ac011-first-pass-db-trace.json)、[最终 SQLite/provider trace](2026-10-04-real-stack/ac011-final-db-trace.json)、[交叉断言结果](2026-10-04-real-stack/ac011-trace-assertion.json)。完整原始候选栈 artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-208242-1791200138/`。
+
+本次验收只关闭 CL-AC-011。CL-AC-001/002/013/016/017/022 部分验收及 CL-AC-024 未运行仍保持开放；见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)。

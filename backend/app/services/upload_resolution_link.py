@@ -54,6 +54,26 @@ def link_details_to_import(
         )
         linked += 1
 
+        # Recovery can recompute a direct match for an already persisted
+        # detail. A successful resolution is the stable identity used by its
+        # answer job, so retries must not replace it. A prior failed
+        # resolution can still be upgraded when matching succeeds.
+        current_resolution = conn.execute(
+            "SELECT canonical_id, status FROM question_resolutions "
+            "WHERE detail_id = ? AND invalidated_at IS NULL ORDER BY id DESC LIMIT 1",
+            (detail_id,),
+        ).fetchone()
+        if current_resolution is not None:
+            if (
+                current_resolution["status"] in ("matched", "created")
+                and current_resolution["canonical_id"] is not None
+            ):
+                continue
+            # An omitted match on recovery is not a new failed match attempt.
+            # An explicit ``detail_id: None`` still takes the failure path.
+            if matches is not None and detail_id not in matches:
+                continue
+
         match = (matches or {}).get(detail_id)
         if match and match.get("status") == "failed":
             # AC-006：模型/匹配失败 → 持久化为可恢复失败（error_code 留痕），

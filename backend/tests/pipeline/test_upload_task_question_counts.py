@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 
 def test_snapshot_progress_uses_extracted_question_and_answer_outcomes(test_db):
@@ -123,3 +124,49 @@ def test_answer_jobs_are_bound_to_upload_root_and_keep_attempt_open(test_db):
     assert test_db.execute(
         "SELECT status FROM upload_attempts WHERE id = ?", (attempt_id,)
     ).fetchone()[0] == "active"
+
+
+def test_successful_answer_checkpoint_persists_stable_output_hash(test_db):
+    from app.services.job_lifecycle import create_answer_generation_jobs, update_upload_answer_stage
+
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (101, 'answer-hash-user', 'x')"
+    )
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, status, current_attempt_no) "
+        "VALUES ('answer-hash-root', 101, 'answer-hash-key', 'answer-hash', 'private', "
+        "'interview', 'upload-pipeline-v1', 'running', 1)"
+    )
+    test_db.execute(
+        "INSERT INTO upload_attempts (import_id, attempt_no, status, requested_by) "
+        "VALUES ('answer-hash-root', 1, 'active', 101)"
+    )
+    attempt_id = test_db.execute(
+        "SELECT id FROM upload_attempts WHERE import_id = 'answer-hash-root'"
+    ).fetchone()[0]
+    parent_job_id = test_db.execute(
+        "INSERT INTO jobs (job_type, status, created_by, root_import_id, upload_attempt_id, "
+        "work_key, lease_generation) VALUES ('submit_import', 'completed', 101, "
+        "'answer-hash-root', ?, 'extract:document:v1', 1) RETURNING id",
+        (attempt_id,),
+    ).fetchone()[0]
+    answer_job_id = create_answer_generation_jobs(
+        test_db, parent_job_id, [(901, "stable answer")], user_id=101
+    )[0]
+    result_json = json.dumps({"answer": "stable answer result"}, ensure_ascii=False)
+
+    update_upload_answer_stage(
+        test_db,
+        answer_job_id,
+        "succeeded",
+        result_json=result_json,
+    )
+
+    stage = test_db.execute(
+        "SELECT status, result_json, output_hash FROM upload_stage_results "
+        "WHERE import_id = 'answer-hash-root' AND stage = 'answer' AND unit_key = 'answer:901'"
+    ).fetchone()
+    assert stage["status"] == "succeeded"
+    assert stage["result_json"] == result_json
+    assert stage["output_hash"] == hashlib.sha256(result_json.encode("utf-8")).hexdigest()

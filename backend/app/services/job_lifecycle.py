@@ -290,6 +290,8 @@ def update_upload_answer_stage(
 ) -> str | None:
     """Mirror a root-bound answer job into its per-question upload checkpoint."""
 
+    import hashlib
+
     row = conn.execute(
         "SELECT j.root_import_id, j.upload_attempt_id, p.payload, i.input_version, "
         "i.pipeline_version FROM jobs j JOIN job_payloads p ON p.job_id = j.id "
@@ -307,14 +309,20 @@ def update_upload_answer_stage(
     if question_id is None:
         return None
     unit_key = f"answer:{int(question_id)}"
+    output_hash = (
+        hashlib.sha256(result_json.encode("utf-8")).hexdigest()
+        if status == "succeeded" and result_json is not None
+        else None
+    )
     conn.execute(
         "INSERT INTO upload_stage_results (import_id, stage, unit_key, input_version, "
-        "pipeline_version, status, result_json, error_code, retryable, job_id) "
-        "VALUES (?, 'answer', ?, ?, ?, ?, ?, ?, ?, ?) "
+        "pipeline_version, status, result_json, output_hash, error_code, retryable, job_id) "
+        "VALUES (?, 'answer', ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
         "pipeline_version = excluded.pipeline_version, status = excluded.status, "
         "result_json = excluded.result_json, error_code = excluded.error_code, "
-        "retryable = excluded.retryable, job_id = excluded.job_id, "
+        "output_hash = excluded.output_hash, retryable = excluded.retryable, "
+        "job_id = excluded.job_id, "
         "updated_at = CURRENT_TIMESTAMP",
         (
             row["root_import_id"],
@@ -323,6 +331,7 @@ def update_upload_answer_stage(
             row["pipeline_version"] or "upload-pipeline-v1",
             status,
             result_json,
+            output_hash,
             error_code,
             1 if status in ("pending", "running") else 0,
             job_id,

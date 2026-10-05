@@ -269,6 +269,76 @@ def test_legacy_wrapper_still_commits_and_maps_duplicate_url():
     conn.close()
 
 
+def test_relinking_existing_import_details_without_new_matches_preserves_resolution():
+    """AC-011 retry reuses old details; an empty retry match map is not a failure."""
+    from app.services.question_resolution import record_resolution
+    from app.services.upload_resolution_link import link_details_to_import
+
+    conn = _db()
+    interview_id = int(
+        conn.execute(
+            "INSERT INTO interview (url, company, owner_id, status, job_position) "
+            "VALUES ('https://retry.example/interview', 'Retry', 101, 'approved', '后端') "
+            "RETURNING id"
+        ).fetchone()["id"]
+    )
+    question_id = int(
+        conn.execute(
+            "INSERT INTO question_bank (question, owner_id, submitted_by, status, job_position) "
+            "VALUES ('stable answer question', 101, 101, 'approved', '后端') RETURNING id"
+        ).fetchone()["id"]
+    )
+    detail_id = int(
+        conn.execute(
+            "INSERT INTO questions_detail (interview_id, question, owner_id, status, job_position, "
+            "import_id, source_ordinal) VALUES (?, 'stable answer question', 101, 'approved', '后端', "
+            "'imp-1', 1) RETURNING id",
+            (interview_id,),
+        ).fetchone()["id"]
+    )
+    record_resolution(
+        conn,
+        detail_id=detail_id,
+        occurrence_scope="private",
+        occurrence_owner_id=101,
+        canonical_id=question_id,
+        canonical_scope="private",
+        status="created",
+        pipeline_version="upload-pipeline-v1",
+    )
+    before = dict(
+        conn.execute(
+            "SELECT id, canonical_id, status, invalidated_at FROM question_resolutions "
+            "WHERE detail_id = ? AND invalidated_at IS NULL",
+            (detail_id,),
+        ).fetchone()
+    )
+    conn.commit()
+
+    link_details_to_import(
+        conn,
+        import_id="imp-1",
+        detail_ids=[detail_id],
+        ordinals={detail_id: 1},
+        actor_id=101,
+        matches={},
+        write_unmatched=False,
+    )
+
+    after = dict(
+        conn.execute(
+            "SELECT id, canonical_id, status, invalidated_at FROM question_resolutions "
+            "WHERE detail_id = ? AND invalidated_at IS NULL",
+            (detail_id,),
+        ).fetchone()
+    )
+    assert after == before
+    assert conn.execute(
+        "SELECT COUNT(*) FROM question_resolutions WHERE detail_id = ?", (detail_id,)
+    ).fetchone()[0] == 1
+    conn.close()
+
+
 # ── thread_id 稳定性（AC-009） ───────────────────────────────
 
 

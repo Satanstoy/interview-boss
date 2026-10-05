@@ -65,6 +65,11 @@ copy_success_artifacts() {
     ac010-revision7.json \
     ac010-browser-result.json \
     ac010-db-trace.json \
+    ac011-seed.json \
+    ac011-first-pass-db-trace.json \
+    ac011-final-db-trace.json \
+    ac011-browser-result.json \
+    ac011-trace-assertion.json \
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
@@ -132,6 +137,97 @@ run_frontend_playwright() {
     --config "$PROJECT_DIR/frontend/playwright.config.js" "$@"
 }
 
+run_ac011_real_stack() {
+  local control_prefix="$TEMP_ARTIFACTS/ac011-control"
+  local browser_log="$TEMP_ARTIFACTS/ac011-browser.log"
+  local monitor_log="$TEMP_ARTIFACTS/ac011-monitor.log"
+  local browser_pid
+  local attempt=0
+
+  compose exec -T llm-stub python -c \
+    'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/reset", data=b"{}", method="POST"), timeout=5).read()'
+  compose exec -T backend python /app/backend/e2e/seed_ac011_partial_answers.py \
+    >"$TEMP_ARTIFACTS/ac011-seed.json"
+
+  cd "$PROJECT_DIR/frontend"
+  set +e
+  REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC011_SEED_PATH="$TEMP_ARTIFACTS/ac011-seed.json" \
+    AC011_RELEASE_SIGNAL="$control_prefix.release" \
+    AC011_RELEASE_DONE="$control_prefix.released" \
+    AC011_BROWSER_DONE="$control_prefix.browser-done" \
+    AC011_BROWSER_TRACE="$TEMP_ARTIFACTS/ac011-browser-result.json" \
+    run_frontend_playwright tests/e2e/upload-answer-partial-ac011-real-stack.spec.js \
+      --timeout "${AC011_REAL_STACK_TEST_TIMEOUT:-720000}" \
+      >"$browser_log" 2>&1 &
+  browser_pid=$!
+  set -e
+
+  while [ "$attempt" -lt "${AC011_REAL_STACK_DRIVER_POLLS:-1800}" ]; do
+    if ! kill -0 "$browser_pid" >/dev/null 2>&1; then
+      set +e
+      wait "$browser_pid"
+      local early_status=$?
+      set -e
+      cat "$browser_log"
+      if [ "$early_status" -ne 0 ]; then
+        return "$early_status"
+      fi
+      if [ -f "$control_prefix.browser-done" ]; then
+        break
+      fi
+      printf 'The AC-011 browser exited without writing its completion signal.\n' >&2
+      return 1
+    fi
+
+    compose exec -T backend python -c \
+      'import asyncio; from app.worker_scheduled import scheduled_submit_job_dispatch_task; asyncio.run(scheduled_submit_job_dispatch_task({}))' \
+      >>"$monitor_log" 2>&1 || true
+
+    if [ -f "$control_prefix.release" ] && [ ! -f "$control_prefix.released" ]; then
+      compose exec -T backend python /app/backend/e2e/ac011_answer_trace.py first \
+        "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["import_id"])' "$TEMP_ARTIFACTS/ac011-seed.json")" \
+        >"$TEMP_ARTIFACTS/ac011-first-pass-db-trace.json"
+      compose exec -T llm-stub python -c \
+        'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/release", data=b"{\"marker\":\"AC011_QUESTION_09\"}", headers={"Content-Type":"application/json"}, method="POST"), timeout=5).read()'
+      compose exec -T llm-stub python -c \
+        'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/release", data=b"{\"marker\":\"AC011_QUESTION_10\"}", headers={"Content-Type":"application/json"}, method="POST"), timeout=5).read()'
+      printf '%s\n' "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["import_id"])' "$TEMP_ARTIFACTS/ac011-seed.json")" \
+        >"$control_prefix.released"
+    fi
+
+    if [ -f "$control_prefix.browser-done" ]; then
+      break
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  if [ "$attempt" -ge "${AC011_REAL_STACK_DRIVER_POLLS:-1800}" ]; then
+    printf 'Timed out driving the real AC-011 worker and browser scenario.\n' >&2
+    cat "$monitor_log" >&2
+    return 1
+  fi
+
+  set +e
+  wait "$browser_pid"
+  local browser_status=$?
+  set -e
+  cat "$browser_log"
+  if [ "$browser_status" -ne 0 ]; then
+    return "$browser_status"
+  fi
+
+  local import_id
+  import_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["import_id"])' "$TEMP_ARTIFACTS/ac011-seed.json")
+  compose exec -T backend python /app/backend/e2e/ac011_answer_trace.py final "$import_id" \
+    >"$TEMP_ARTIFACTS/ac011-final-db-trace.json"
+  python3 "$PROJECT_DIR/backend/e2e/assert_ac011_answer_trace.py" \
+    "$TEMP_ARTIFACTS/ac011-first-pass-db-trace.json" \
+    "$TEMP_ARTIFACTS/ac011-final-db-trace.json" \
+    >"$TEMP_ARTIFACTS/ac011-trace-assertion.json"
+}
+
 compose config --quiet
 if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
   for image in \
@@ -153,6 +249,21 @@ fi
 
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/" >/dev/null
 curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$BASE_URL/api/health" >/dev/null
+
+if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ] \
+  || {
+    [ "${REAL_STACK_ONLY_AC001_AC002:-0}" != "1" ] \
+      && [ "${REAL_STACK_ONLY_AC022:-0}" != "1" ] \
+      && [ "${REAL_STACK_ONLY_AC007:-0}" != "1" ] \
+      && [ "${REAL_STACK_ONLY_AC007_QUEUE:-0}" != "1" ] \
+      && [ "${REAL_STACK_ONLY_AC009:-0}" != "1" ] \
+      && [ "${REAL_STACK_ONLY_AC010:-0}" != "1" ]
+  }; then
+  run_ac011_real_stack
+  if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ]; then
+    exit 0
+  fi
+fi
 
 if [ "${REAL_STACK_ONLY_AC010:-0}" = "1" ]; then
   compose stop worker >/dev/null
