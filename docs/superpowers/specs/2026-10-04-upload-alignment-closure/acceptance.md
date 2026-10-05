@@ -1,8 +1,8 @@
-# 剩余 11 项的验收矩阵
+# 闭环验收矩阵（本批 11 项）
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-05，本地隔离候选栈还验证了 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-05，本地隔离候选栈已验证 AC-011 的 8/2 答案部分失败、仅恢复失败题、稳定答案/resolution 身份、可恢复错误分类和最终结果历史定位，以及 AC-013 的真实 HTTP 错误、共享物理调用预算、旧 retry/SSE 兼容和日志脱敏。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
@@ -12,7 +12,7 @@
 | CL-AC-009 | 通过 | 隔离候选栈中双浏览器在同一秒提交；两条 submit job 的 durable start time 相同、两个独立 worker 各领取一个 root；真实答案、canonical/source、resolution、detail、任务结果页均按 owner 对应，跨用户 snapshot 为 404。见[AC-009 候选栈证据](../../../verification/upload-recovery/2026-10-04-real-stack/ac009-db-trace.json)。 |
 | CL-AC-010 | 通过 | 隔离候选栈真实 API/SSE 和浏览器验收通过：EOF 重连、列表/详情 500、revision 8→7、心跳、登出后延迟 401、切换账号、恢复失败保留草稿；DB 确认无第二 attempt/job。证据见[AC-010 验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-010-独立候选栈验收)。 |
 | CL-AC-011 | 通过 | 独立候选栈真实浏览器/API/SSE/worker/SQLite/provider 调用账本验证了首轮 8/2、仅重试题 9/10、8 个成功答案 hash 与 10 个 resolution ID/规范映射稳定，完成后 6 秒仍可从历史打开结果。证据见[AC-011 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-011-独立候选栈验收)。 |
-| CL-AC-013 | 部分 | 调用预算与 stream contract 单测通过；本地 HTTP provider 的 401/429/超时真实请求计数和旧入口联测尚未运行。 |
+| CL-AC-013 | 通过 | 隔离候选栈真实浏览器/API/SSE/worker/SQLite/provider HTTP 验证了 401/403 单次失败、429 三次预算后经旧 retry 完成、格式错误三次预算及超时账本；旧 SSE 只读且日志脱敏通过。详见[AC-013 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-013-独立候选栈验收)。 |
 | CL-AC-016 | 部分 | 公共审核、失败子项恢复的候选栈回归通过；相同 URL 两份 contribution 加同 URL 私人面经的完整累计投影验收尚未运行。 |
 | CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
 | CL-AC-022 | 部分 | 真实 MIME/空文件/超限拒绝、草稿保留、重提和幂等已过；后端读取字节数/临时文件在超限前的断言尚未验证。 |

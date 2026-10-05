@@ -1171,13 +1171,36 @@ def _llm_retry_wait(retry_state) -> float:
     return _DEFAULT_LLM_WAIT(retry_state)
 
 
+def _log_llm_retry(retry_state) -> None:
+    """Correlate upload retries without logging prompts or provider responses."""
+
+    error = retry_state.outcome.exception()
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        from app.services.upload_retry_budget import normalize_upload_error_code
+
+        logger.warning(
+            "upload LLM retry import_id=%s stage=%s attempt=%s exception_type=%s code=%s",
+            upload_context.root_import_id,
+            upload_context.stage,
+            retry_state.attempt_number,
+            type(error).__name__,
+            normalize_upload_error_code(error),
+        )
+        return
+
+    logger.warning(
+        "LLM 调用失败，第 %s 次重试: %s",
+        retry_state.attempt_number,
+        error,
+    )
+
+
 @retry(
     stop=_llm_retry_stop,
     wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
-    before_sleep=lambda retry_state: logger.warning(
-        f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
-    ),
+    before_sleep=_log_llm_retry,
 )
 async def _call_llm_with_retry(
     prompt: str,
@@ -1292,9 +1315,7 @@ async def _call_llm_with_retry(
     stop=_llm_retry_stop,
     wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
-    before_sleep=lambda retry_state: logger.warning(
-        f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
-    ),
+    before_sleep=_log_llm_retry,
 )
 async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **kwargs) -> str:
     """带重试的 LLM 调用，支持 multimodal messages（图片+文本），自动适配 OpenAI / Anthropic"""

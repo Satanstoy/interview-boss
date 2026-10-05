@@ -151,3 +151,18 @@ bash -n scripts/real_stack_smoke.sh \
 - 长期证据：[browser/API/SSE trace](2026-10-04-real-stack/ac011-browser-result.json)、[首轮 SQLite/provider trace](2026-10-04-real-stack/ac011-first-pass-db-trace.json)、[最终 SQLite/provider trace](2026-10-04-real-stack/ac011-final-db-trace.json)、[交叉断言结果](2026-10-04-real-stack/ac011-trace-assertion.json)。完整原始候选栈 artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-208242-1791200138/`。
 
 本次验收只关闭 CL-AC-011。CL-AC-001/002/013/016/017/022 部分验收及 CL-AC-024 未运行仍保持开放；见[验收矩阵](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md)。
+
+## CL-AC-013 独立候选栈验收
+
+- 日期：2026-10-05。
+- 命令：`REAL_STACK_ONLY_AC013=1 REAL_STACK_REUSE_BUILT_IMAGES=0 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_PORT=18081 REAL_STACK_STUB_PORT=18082 scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（2.6 分钟）；浏览器/API/SSE、SQLite/provider 账本交叉断言和日志脱敏脚本均通过。候选项目：`interview-boss-real-e2e-384602-1791205420`。
+- 环境：一次性 SQLite volume、独立 Redis、真实 frontend/Nginx/FastAPI/鉴权/SSE/ARQ dispatcher/worker；模型边界通过本地 HTTP stub 验证真实 provider 请求，不连接生产数据库或外部模型。
+- 401 与 403：各产生 1 次标记的 HTTP 请求；提取账本各 1 次失败调用；root 分别为 `needs_action/MODEL_AUTH_INVALID` 与 `needs_action/PERMISSION_REVOKED`，每个只保留 attempt 1 和一条 submit job。API snapshot、SSE、允许动作和任务中心按钮一致。
+- 429 与旧入口：首个 attempt 实际发送 3 次 HTTP 429（物理调用上限），root 显示 `partial_failed/UPSTREAM_RATE_LIMIT` 和 `retry_failed_steps`；调用旧 `/api/submit-jobs/{job_id}/retry` 后，同一 root 的 attempt 2 发送 1 次 HTTP 200 并完成。SQLite 有 2 条 submit job、attempt 历史 `failed → completed`；旧 SSE 读回同一 snapshot，没有重复入队。
+- 格式失败：实际发送 3 次 HTTP 200 的格式错误响应，提取账本记录 3 次成功 HTTP 调用、阶段最终为 `MODEL_OUTPUT_INVALID`；root 为可恢复的 `partial_failed`，API action 与 `allowed_actions` 一致，只有一条 submit job。
+- 超时：第一次 HTTP 请求被 stub 延迟并在模型调用期限内超时；账本保留 1 个 `unknown/APITimeoutError` 和 1 个成功调用，stub 收到两次请求，root 最终 `completed`。SQLite 只有一条 interview 与一份 detail，业务写入没有重复。
+- 日志脱敏扫描 118,013 字节，结果 `passed`，未发现 provider key、Authorization header、原文、私有题干或敏感响应标记。provider access ledger 总计 22 次请求，状态为 17×200、1×401、1×403、3×429；逐场景状态见[stub HTTP 账本](2026-10-05-real-stack/ac013-stub-access.json)。
+- 候选 image ID：backend/worker `sha256:4ada6281fd90b43afc3227f8b58aea698aded1ce9128966a1aa5e656affbbb19`；nginx/frontend `sha256:ba89d90a9beaf9da738ce570886fd420bce057de4af4bb1cb16648d9f3a01964`；本地 HTTP 模型 stub `sha256:176660801baf2be16c9e7e2fe18fb250491fc14bd34aab649a39ffbfe875b8bf`；OAuth gateway `sha256:474d033b80a863243f1a8ff72d56f2bab12b9044fd15908bd983be3d83a3eb84`。
+- 持久证据：[浏览器/API/SSE trace](2026-10-05-real-stack/ac013-browser-result.json)、[401 SQLite trace](2026-10-05-real-stack/ac013-auth_401-db-trace.json)、[403 SQLite trace](2026-10-05-real-stack/ac013-permission_403-db-trace.json)、[429 与旧 retry SQLite trace](2026-10-05-real-stack/ac013-rate_429-db-trace.json)、[格式错误 SQLite trace](2026-10-05-real-stack/ac013-format_invalid-db-trace.json)、[超时 SQLite trace](2026-10-05-real-stack/ac013-timeout_once-db-trace.json)、[日志脱敏结果](2026-10-05-real-stack/ac013-log-redaction.json)。
+- 红绿根因：实际 stack 暴露 Tenacity `RetryError` 未被统一分类、legacy retry 把 `credential_preflight` 错投到 submit worker，以及 fixture 协议自动探测调用污染了 extract 物理调用断言。三者分别以 wrapper 异常单测、legacy retry job-type 回归和显式 Chat 的隔离 provider 配置修复；最终候选栈已转绿。

@@ -111,6 +111,8 @@ def allowed_actions(
                 )
             else:
                 actions.append("configure_user_model")
+        elif error_code == "PERMISSION_REVOKED":
+            actions.append("check_permission")
         if error_code == "QUOTA_EXCEEDED":
             actions.append("view_budget")
         if error_code not in (

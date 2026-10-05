@@ -78,13 +78,21 @@ def test_retry_binds_root_and_attempt_when_v2_root_exists(client, test_db):
     app, dependency = _override_user()
     try:
         arq_job = MagicMock(job_id="arq-retry-root-1")
-        with patch(
-            "app.worker.enqueue_submit_import_job",
-            new=AsyncMock(return_value=arq_job),
+        with (
+            patch(
+                "app.worker_enqueue.enqueue_credential_preflight_job",
+                new=AsyncMock(return_value=arq_job),
+            ) as enqueue_preflight,
+            patch(
+                "app.worker.enqueue_submit_import_job",
+                new=AsyncMock(return_value=MagicMock(job_id="arq-wrong-type")),
+            ) as enqueue_submit,
         ):
             retry_response = client.post(f"/api/submit-jobs/{submit_job_id}/retry", json={})
 
         assert retry_response.status_code == 200, retry_response.text
+        enqueue_preflight.assert_awaited_once()
+        enqueue_submit.assert_not_awaited()
         retry_id = retry_response.json()["job_id"]
         job = test_db.execute(
             "SELECT job_type, status, root_import_id, upload_attempt_id, work_key, arq_job_id "

@@ -5,14 +5,17 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.real-e2e.yml"
 PROJECT="interview-boss-real-e2e-${BASHPID}-$(date +%s)"
 PORT="${REAL_STACK_PORT:-18081}"
+STUB_PORT="${REAL_STACK_STUB_PORT:-$((PORT + 1))}"
 BASE_URL="http://127.0.0.1:${PORT}"
+STUB_URL="http://127.0.0.1:${STUB_PORT}"
 REAL_STACK_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 TEMP_ARTIFACTS="$(mktemp -d "${TMPDIR:-/tmp}/interview-boss-real-stack.XXXXXX")"
 FINAL_ARTIFACT_ROOT="$PROJECT_DIR/test-results/real-stack"
 RUN_STATUS=0
 
 compose() {
-  REAL_STACK_PORT="$PORT" docker compose --project-name "$PROJECT" -f "$COMPOSE_FILE" "$@"
+  REAL_STACK_PORT="$PORT" REAL_STACK_STUB_PORT="$STUB_PORT" \
+    docker compose --project-name "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
 ensure_real_stack_builder() {
@@ -70,6 +73,14 @@ copy_success_artifacts() {
     ac011-final-db-trace.json \
     ac011-browser-result.json \
     ac011-trace-assertion.json \
+    ac013-browser-result.json \
+    ac013-auth_401-db-trace.json \
+    ac013-permission_403-db-trace.json \
+    ac013-rate_429-db-trace.json \
+    ac013-format_invalid-db-trace.json \
+    ac013-timeout_once-db-trace.json \
+    ac013-stub-access.json \
+    ac013-log-redaction.json \
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
@@ -228,6 +239,60 @@ run_ac011_real_stack() {
     >"$TEMP_ARTIFACTS/ac011-trace-assertion.json"
 }
 
+run_ac013_real_stack() {
+  local browser_log="$TEMP_ARTIFACTS/ac013-browser.log"
+  local import_id
+  local marker
+  local scenario
+
+  compose exec -T llm-stub python -c \
+    'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/reset", data=b"{}", method="POST"), timeout=5).read()'
+  compose exec -T backend python /app/backend/e2e/seed_ac013_error_contract.py \
+    >"$TEMP_ARTIFACTS/ac013-seed.json"
+
+  cd "$PROJECT_DIR/frontend"
+  REAL_STACK_E2E=1 \
+    PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC013_SEED_PATH="$TEMP_ARTIFACTS/ac013-seed.json" \
+    AC013_BROWSER_TRACE="$TEMP_ARTIFACTS/ac013-browser-result.json" \
+    AC013_STUB_URL="$STUB_URL" \
+    run_frontend_playwright tests/e2e/upload-ac013-real-stack.spec.js \
+      --timeout "${AC013_REAL_STACK_TEST_TIMEOUT:-720000}" \
+      >"$browser_log" 2>&1 || {
+        cat "$browser_log"
+        return 1
+      }
+  cat "$browser_log"
+
+  for marker in \
+    AC013_AUTH_401 \
+    AC013_PERMISSION_403 \
+    AC013_RATE_429 \
+    AC013_FORMAT_INVALID \
+    AC013_TIMEOUT_ONCE; do
+    case "$marker" in
+      AC013_AUTH_401) scenario=auth_401 ;;
+      AC013_PERMISSION_403) scenario=permission_403 ;;
+      AC013_RATE_429) scenario=rate_429 ;;
+      AC013_FORMAT_INVALID) scenario=format_invalid ;;
+      AC013_TIMEOUT_ONCE) scenario=timeout_once ;;
+    esac
+    import_id=$(python3 -c \
+      'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["import_ids"][sys.argv[2]])' \
+      "$TEMP_ARTIFACTS/ac013-browser-result.json" "$scenario")
+    compose exec -T backend python /app/backend/e2e/ac013_error_trace.py "$import_id" "$marker" \
+      >"$TEMP_ARTIFACTS/ac013-${scenario}-db-trace.json"
+  done
+
+  compose exec -T llm-stub python -c \
+    'import json,urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/__e2e/access", timeout=5).read().decode())' \
+    >"$TEMP_ARTIFACTS/ac013-stub-access.json"
+  compose logs --no-color backend worker llm-stub >"$TEMP_ARTIFACTS/ac013-compose.log" 2>&1
+  python3 "$PROJECT_DIR/backend/e2e/assert_ac013_log_redaction.py" \
+    "$TEMP_ARTIFACTS/ac013-compose.log" \
+    >"$TEMP_ARTIFACTS/ac013-log-redaction.json"
+}
+
 compose config --quiet
 if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
   for image in \
@@ -252,6 +317,8 @@ curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused
 
 if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ] \
   || {
+    [ "${REAL_STACK_ONLY_AC013:-0}" != "1" ] \
+      && \
     [ "${REAL_STACK_ONLY_AC001_AC002:-0}" != "1" ] \
       && [ "${REAL_STACK_ONLY_AC022:-0}" != "1" ] \
       && [ "${REAL_STACK_ONLY_AC007:-0}" != "1" ] \
@@ -263,6 +330,11 @@ if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ] \
   if [ "${REAL_STACK_ONLY_AC011:-0}" = "1" ]; then
     exit 0
   fi
+fi
+
+if [ "${REAL_STACK_ONLY_AC013:-0}" = "1" ]; then
+  run_ac013_real_stack
+  exit 0
 fi
 
 if [ "${REAL_STACK_ONLY_AC010:-0}" = "1" ]; then

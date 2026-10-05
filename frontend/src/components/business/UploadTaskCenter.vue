@@ -94,6 +94,7 @@ const actionLabel = {
   retry_after_configuration: '配置后继续',
   configure_user_model: '去配置模型',
   configure_system_model: '配置系统模型',
+  check_permission: '检查模型权限',
   retry: '重新处理',
   view_progress: '查看进度',
   view_review_status: '查看审核状态',
@@ -292,6 +293,10 @@ async function onAction(task, action) {
     return
   }
   if (action === 'configure_user_model') {
+    router.push({ name: 'settings' })
+    return
+  }
+  if (action === 'check_permission') {
     router.push({ name: 'settings' })
     return
   }

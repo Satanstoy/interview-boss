@@ -8,7 +8,6 @@ ARQ Worker 配置
 import os
 import time
 import json
-import re
 import base64
 import asyncio
 import logging
@@ -492,23 +491,12 @@ async def _build_master_bank_job(ctx, job_id: int):
         raise
 
 
-def _normalize_error_code(message: str) -> str:
-    """把 worker 原始错误消息归一到契约错误码（AC-013）；未知返回原样截断。"""
+def _normalize_error_code(error: object) -> str:
+    """Map upload failures through the shared AC-013 error taxonomy."""
 
-    text = (message or "").lower()
-    if "401" in text or "invalid api key" in text or "unauthorized" in text:
-        return "MODEL_AUTH_INVALID"
-    if "额度" in text or ("quota" in text and "limit" in text):
-        return "QUOTA_EXCEEDED"
-    if "429" in text or "rate limit" in text or "rate_limit" in text:
-        return "UPSTREAM_RATE_LIMIT"
-    if "timeout" in text or "超时" in text:
-        return "UPSTREAM_TIMEOUT"
-    if re.search(r"\b5\d{2}\b", text):
-        return "UPSTREAM_UNAVAILABLE"
-    if "api key" in text or "model_config" in text or "配置" in text:
-        return "MODEL_CONFIG_MISSING"
-    return (message or "UNKNOWN_ERROR")[:64]
+    from app.services.upload_retry_budget import normalize_upload_error_code
+
+    return normalize_upload_error_code(error)
 
 
 async def credential_preflight_task(ctx, job_id: int):
@@ -977,22 +965,28 @@ async def submit_import_task(ctx, job_id: int):
 
         _update_progress("extract", "正在提取内容...")
 
-        async def _aggregate_root_failure(error_message: str):
-            """失败路径：把执行中的阶段检查点标记为 failed，并聚合根状态（R04）。"""
+        async def _aggregate_root_failure(error_message: str, error_code: str | None = None):
+            """Persist a sanitized error and aggregate the contract status (R04)."""
 
             if not root_import_id:
                 return
-            code = str(error_message)[:64]
-            # 统一错误码归一到契约常量（AC-013）
-            normalized = _normalize_error_code(code)
+            from app.services.upload_retry_budget import ERROR_POLICY, safe_upload_error_message
+
+            normalized = _normalize_error_code(error_code or error_message)
+            safe_message = safe_upload_error_message(normalized)
+            stage_status = (
+                "needs_action"
+                if ERROR_POLICY.get(normalized, {}).get("root_status") == "needs_action"
+                else "failed"
+            )
 
             def _apply():
                 with get_db_connection() as conn:
                     conn.execute(
-                        "UPDATE upload_stage_results SET status = 'failed', "
+                        "UPDATE upload_stage_results SET status = ?, "
                         "error_code = ?, updated_at = CURRENT_TIMESTAMP "
                         "WHERE import_id = ? AND status IN ('running', 'pending')",
-                        (normalized, root_import_id),
+                        (stage_status, normalized, root_import_id),
                     )
                     conn.commit()
                     return finalize_attempt_and_aggregate_root(
@@ -1000,7 +994,7 @@ async def submit_import_task(ctx, job_id: int):
                         import_id=root_import_id,
                         actor_id=int(payload.get("user_id") or 0),
                         error_code=normalized,
-                        error_message=error_message,
+                        error_message=safe_message,
                         lease_generation=lease_generation,
                     )
 
@@ -1013,11 +1007,16 @@ async def submit_import_task(ctx, job_id: int):
                     normalized,
                 )
             except Exception as exc:
-                logger.warning("根任务失败聚合异常: %s", exc)
+                logger.warning(
+                    "根任务失败聚合异常: import_id=%s exception_type=%s",
+                    root_import_id,
+                    type(exc).__name__,
+                )
 
         result_collector = {}
         last_phase = ""
         emitted_error = None
+        emitted_error_code = None
         saw_done = False
 
         # 消费 graph 事件流（只读取事件，不产出 SSE）
@@ -1032,7 +1031,12 @@ async def submit_import_task(ctx, job_id: int):
                         etype = event.get("type", "")
 
                         if etype == "error":
-                            emitted_error = event.get("message") or "处理失败"
+                            emitted_error_code = event.get("error_code")
+                            from app.services.upload_retry_budget import safe_upload_error_message
+
+                            emitted_error = safe_upload_error_message(
+                                emitted_error_code or event.get("message") or "UNKNOWN_ERROR"
+                            )
                             # Drain the async SSE generator to completion. Breaking
                             # here closes it from the consumer's context while its
                             # ContextVar token was set in the generator task.
@@ -1052,21 +1056,37 @@ async def submit_import_task(ctx, job_id: int):
                 except (json.JSONDecodeError, ValueError):
                     pass
         except Exception as e:
-            logger.exception(f"graph 流式执行异常: job_id={job_id}")
-            emitted_error = str(e)[:500] or "任务执行异常"
+            from app.services.upload_retry_budget import safe_upload_error_message
+
+            emitted_error_code = _normalize_error_code(e)
+            emitted_error = safe_upload_error_message(emitted_error_code)
+            logger.warning(
+                "graph 流式执行异常: job_id=%s import_id=%s exception_type=%s code=%s",
+                job_id,
+                root_import_id,
+                type(e).__name__,
+                emitted_error_code,
+            )
 
         # 如果 graph yield 了 error 事件，立刻标记失败
         if emitted_error:
-            await _aggregate_root_failure(emitted_error)
-            _fail(emitted_error)
+            await _aggregate_root_failure(emitted_error, emitted_error_code)
+            # The graph already exhausted this step's shared physical-call
+            # budget. A durable-job redelivery would reset that budget and
+            # exceed the AC-013 limit; a new owner retry creates a new attempt.
+            _fail(emitted_error, terminal=True)
             return
 
         # 读取最终结果（从 result_collector 获取，避免 thread_id 不匹配）
         final_state_values = result_collector.get("final_state") or {}
 
         if final_state_values.get("error"):
-            await _aggregate_root_failure(final_state_values["error"])
-            _fail(final_state_values["error"])
+            from app.services.upload_retry_budget import safe_upload_error_message
+
+            error_code = _normalize_error_code(final_state_values["error"])
+            safe_message = safe_upload_error_message(error_code)
+            await _aggregate_root_failure(safe_message, error_code)
+            _fail(safe_message, terminal=True)
             return
 
         if not final_state_values and not saw_done:
@@ -1266,9 +1286,18 @@ async def submit_import_task(ctx, job_id: int):
                     )
 
     except Exception as e:
-        logger.exception(f"上传导入任务失败: job_id={job_id}")
-        await _aggregate_root_failure(str(e)[:500])
-        _fail(str(e)[:500])
+        from app.services.upload_retry_budget import safe_upload_error_message
+
+        error_code = _normalize_error_code(e)
+        safe_message = safe_upload_error_message(error_code)
+        logger.warning(
+            "上传导入任务失败: job_id=%s exception_type=%s code=%s",
+            job_id,
+            type(e).__name__,
+            error_code,
+        )
+        await _aggregate_root_failure(safe_message, error_code)
+        _fail(safe_message)
 
 
 async def _refresh_answer_batch_parent(parent_job_id: int):

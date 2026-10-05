@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -111,6 +112,9 @@ class _StubCallLedger:
         self._fail_markers = set(fail_markers)
         self._released = set()
         self._counts = {}
+        self._access_count = 0
+        self._status_counts = {}
+        self._marker_status_counts = {}
         self._lock = threading.Lock()
 
     def record(self, marker: str) -> bool:
@@ -123,19 +127,60 @@ class _StubCallLedger:
         with self._lock:
             self._released.add(marker)
 
+    def count(self, marker: str) -> int:
+        with self._lock:
+            return self._counts.get(marker, 0)
+
+    def record_http_access(self) -> None:
+        with self._lock:
+            self._access_count += 1
+
+    def record_http_status(self, status: int, marker: str | None = None) -> None:
+        with self._lock:
+            key = str(status)
+            self._status_counts[key] = self._status_counts.get(key, 0) + 1
+            if marker:
+                marker_counts = self._marker_status_counts.setdefault(marker, {})
+                marker_counts[key] = marker_counts.get(key, 0) + 1
+
     def reset(self) -> None:
         with self._lock:
             self._released.clear()
             self._counts.clear()
+            self._access_count = 0
+            self._status_counts.clear()
+            self._marker_status_counts.clear()
 
     def counts(self) -> dict[str, int]:
         with self._lock:
             return dict(self._counts)
 
+    def access(self) -> dict:
+        with self._lock:
+            return {
+                "requests": self._access_count,
+                "statuses": dict(self._status_counts),
+                "marker_statuses": {
+                    marker: dict(statuses)
+                    for marker, statuses in self._marker_status_counts.items()
+                },
+            }
+
 
 _AC011_MARKERS = tuple(f"AC011_QUESTION_{ordinal:02d}" for ordinal in range(1, 11))
+_AC013_MARKERS = (
+    "AC013_AUTH_401",
+    "AC013_PERMISSION_403",
+    "AC013_RATE_429",
+    "AC013_FORMAT_INVALID",
+    "AC013_TIMEOUT_ONCE",
+)
 _CALL_LEDGER = _StubCallLedger(
-    fail_markers={"AC011_QUESTION_09", "AC011_QUESTION_10"}
+    fail_markers={
+        "AC011_QUESTION_09",
+        "AC011_QUESTION_10",
+        "AC013_RATE_429",
+    }
 )
 
 
@@ -143,16 +188,25 @@ class StubHandler(BaseHTTPRequestHandler):
     server_version = "InterviewBossE2EStub/1.0"
 
     def _send_json(self, status: int, payload: dict) -> None:
+        if getattr(self, "_is_model_call", False):
+            _CALL_LEDGER.record_http_status(status, getattr(self, "_model_marker", None))
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The timeout scenario intentionally outlives the client's deadline.
+            pass
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/__e2e/calls":
             self._send_json(200, {"counts": _CALL_LEDGER.counts()})
+            return
+        if self.path == "/__e2e/access":
+            self._send_json(200, _CALL_LEDGER.access())
             return
         if self.path == "/health":
             self._send_json(200, {"status": "ok", "provider": "stub"})
@@ -171,6 +225,10 @@ class StubHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "reset"})
             return
 
+        self._is_model_call = self.path == "/v1/chat/completions"
+        if self._is_model_call:
+            _CALL_LEDGER.record_http_access()
+
         length = int(self.headers.get("Content-Length", "0"))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -182,6 +240,51 @@ class StubHandler(BaseHTTPRequestHandler):
         serialized = json.dumps(messages, ensure_ascii=False)
         prompt_text = "\n".join(_collect_message_text(messages))
 
+        ac013_marker = next((marker for marker in _AC013_MARKERS if marker in prompt_text), None)
+        self._model_marker = ac013_marker
+        ac013_should_fail = False
+        if ac013_marker and "请分析以下联合内容" in prompt_text:
+            ac013_should_fail = _CALL_LEDGER.record(ac013_marker)
+            physical_call = _CALL_LEDGER.count(ac013_marker)
+            if ac013_marker == "AC013_AUTH_401":
+                self._send_json(401, {"error": {"message": "invalid api key"}})
+                return
+            if ac013_marker == "AC013_PERMISSION_403":
+                self._send_json(403, {"error": {"message": "permission denied"}})
+                return
+            if ac013_marker == "AC013_RATE_429":
+                if ac013_should_fail:
+                    self._send_json(429, {"error": {"message": "stub rate limit"}})
+                    return
+                content = json.dumps(
+                    {
+                        "type": "interview",
+                        "data": {
+                            "公司": "AC013 限流恢复演练",
+                            "面试轮次": "一面",
+                            "考察重点": "限流后的手动恢复",
+                            "难易程度": "中等",
+                            "具体题目清单": [
+                                {"ordinal": 1, "question": "如何处理模型 API 的限流？"}
+                            ],
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+                return
+            if ac013_marker == "AC013_FORMAT_INVALID":
+                self._send_json(
+                    200,
+                    _json_response(
+                        "{ invalid AC013_PRIVATE_RESPONSE_SENTINEL",
+                        payload.get("model", "real-stack-stub"),
+                    ),
+                )
+                return
+            if ac013_marker == "AC013_TIMEOUT_ONCE" and physical_call == 1:
+                time.sleep(12)
+
         if "公共参考答案" in prompt_text:
             answer_marker = next((item for item in _AC011_MARKERS if item in prompt_text), None)
             if answer_marker:
@@ -191,6 +294,25 @@ class StubHandler(BaseHTTPRequestHandler):
                 content = f"{answer_marker}_ANSWER：这是可复核的隔离候选答案。"
                 self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
                 return
+
+        if ac013_marker == "AC013_TIMEOUT_ONCE" and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC013 超时恢复演练",
+                        "面试轮次": "一面",
+                        "考察重点": "超时后的幂等恢复",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {"ordinal": 1, "question": "超时后如何保证上传结果幂等？"}
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
 
         if "AC011_ANSWER_PARTIAL_REAL_STACK" in prompt_text and "请分析以下联合内容" in prompt_text:
             content = json.dumps(
@@ -234,7 +356,7 @@ class StubHandler(BaseHTTPRequestHandler):
 
         if self.path == "/__e2e/release":
             marker = str(payload.get("marker") or "")
-            if marker not in _AC011_MARKERS:
+            if marker not in {*_AC011_MARKERS, *_AC013_MARKERS}:
                 self._send_json(400, {"error": {"message": "unknown marker"}})
                 return
             _CALL_LEDGER.release(marker)

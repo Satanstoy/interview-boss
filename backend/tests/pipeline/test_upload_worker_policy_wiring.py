@@ -205,6 +205,39 @@ async def test_worker_failure_aggregates_root_to_failed(
     ).fetchone()["c"]
     assert failed_stages >= 1
 
+
+async def test_worker_projects_model_auth_failure_to_needs_action(
+    client, monkeypatch, test_db
+):
+    """AC-013: credential errors require configuration, not a generic retry."""
+
+    from app.agents.shared.events import make_error_event
+    from app.worker import submit_import_task
+
+    job_id, _ = _seed_root(test_db, target_intent="private", actor_id=101)
+
+    async def _auth_failed(input_state, result_collector=None):
+        yield format_sse(
+            make_error_event("模型凭据无效，请检查配置", error_code="MODEL_AUTH_INVALID")
+        )
+
+    monkeypatch.setattr("app.agents.submit.graph.stream_submit_graph", _auth_failed)
+    await submit_import_task({}, job_id)
+
+    root = test_db.execute(
+        "SELECT status, error_code FROM upload_imports WHERE id = 'imp-1'"
+    ).fetchone()
+    assert root["status"] == "needs_action"
+    assert root["error_code"] == "MODEL_AUTH_INVALID"
+    stage = test_db.execute(
+        "SELECT status, error_code FROM upload_stage_results "
+        "WHERE import_id = 'imp-1' AND stage = 'extract'"
+    ).fetchone()
+    assert stage["status"] == "needs_action"
+    assert stage["error_code"] == "MODEL_AUTH_INVALID"
+    job = test_db.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert job["status"] == "failed"
+
 async def test_worker_share_binds_contribution_to_root(
     client, monkeypatch, test_db
 ):

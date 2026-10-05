@@ -64,6 +64,8 @@ services:
       context: ./e2e/stub-llm
       dockerfile: Dockerfile
     image: interview-boss-llm-stub:real-e2e
+    ports:
+      - "127.0.0.1:${REAL_STACK_STUB_PORT:-18082}:8080"
     networks: [data-network]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]

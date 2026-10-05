@@ -537,23 +537,36 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                     if not new_root_id:
                         # 幂等路径：已有在途 job 直接返回
                         active_child = conn.execute(
-                            "SELECT id FROM jobs WHERE root_import_id = ? "
+                            "SELECT id, job_type FROM jobs WHERE root_import_id = ? "
                             "AND status IN ('pending', 'queued', 'running') "
                             "ORDER BY id DESC LIMIT 1",
                             (restored["import_id"],),
                         ).fetchone()
                         if active_child:
                             conn.commit()
-                            return {"job_id": int(active_child["id"]), "created": False}
+                            return {
+                                "job_id": int(active_child["id"]),
+                                "job_type": active_child["job_type"],
+                                "created": False,
+                            }
+                        raise HTTPException(status_code=409, detail="无法规划恢复工作")
+                    planned_job = conn.execute(
+                        "SELECT job_type FROM jobs WHERE id = ?", (new_root_id,)
+                    ).fetchone()
+                    if planned_job is None:
                         raise HTTPException(status_code=409, detail="无法规划恢复工作")
                     conn.commit()
-                    return {"job_id": new_root_id, "created": restored["created_attempt"]}
+                    return {
+                        "job_id": new_root_id,
+                        "job_type": planned_job["job_type"],
+                        "created": restored["created_attempt"],
+                    }
                 except UploadRestoreError as leaky:
                     if leaky.code not in ("NOT_FOUND", "LEGACY_MAPPING_AMBIGUOUS"):
                         raise HTTPException(status_code=409, detail=f"{leaky.code}: {leaky}") from None
                     # 无 root 归属的历史任务：走旧子任务重试路径
                     active_child = conn.execute(
-                        "SELECT id FROM jobs WHERE parent_job_id = ? "
+                        "SELECT id, job_type FROM jobs WHERE parent_job_id = ? "
                         "AND job_type = 'submit_import' "
                         "AND status IN ('pending', 'queued', 'running') "
                         "ORDER BY id DESC LIMIT 1",
@@ -561,7 +574,11 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                     ).fetchone()
                     if active_child:
                         conn.commit()
-                        return {"job_id": int(active_child["id"]), "created": False}
+                        return {
+                            "job_id": int(active_child["id"]),
+                            "job_type": active_child["job_type"],
+                            "created": False,
+                        }
 
                     payload_row = conn.execute(
                         "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
@@ -595,7 +612,11 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
                         (new_job_id, json.dumps(payload, ensure_ascii=False)),
                     )
                     conn.commit()
-                    return {"job_id": new_job_id, "created": True}
+                    return {
+                        "job_id": new_job_id,
+                        "job_type": "submit_import",
+                        "created": True,
+                    }
             except HTTPException:
                 conn.rollback()
                 raise
@@ -610,10 +631,16 @@ async def retry_submit_job(job_id: int, user: dict = Depends(get_current_user)):
 
     dispatch_error = None
     try:
-        from app.worker import enqueue_submit_import_job
         from app.services.job_lifecycle import mark_job_dispatched
 
-        arq_job = await enqueue_submit_import_job(new_job_id)
+        if retry.get("job_type") == "credential_preflight":
+            from app.worker_enqueue import enqueue_credential_preflight_job
+
+            arq_job = await enqueue_credential_preflight_job(new_job_id)
+        else:
+            from app.worker import enqueue_submit_import_job
+
+            arq_job = await enqueue_submit_import_job(new_job_id)
         arq_job_id = getattr(arq_job, "job_id", None)
         if not arq_job_id:
             raise RuntimeError("ARQ 未返回 job_id")

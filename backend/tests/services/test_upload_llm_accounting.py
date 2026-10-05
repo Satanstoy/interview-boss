@@ -169,3 +169,31 @@ async def test_non_upload_provider_call_does_not_write_upload_ledger():
     assert conn.execute("SELECT COUNT(*) FROM upload_llm_calls").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
     conn.close()
+
+
+def test_upload_retry_log_is_correlated_without_provider_or_prompt_text(caplog):
+    from app.services.llm import _log_llm_retry
+
+    private_marker = "AC013_PRIVATE_QUESTION_SENTINEL"
+    error = RuntimeError(f"Authorization: bearer secret; response included {private_marker}")
+    retry_state = SimpleNamespace(
+        attempt_number=1,
+        outcome=SimpleNamespace(exception=lambda: error),
+    )
+
+    with upload_llm_context(
+        root_import_id="imp-ac013-log",
+        stage="extract",
+        unit_key="document",
+        credential_scope="user",
+        user_id=101,
+    ):
+        with caplog.at_level("WARNING", logger="interview-boss"):
+            _log_llm_retry(retry_state)
+
+    assert "imp-ac013-log" in caplog.text
+    assert "extract" in caplog.text
+    assert "UNKNOWN_ERROR" in caplog.text
+    assert "Authorization" not in caplog.text
+    assert "secret" not in caplog.text
+    assert private_marker not in caplog.text

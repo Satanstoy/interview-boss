@@ -24,7 +24,7 @@ from app.services.upload_lifecycle import UploadRestoreError, restore_upload
 router = APIRouter()
 
 
-def _error_dto(code, message, *, credential_scope="user", is_admin=False):
+def _error_dto(code, message, *, status=None, credential_scope="user", is_admin=False):
     """错误码 → DTO（AC-013）：action/retryable 由统一错误策略映射。"""
 
     from app.models.upload_contracts import ErrorCode
@@ -37,6 +37,12 @@ def _error_dto(code, message, *, credential_scope="user", is_admin=False):
     policy = ERROR_POLICY.get(code, {})
     scope = policy.get("scope")
     action = policy.get("action")
+    if status == "failed" and policy.get("retryable"):
+        action = "retry"
+    elif status == "partial_failed" and policy.get("retryable"):
+        action = "retry_failed_steps"
+    elif status in ("queued", "running"):
+        action = "view_progress"
     if code in ("MODEL_AUTH_INVALID", "MODEL_CONFIG_MISSING"):
         if credential_scope in ("user", "global"):
             scope = credential_scope
@@ -349,6 +355,7 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
             _error_dto(
                 row["error_code"],
                 row["error_message"] or "",
+                status=row["status"],
                 credential_scope=action_scope,
                 is_admin=bool(actor_is_admin),
             )

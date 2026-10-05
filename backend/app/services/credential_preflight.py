@@ -328,15 +328,13 @@ def run_credential_preflight(
             )
         raise RuntimeError("探测未返回有效状态")
     except Exception as exc:
-        text = str(exc).lower()
-        if "401" in text or "invalid api key" in text or "unauthorized" in text:
-            error_code = "MODEL_AUTH_INVALID"
-        elif "404" in text or "not found" in text or "connection refused" in text:
-            error_code = "UPSTREAM_UNAVAILABLE"
-        elif "timeout" in text or "timed out" in text or "超时" in text:
-            error_code = "UPSTREAM_TIMEOUT"
-        else:
-            error_code = "UPSTREAM_UNAVAILABLE"
+        from app.services.upload_retry_budget import (
+            normalize_upload_error_code,
+            safe_upload_error_message,
+        )
+
+        error_code = normalize_upload_error_code(exc)
+        safe_message = safe_upload_error_message(error_code)
         try:
             complete_llm_call(
                 conn, call_key=call_key, status="failed", error_code=error_code
@@ -348,10 +346,10 @@ def run_credential_preflight(
             root_import_id,
             job_id,
             error_code,
-            str(exc),
+            safe_message,
             unit_key=preflight_unit,
         )
-        return PreflightOutcome(status="blocked", error_code=error_code, message=str(exc))
+        return PreflightOutcome(status="blocked", error_code=error_code, message=safe_message)
 
 
 def release_root_after_preflight_success(

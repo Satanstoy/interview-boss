@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.models.upload_contracts import (
@@ -16,7 +17,88 @@ from app.models.upload_contracts import (
     UploadResultTargetDTO,
     UploadSnapshot,
     UploadStatus,
+    ErrorCode,
 )
+
+
+_SAFE_ERROR_MESSAGES = {
+    ErrorCode.MODEL_AUTH_INVALID.value: "AI 服务凭据无效，请检查模型配置。",
+    ErrorCode.MODEL_CONFIG_MISSING.value: "尚未配置可用的模型服务。",
+    ErrorCode.PERMISSION_REVOKED.value: "当前模型凭据无权访问此服务。",
+    ErrorCode.QUOTA_EXCEEDED.value: "模型服务额度不足，请稍后处理。",
+    ErrorCode.UPSTREAM_RATE_LIMIT.value: "模型服务繁忙，请稍后重试。",
+    ErrorCode.UPSTREAM_TIMEOUT.value: "模型服务响应超时，请稍后重试。",
+    ErrorCode.UPSTREAM_UNAVAILABLE.value: "模型服务暂时不可用，请稍后重试。",
+    ErrorCode.MODEL_OUTPUT_INVALID.value: "模型返回内容未通过格式校验，请稍后重试。",
+}
+
+
+def normalize_upload_error_code(error: object) -> str:
+    """Map provider/validation exceptions to the shared upload error taxonomy."""
+
+    # Tenacity raises RetryError after its internal retry loop is exhausted.
+    # Preserve the final provider exception instead of classifying the wrapper.
+    last_attempt = getattr(error, "last_attempt", None)
+    exception_method = getattr(last_attempt, "exception", None)
+    if callable(exception_method):
+        try:
+            wrapped_error = exception_method()
+        except Exception:
+            wrapped_error = None
+        if wrapped_error is not None and wrapped_error is not error:
+            return normalize_upload_error_code(wrapped_error)
+
+    known_codes = ErrorCode._value2member_map_
+    direct_code = getattr(error, "code", None)
+    if direct_code is not None and str(direct_code) in known_codes:
+        return str(direct_code)
+    if isinstance(error, str) and error.strip().upper() in known_codes:
+        return error.strip().upper()
+
+    status_code = getattr(error, "status_code", None)
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        status_code = None
+    if status_code == 401:
+        return ErrorCode.MODEL_AUTH_INVALID.value
+    if status_code == 403:
+        return ErrorCode.PERMISSION_REVOKED.value
+    if status_code == 429:
+        return ErrorCode.UPSTREAM_RATE_LIMIT.value
+    if status_code in (408, 504):
+        return ErrorCode.UPSTREAM_TIMEOUT.value
+    if status_code == 404:
+        return ErrorCode.UPSTREAM_UNAVAILABLE.value
+    if status_code is not None and 500 <= status_code <= 599:
+        return ErrorCode.UPSTREAM_UNAVAILABLE.value
+
+    text = str(error or "")
+    normalized = text.lower()
+    if "401" in normalized or "invalid api key" in normalized or "unauthorized" in normalized:
+        return ErrorCode.MODEL_AUTH_INVALID.value
+    if "403" in normalized or "forbidden" in normalized or "permission denied" in normalized:
+        return ErrorCode.PERMISSION_REVOKED.value
+    if "额度" in text or ("quota" in normalized and "limit" in normalized):
+        return ErrorCode.QUOTA_EXCEEDED.value
+    if "429" in normalized or "rate limit" in normalized or "rate_limit" in normalized:
+        return ErrorCode.UPSTREAM_RATE_LIMIT.value
+    if "404" in normalized or "not found" in normalized or "connection refused" in normalized:
+        return ErrorCode.UPSTREAM_UNAVAILABLE.value
+    if "timeout" in normalized or "timed out" in normalized or "超时" in text:
+        return ErrorCode.UPSTREAM_TIMEOUT.value
+    if re.search(r"\b5\d{2}\b", normalized):
+        return ErrorCode.UPSTREAM_UNAVAILABLE.value
+    if "api key" in normalized or "model_config" in normalized or "配置" in text:
+        return ErrorCode.MODEL_CONFIG_MISSING.value
+    return "UNKNOWN_ERROR"
+
+
+def safe_upload_error_message(error: object) -> str:
+    """Return a user-safe message without echoing provider or prompt contents."""
+
+    code = normalize_upload_error_code(error)
+    return _SAFE_ERROR_MESSAGES.get(code, "处理失败，请检查任务状态后重试。")
 
 # code → {retryable, action, root_status, scope}
 ERROR_POLICY: dict[str, dict] = {

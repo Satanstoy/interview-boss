@@ -20,17 +20,17 @@ from app.agents.submit.persist_personal import (
     error_empty_node,
 )
 from app.agents.submit.persist_public import persist_public_node, cluster_public_node
+from app.services.upload_retry_budget import (
+    normalize_upload_error_code,
+    safe_upload_error_message,
+)
 
 logger = logging.getLogger("interview-boss")
 
-_FRIENDLY_ERROR = "AI 服务配置错误，请在系统设置中配置有效的 API Key"
-
-
 def _sanitize_error(e: Exception) -> str:
-    err_str = str(e).lower()
-    if "401" in err_str or "invalid api key" in err_str or "unauthorized" in err_str:
-        return _FRIENDLY_ERROR
-    return f"处理失败: {str(e)[:200]}"
+    """Convert provider exceptions to safe user-facing text without echoing details."""
+
+    return safe_upload_error_message(e)
 
 
 # ── 条件路由函数 ──
@@ -176,8 +176,14 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
             await submit_graph.ainvoke(input_state, config=config)
             logger.info(f"[SSE] graph task completed in {_t.monotonic() - _t0:.1f}s")
         except Exception as e:
-            logger.exception(f"[SSE] graph task failed in {_t.monotonic() - _t0:.1f}s")
-            queue.put_nowait(make_error_event(_sanitize_error(e)))
+            error_code = normalize_upload_error_code(e)
+            logger.warning(
+                "[SSE] graph task failed import_id=%s exception_type=%s code=%s",
+                input_state.get("import_id"),
+                type(e).__name__,
+                error_code,
+            )
+            queue.put_nowait(make_error_event(_sanitize_error(e), error_code=error_code))
         finally:
             queue.put_nowait(_SENTINEL)
 
@@ -226,8 +232,14 @@ async def stream_submit_graph(input_state: dict, result_collector: dict = None):
             result_collector["final_state"] = state_values
 
     except Exception as e:
-        logger.exception("LangGraph 流式执行失败")
-        yield format_sse(make_error_event(_sanitize_error(e)))
+        error_code = normalize_upload_error_code(e)
+        logger.warning(
+            "LangGraph 流式执行失败 import_id=%s exception_type=%s code=%s",
+            input_state.get("import_id"),
+            type(e).__name__,
+            error_code,
+        )
+        yield format_sse(make_error_event(_sanitize_error(e), error_code=error_code))
     finally:
         # 恢复 contextvar，避免泄漏
         _event_queue_var.reset(token)
