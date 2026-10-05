@@ -81,7 +81,9 @@ def _stage_counts(conn, import_id: str) -> dict:
     if extract_row and extract_row["result_json"]:
         try:
             payload = _json.loads(extract_row["result_json"])
-            counts = (payload or {}).get("提取计数") or {}
+            payload = payload or {}
+            extracted_data = payload.get("data") or {}
+            counts = payload.get("提取计数") or extracted_data.get("提取计数") or {}
             has_extract_count = "extracted" in counts
             extracted = int(counts.get("extracted", 0))
             retained = int(counts.get("retained", 0))

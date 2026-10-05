@@ -213,11 +213,14 @@ def test_stage_counts_reflect_extract_counts_and_resolutions(tmp_path):
         (
             _json.dumps(
                 {
-                    "提取计数": {
-                        "extracted": 5,
-                        "retained": 4,
-                        "excluded": 1,
-                        "needs_review": 2,
+                    "doc_type": "interview",
+                    "data": {
+                        "提取计数": {
+                            "extracted": 5,
+                            "retained": 4,
+                            "excluded": 1,
+                            "needs_review": 2,
+                        }
                     }
                 },
                 ensure_ascii=False,

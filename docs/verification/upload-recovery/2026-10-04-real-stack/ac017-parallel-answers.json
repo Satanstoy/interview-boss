@@ -1,0 +1,26 @@
+{
+  "import_id": "imp-ac017-cross-generation-retry",
+  "attempt_c_id": 3,
+  "parent_job_id": 3,
+  "answer_jobs": [
+    {
+      "id": 4,
+      "status": "pending",
+      "upload_attempt_id": 3,
+      "work_key": "answer:1:v1",
+      "idempotency_key": "submit:3:answer:1"
+    },
+    {
+      "id": 5,
+      "status": "pending",
+      "upload_attempt_id": 3,
+      "work_key": "answer:2:v1",
+      "idempotency_key": "submit:3:answer:2"
+    }
+  ],
+  "duplicate_replan_same_job_ids": [
+    4,
+    5
+  ],
+  "different_work_keys_created": true
+}

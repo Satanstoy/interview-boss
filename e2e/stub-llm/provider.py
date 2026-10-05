@@ -115,6 +115,9 @@ class _StubCallLedger:
         self._access_count = 0
         self._status_counts = {}
         self._marker_status_counts = {}
+        self._parallel_answer_active = 0
+        self._parallel_answer_max_active = 0
+        self._parallel_answer_markers = {}
         self._lock = threading.Lock()
 
     def record(self, marker: str) -> bool:
@@ -126,6 +129,10 @@ class _StubCallLedger:
     def release(self, marker: str) -> None:
         with self._lock:
             self._released.add(marker)
+
+    def is_released(self, marker: str) -> bool:
+        with self._lock:
+            return marker in self._released
 
     def count(self, marker: str) -> int:
         with self._lock:
@@ -143,6 +150,20 @@ class _StubCallLedger:
                 marker_counts = self._marker_status_counts.setdefault(marker, {})
                 marker_counts[key] = marker_counts.get(key, 0) + 1
 
+    def begin_parallel_answer(self, marker: str) -> None:
+        with self._lock:
+            self._parallel_answer_active += 1
+            self._parallel_answer_max_active = max(
+                self._parallel_answer_max_active, self._parallel_answer_active
+            )
+            self._parallel_answer_markers[marker] = (
+                self._parallel_answer_markers.get(marker, 0) + 1
+            )
+
+    def end_parallel_answer(self) -> None:
+        with self._lock:
+            self._parallel_answer_active = max(0, self._parallel_answer_active - 1)
+
     def reset(self) -> None:
         with self._lock:
             self._released.clear()
@@ -150,6 +171,9 @@ class _StubCallLedger:
             self._access_count = 0
             self._status_counts.clear()
             self._marker_status_counts.clear()
+            self._parallel_answer_active = 0
+            self._parallel_answer_max_active = 0
+            self._parallel_answer_markers.clear()
 
     def counts(self) -> dict[str, int]:
         with self._lock:
@@ -164,6 +188,11 @@ class _StubCallLedger:
                     marker: dict(statuses)
                     for marker, statuses in self._marker_status_counts.items()
                 },
+                "parallel_answers": {
+                    "active": self._parallel_answer_active,
+                    "max_active": self._parallel_answer_max_active,
+                    "markers": dict(self._parallel_answer_markers),
+                },
             }
 
 
@@ -175,6 +204,8 @@ _AC013_MARKERS = (
     "AC013_FORMAT_INVALID",
     "AC013_TIMEOUT_ONCE",
 )
+_AC024_MARKER = "AC024_LEGACY_JD_REAL_STACK"
+_AC024_INTERVIEW_MARKER = "AC024_ORDINARY_INTERVIEW_REAL_STACK"
 _CALL_LEDGER = _StubCallLedger(
     fail_markers={
         "AC011_QUESTION_09",
@@ -241,7 +272,100 @@ class StubHandler(BaseHTTPRequestHandler):
         prompt_text = "\n".join(_collect_message_text(messages))
 
         ac013_marker = next((marker for marker in _AC013_MARKERS if marker in prompt_text), None)
-        self._model_marker = ac013_marker
+        parallel_answer_marker = next(
+            (
+                marker
+                for marker in (
+                    "AC017_PARALLEL_ANSWER_A",
+                    "AC017_PARALLEL_ANSWER_B",
+                )
+                if marker in prompt_text
+            ),
+            None,
+        )
+        ac024_marker = _AC024_MARKER if _AC024_MARKER in prompt_text else None
+        ac024_interview_marker = (
+            _AC024_INTERVIEW_MARKER if _AC024_INTERVIEW_MARKER in prompt_text else None
+        )
+        self._model_marker = (
+            ac013_marker or parallel_answer_marker or ac024_marker or ac024_interview_marker
+        )
+        if parallel_answer_marker:
+            _CALL_LEDGER.begin_parallel_answer(parallel_answer_marker)
+            try:
+                release_deadline = time.monotonic() + 180
+                while (
+                    not _CALL_LEDGER.is_released(parallel_answer_marker)
+                    and time.monotonic() < release_deadline
+                ):
+                    time.sleep(0.025)
+                if not _CALL_LEDGER.is_released(parallel_answer_marker):
+                    self._send_json(504, {"error": {"message": "AC017 release gate timed out"}})
+                    return
+                answer = f"{parallel_answer_marker}_RESULT: isolated answer for its own question."
+                self._send_json(
+                    200,
+                    _json_response(answer, payload.get("model", "real-stack-stub")),
+                )
+            finally:
+                _CALL_LEDGER.end_parallel_answer()
+            return
+        if ac024_marker and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "jd",
+                    "data": {
+                        "公司": "AC024_PRIVATE_COMPANY_SENTINEL",
+                        "岗位名称": "AC024 Legacy JD platform engineer",
+                        "薪资范围": "AC024_PRIVATE_SALARY_SENTINEL",
+                        "核心技术要求": ["AC024_PUBLIC_TECH_GO"],
+                        "加分项": "AC024_PUBLIC_BONUS_SQL",
+                        "联系人": "AC024_PRIVATE_CONTACT_SENTINEL",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
+        if ac024_interview_marker and "请分析以下联合内容" in prompt_text:
+            content = json.dumps(
+                {
+                    "type": "interview",
+                    "data": {
+                        "公司": "AC024_ORDINARY_INTERVIEW_COMPANY",
+                        "面试轮次": "AC024 legacy compatibility round",
+                        "考察重点": "AC024 ordinary interview path",
+                        "难易程度": "中等",
+                        "具体题目清单": [
+                            {
+                                "ordinal": 1,
+                                "question": "AC024_ORDINARY_INTERVIEW_QUESTION_MARKER: explain transaction isolation.",
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
+        if ac024_interview_marker and "请为以下题目列表标记" in prompt_text:
+            content = json.dumps(
+                {
+                    "questions": [
+                        {
+                            "id": 0,
+                            "题目": "AC024_ORDINARY_INTERVIEW_QUESTION_MARKER: explain transaction isolation.",
+                            "一级大类": "C.基础工程能力",
+                            "二级子类": "C3.数据库基础",
+                            "考点标签": "事务隔离",
+                            "难度标签": "L2-中等",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+            self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+            return
         ac013_should_fail = False
         if ac013_marker and "请分析以下联合内容" in prompt_text:
             ac013_should_fail = _CALL_LEDGER.record(ac013_marker)
@@ -292,6 +416,13 @@ class StubHandler(BaseHTTPRequestHandler):
                     self._send_json(503, {"error": {"message": "AC011 temporary answer failure"}})
                     return
                 content = f"{answer_marker}_ANSWER：这是可复核的隔离候选答案。"
+                self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
+                return
+            if _AC024_INTERVIEW_MARKER in prompt_text:
+                content = (
+                    "AC024 ordinary interview answer: explain the transaction boundary, "
+                    "isolation level, and a concrete verification case."
+                )
                 self._send_json(200, _json_response(content, payload.get("model", "real-stack-stub")))
                 return
 
@@ -356,7 +487,12 @@ class StubHandler(BaseHTTPRequestHandler):
 
         if self.path == "/__e2e/release":
             marker = str(payload.get("marker") or "")
-            if marker not in {*_AC011_MARKERS, *_AC013_MARKERS}:
+            if marker not in {
+                *_AC011_MARKERS,
+                *_AC013_MARKERS,
+                "AC017_PARALLEL_ANSWER_A",
+                "AC017_PARALLEL_ANSWER_B",
+            }:
                 self._send_json(400, {"error": {"message": "unknown marker"}})
                 return
             _CALL_LEDGER.release(marker)

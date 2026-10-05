@@ -256,25 +256,27 @@ def test_jd_approve_materializes_jd_not_interview():
     request_id = request["id"]
     assert request["source_type"] == "jd"
 
+    review_request = build_review_projection_request(
+        {
+            "expected_revision": 1,
+            "review_fields": {
+                "source": {
+                    "company": "某公司",
+                    "job_title": "资深后端工程师",
+                    "tech_stack": "Go",
+                    "bonus": "SQL 与分布式系统",
+                    "position": "后端开发",
+                    "source_url": "https://public.example.com/jd/1",
+                }
+            },
+        },
+        source_type="jd",
+    )
     approval = approve_public_contribution_v2(
         conn,
         request_id=request_id,
         admin_id=201,
-        review_request=build_review_projection_request(
-            {
-                "expected_revision": 1,
-                "review_fields": {
-                    "source": {
-                        "company": "某公司",
-                        "job_title": "资深后端工程师",
-                        "tech_stack": "Go",
-                        "position": "后端开发",
-                        "source_url": "https://public.example.com/jd/1",
-                    }
-                },
-            },
-            source_type="jd",
-        ),
+        review_request=review_request,
     )
     assert approval["public_jd_id"]
     assert approval["status"] == "published"
@@ -286,6 +288,7 @@ def test_jd_approve_materializes_jd_not_interview():
     assert jd_row["owner_id"] is None
     assert jd_row["company"] == "某公司"
     assert jd_row["job_title"] == "资深后端工程师"
+    assert jd_row["bonus"] == "SQL 与分布式系统"
     assert jd_row["url"] == "https://public.example.com/jd/1"
     # 岗位信息保留（R11）
     assert (jd_row["job_position"] or "") == "后端开发"
@@ -299,6 +302,45 @@ def test_jd_approve_materializes_jd_not_interview():
         "SELECT * FROM public_contribution_requests WHERE id = ?", (request_id,)
     ).fetchone()
     assert request_row["public_jd_id"] == approval["public_jd_id"]
+    assert request_row["status"] == "published"
+
+    event_count = conn.execute(
+        "SELECT COUNT(*) FROM public_contribution_events WHERE request_id = ?", (request_id,)
+    ).fetchone()[0]
+    jd_count = conn.execute("SELECT COUNT(*) FROM jd WHERE owner_id IS NULL").fetchone()[0]
+    repeated_approval = approve_public_contribution_v2(
+        conn,
+        request_id=request_id,
+        admin_id=201,
+        review_request=review_request,
+        expected_revision=approval["revision"],
+    )
+    assert repeated_approval["status"] == "published"
+    assert repeated_approval["public_jd_id"] == approval["public_jd_id"]
+    assert repeated_approval["revision"] == approval["revision"]
+    assert conn.execute(
+        "SELECT COUNT(*) FROM public_contribution_events WHERE request_id = ?", (request_id,)
+    ).fetchone()[0] == event_count
+    assert conn.execute("SELECT COUNT(*) FROM jd WHERE owner_id IS NULL").fetchone()[0] == jd_count
+
+    conflicting_review = build_review_projection_request(
+        {
+            "expected_revision": approval["revision"],
+            "review_fields": {"source": {"company": "某公司", "bonus": "changed projection"}},
+        },
+        source_type="jd",
+    )
+    from app.services.public_contributions import StateConflict
+    import pytest
+
+    with pytest.raises(StateConflict):
+        approve_public_contribution_v2(
+            conn,
+            request_id=request_id,
+            admin_id=201,
+            review_request=conflicting_review,
+            expected_revision=approval["revision"],
+        )
     conn.close()
 
 

@@ -1,0 +1,35 @@
+{
+  "root_import_id": "imp-ac017-cross-generation-retry",
+  "current_attempt_no": 3,
+  "attempt_c": {
+    "id": 3,
+    "status": "active"
+  },
+  "running_answer_jobs": [
+    {
+      "id": 4,
+      "job_type": "generate_answer",
+      "status": "running",
+      "root_import_id": "imp-ac017-cross-generation-retry",
+      "upload_attempt_id": 3,
+      "work_key": "answer:1:v1"
+    },
+    {
+      "id": 5,
+      "job_type": "generate_answer",
+      "status": "running",
+      "root_import_id": "imp-ac017-cross-generation-retry",
+      "upload_attempt_id": 3,
+      "work_key": "answer:2:v1"
+    }
+  ],
+  "provider_parallel_answers": {
+    "active": 2,
+    "max_active": 2,
+    "markers": {
+      "AC017_PARALLEL_ANSWER_A": 1,
+      "AC017_PARALLEL_ANSWER_B": 1
+    }
+  },
+  "browser_retries_overlap": true
+}

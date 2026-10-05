@@ -1,0 +1,68 @@
+{
+  "root": {
+    "id": "imp-ac017-cross-generation-retry",
+    "requester_id": 2,
+    "status": "partial_failed",
+    "current_attempt_no": 3,
+    "revision": 9
+  },
+  "attempts": [
+    {
+      "id": 1,
+      "attempt_no": 1,
+      "status": "failed",
+      "requested_by": 2
+    },
+    {
+      "id": 2,
+      "attempt_no": 2,
+      "status": "failed",
+      "requested_by": 2
+    },
+    {
+      "id": 3,
+      "attempt_no": 3,
+      "status": "active",
+      "requested_by": 2
+    }
+  ],
+  "jobs": [
+    {
+      "id": 1,
+      "parent_job_id": null,
+      "job_type": "submit_import",
+      "status": "failed",
+      "upload_attempt_id": 1,
+      "work_key": "extract:document:v1"
+    },
+    {
+      "id": 2,
+      "parent_job_id": 1,
+      "job_type": "submit_import",
+      "status": "failed",
+      "upload_attempt_id": 2,
+      "work_key": "classify:question-batch"
+    },
+    {
+      "id": 3,
+      "parent_job_id": 2,
+      "job_type": "submit_import",
+      "status": "queued",
+      "upload_attempt_id": 3,
+      "work_key": "extract:document:v1"
+    }
+  ],
+  "success_checkpoint": {
+    "status": "succeeded",
+    "result_json": "{\"extracted\": \"AC017 preserved successful checkpoint\"}",
+    "output_hash": "0b6e8dee5d24758a7c7e154c8309f5df0982a4c27e64d59c43d1b78f04cd2f68",
+    "job_id": 1
+  },
+  "failed_checkpoint": {
+    "status": "failed",
+    "error_code": "UPSTREAM_TIMEOUT",
+    "retryable": 1,
+    "job_id": 2
+  },
+  "duplicate_active_work_keys": []
+}

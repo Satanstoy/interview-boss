@@ -510,6 +510,7 @@ def _materialize_public_jd(conn, snapshot: dict) -> int:
         "position": source.get("position"),
         "salary": source.get("salary"),
         "job_title": source.get("job_title"),
+        "bonus": source.get("bonus"),
         # 岗位从源冻结：投影 JD 源不含 job_position（contracts §3.1），
         # 旧直写路径携带时透传，避免公共 JD 丢失岗位信息（R11）
         "job_position": source.get("job_position") or source.get("position") or "",
@@ -812,16 +813,11 @@ def approve_public_contribution_v2(
                 f"申请版本已变化: expected={expected_revision} current={current_revision}"
             )
 
-        if row["status"] == "approved_for_processing":
-            # 同 revision 重复批准：幂等返回，不追加事件/实体
-            _finish(conn, commit=True)
-            return {
-                "status": row["status"],
-                "revision": current_revision,
-                "public_interview_id": row["public_interview_id"],
-                "public_jd_id": row["public_jd_id"],
-            }
-        if row["status"] not in APPROVABLE_STATES:
+        idempotent_approval_statuses = {"approved_for_processing", "published"}
+        if (
+            row["status"] not in APPROVABLE_STATES
+            and row["status"] not in idempotent_approval_statuses
+        ):
             raise StateConflict(f"当前状态不可批准: {row['status']}")
 
         snapshot = _loads(row["snapshot_json"], {})
@@ -844,6 +840,20 @@ def approve_public_contribution_v2(
             reviewer_id=admin_id,
             source_type=row["source_type"],
         )
+
+        if row["status"] in idempotent_approval_statuses:
+            # 相同 revision、相同投影的重复批准保持幂等；不能让 JD 即时
+            # materialize 到 published 后失去此语义，也不能接受不同投影。
+            if row["projection_hash"] != projection["hash"]:
+                raise StateConflict("申请版本已批准为不同投影")
+            _finish(conn, commit=True)
+            return {
+                "status": row["status"],
+                "revision": current_revision,
+                "public_interview_id": row["public_interview_id"],
+                "public_jd_id": row["public_jd_id"],
+                "projection_hash": row["projection_hash"],
+            }
 
         excluded = set(projection["excluded_item_ids"])
         approved_item_ids = [item["item_id"] for item in projection["items"]]
@@ -891,7 +901,7 @@ def approve_public_contribution_v2(
             public_jd_id = _materialize_public_jd(conn, {"source": projection["source"]})
             conn.execute(
                 "UPDATE public_contribution_requests SET public_jd_id = ?, "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "status = 'published', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (public_jd_id, request_id),
             )
             conn.execute(

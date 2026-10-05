@@ -87,6 +87,17 @@ copy_success_artifacts() {
     ac016-browser-result.json \
     ac016-first-pass-db-trace.json \
     ac016-db-trace.json \
+    ac017-seed.json \
+    ac017-retry-db-trace.json \
+    ac017-parallel-answers.json \
+    ac017-parallel-answers-inflight.json \
+    ac017-parallel-answers-final.json \
+    ac017-browser-result.json \
+    ac024-seed.json \
+    ac024-browser-result.json \
+    ac024-read-baseline.json \
+    ac024-provider-access.json \
+    ac024-db-trace.json \
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
@@ -403,6 +414,195 @@ PY
     >"$TEMP_ARTIFACTS/ac016-db-trace.json"
 }
 
+run_ac017_real_stack() {
+  local control_prefix="$TEMP_ARTIFACTS/ac017-control"
+  local browser_log="$TEMP_ARTIFACTS/ac017-browser.log"
+  local browser_pid
+  local attempt=0
+
+  compose stop worker >/dev/null
+  compose exec -T llm-stub python -c \
+    'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/reset", data=b"{}", method="POST"), timeout=5).read()'
+  compose exec -T backend python /app/backend/e2e/seed_ac017_retry_chain.py \
+    >"$TEMP_ARTIFACTS/ac017-seed.json"
+
+  cd "$PROJECT_DIR/frontend"
+  set +e
+  REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC017_SEED_PATH="$TEMP_ARTIFACTS/ac017-seed.json" \
+    AC017_CONTROL_PREFIX="$control_prefix" \
+    AC017_BROWSER_TRACE="$TEMP_ARTIFACTS/ac017-browser-result.json" \
+    run_frontend_playwright tests/e2e/upload-retry-ac017-real-stack.spec.js \
+      --timeout "${AC017_REAL_STACK_TEST_TIMEOUT:-240000}" \
+      >"$browser_log" 2>&1 &
+  browser_pid=$!
+  set -e
+
+  while [ "$attempt" -lt "${AC017_REAL_STACK_DRIVER_POLLS:-600}" ]; do
+    if [ -f "$control_prefix.retry-actions-done" ]; then
+      break
+    fi
+    if ! kill -0 "$browser_pid" >/dev/null 2>&1; then
+      wait "$browser_pid" || true
+      cat "$browser_log"
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.5
+  done
+  if [ ! -f "$control_prefix.retry-actions-done" ]; then
+    kill "$browser_pid" >/dev/null 2>&1 || true
+    wait "$browser_pid" >/dev/null 2>&1 || true
+    cat "$browser_log"
+    printf 'Timed out waiting for AC-017 browser retry assertions.\n' >&2
+    return 1
+  fi
+
+  compose exec -T backend python /app/backend/e2e/assert_ac017_retry_chain.py \
+    >"$TEMP_ARTIFACTS/ac017-retry-db-trace.json"
+  compose exec -T backend python /app/backend/e2e/prepare_ac017_parallel_answers.py \
+    >"$TEMP_ARTIFACTS/ac017-parallel-answers.json"
+
+  compose up -d --scale worker=2 --wait --wait-timeout 120 worker
+  compose exec -T backend python -c \
+    'import asyncio; from app.worker_scheduled import scheduled_submit_job_dispatch_task; print(asyncio.run(scheduled_submit_job_dispatch_task({})))'
+
+  python3 - "$STUB_URL" <<'PY'
+import json
+import sys
+import time
+import urllib.request
+
+url = sys.argv[1].rstrip("/") + "/__e2e/access"
+deadline = time.monotonic() + 90
+while time.monotonic() < deadline:
+    with urllib.request.urlopen(url, timeout=5) as response:
+        access = json.load(response)
+    if access.get("parallel_answers", {}).get("active") == 2:
+        break
+    time.sleep(0.05)
+else:
+    raise SystemExit("AC-017 parallel provider calls did not overlap")
+PY
+  touch "$control_prefix.parallel-answers-inflight"
+
+  attempt=0
+  while [ "$attempt" -lt "${AC017_REAL_STACK_DRIVER_POLLS:-600}" ]; do
+    if [ -f "$control_prefix.parallel-retries-done" ]; then
+      break
+    fi
+    if ! kill -0 "$browser_pid" >/dev/null 2>&1; then
+      wait "$browser_pid" || true
+      cat "$browser_log"
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.5
+  done
+  if [ ! -f "$control_prefix.parallel-retries-done" ]; then
+    cat "$browser_log"
+    printf 'Timed out waiting for AC-017 same-root retries during worker claims.\n' >&2
+    return 1
+  fi
+
+  compose exec -T backend python /app/backend/e2e/assert_ac017_parallel_answers_inflight.py \
+    >"$TEMP_ARTIFACTS/ac017-parallel-answers-inflight.json"
+  for marker in AC017_PARALLEL_ANSWER_A AC017_PARALLEL_ANSWER_B; do
+    compose exec -T llm-stub python -c \
+      'import json,sys,urllib.request; data=json.dumps({"marker":sys.argv[1]}).encode(); urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/release", data=data, headers={"Content-Type":"application/json"}, method="POST"), timeout=5).read()' \
+      "$marker"
+  done
+  compose exec -T backend python /app/backend/e2e/assert_ac017_parallel_answers.py \
+    180 >"$TEMP_ARTIFACTS/ac017-parallel-answers-final.json"
+  touch "$control_prefix.answers-complete"
+
+  set +e
+  wait "$browser_pid"
+  local browser_status=$?
+  set -e
+  cat "$browser_log"
+  if [ "$browser_status" -ne 0 ]; then
+    return "$browser_status"
+  fi
+}
+
+run_ac024_real_stack() {
+  local control_prefix="$TEMP_ARTIFACTS/ac024-control"
+  local browser_log="$TEMP_ARTIFACTS/ac024-browser.log"
+  local browser_pid
+  local attempt=0
+
+  compose exec -T llm-stub python -c \
+    'import urllib.request; urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/__e2e/reset", data=b"{}", method="POST"), timeout=5).read()'
+  compose exec -T backend python /app/backend/e2e/seed_ac024_legacy_jd.py \
+    >"$TEMP_ARTIFACTS/ac024-seed.json"
+
+  cd "$PROJECT_DIR/frontend"
+  set +e
+  REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
+    AC024_SEED_PATH="$TEMP_ARTIFACTS/ac024-seed.json" \
+    AC024_CONTROL_PREFIX="$control_prefix" \
+    AC024_BROWSER_TRACE="$TEMP_ARTIFACTS/ac024-browser-result.json" \
+    run_frontend_playwright tests/e2e/upload-legacy-jd-ac024-real-stack.spec.js \
+      --timeout "${AC024_REAL_STACK_TEST_TIMEOUT:-240000}" \
+      >"$browser_log" 2>&1 &
+  browser_pid=$!
+  set -e
+
+  while [ "$attempt" -lt "${AC024_REAL_STACK_DRIVER_POLLS:-600}" ]; do
+    if [ -f "$control_prefix.approved" ]; then
+      break
+    fi
+    if ! kill -0 "$browser_pid" >/dev/null 2>&1; then
+      wait "$browser_pid" || true
+      cat "$browser_log"
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.5
+  done
+  if [ ! -f "$control_prefix.approved" ]; then
+    kill "$browser_pid" >/dev/null 2>&1 || true
+    wait "$browser_pid" >/dev/null 2>&1 || true
+    cat "$browser_log"
+    printf 'Timed out waiting for AC-024 approval assertions.\n' >&2
+    return 1
+  fi
+
+  compose exec -T backend python /app/backend/e2e/capture_ac024_read_baseline.py \
+    /tmp/ac024-read-baseline.json \
+    >"$TEMP_ARTIFACTS/ac024-read-baseline.json"
+  touch "$control_prefix.read-baseline-ready"
+
+  set +e
+  wait "$browser_pid"
+  local browser_status=$?
+  set -e
+  cat "$browser_log"
+  if [ "$browser_status" -ne 0 ]; then
+    return "$browser_status"
+  fi
+
+  compose exec -T llm-stub python -c \
+    'import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen("http://127.0.0.1:8080/__e2e/access", timeout=5))))' \
+    >"$TEMP_ARTIFACTS/ac024-provider-access.json"
+
+  local backend_container
+  backend_container=$(compose ps -q backend)
+  docker cp "$TEMP_ARTIFACTS/ac024-seed.json" "$backend_container:/tmp/ac024-seed.json" >/dev/null
+  docker cp "$TEMP_ARTIFACTS/ac024-browser-result.json" "$backend_container:/tmp/ac024-browser-result.json" >/dev/null
+  docker cp "$TEMP_ARTIFACTS/ac024-read-baseline.json" "$backend_container:/tmp/ac024-read-baseline.json" >/dev/null
+  docker cp "$TEMP_ARTIFACTS/ac024-provider-access.json" "$backend_container:/tmp/ac024-provider-access.json" >/dev/null
+  docker cp "$PROJECT_DIR/backend/e2e/assert_ac024_legacy_jd.py" \
+    "$backend_container:/app/backend/e2e/assert_ac024_legacy_jd.py" >/dev/null
+  compose exec -T backend python /app/backend/e2e/assert_ac024_legacy_jd.py \
+    /tmp/ac024-seed.json \
+    /tmp/ac024-browser-result.json \
+    /tmp/ac024-read-baseline.json \
+    /tmp/ac024-provider-access.json \
+    >"$TEMP_ARTIFACTS/ac024-db-trace.json"
+}
+
 compose config --quiet
 if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
   for image in \
@@ -427,6 +627,16 @@ curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused
 
 if [ "${REAL_STACK_ONLY_AC016:-0}" = "1" ]; then
   run_ac016_real_stack
+  exit 0
+fi
+
+if [ "${REAL_STACK_ONLY_AC017:-0}" = "1" ]; then
+  run_ac017_real_stack
+  exit 0
+fi
+
+if [ "${REAL_STACK_ONLY_AC024:-0}" = "1" ]; then
+  run_ac024_real_stack
   exit 0
 fi
 

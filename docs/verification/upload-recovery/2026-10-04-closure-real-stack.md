@@ -208,3 +208,62 @@ bash -n scripts/real_stack_smoke.sh \
 - 候选镜像 image ID：backend/worker `sha256:577b5edc9ff51a39bac674397cb306165604acfc00dcd35e63b408917b4c7c31`；nginx/frontend `sha256:1e05fae4919ac1581d9c4ab5b2509d1d6be9fd110012f151c78b6607bcd06d23`；本地 HTTP 模型 stub `sha256:0b6c52eeb18479fc4b614b2ec8176fd32e3f8162b986e2d33a3b877cf1c97aab`；OAuth gateway `sha256:108ce4919327ae078f91da540d0fd78fa9f9dbcc4efe08f3ed8491fb488da45b`。
 - 持久证据：[seed](2026-10-04-real-stack/ac016-seed.json)、[source append](2026-10-04-real-stack/ac016-source-update.json)、[浏览器/API trace](2026-10-04-real-stack/ac016-browser-result.json)、[失败边界 SQLite trace](2026-10-04-real-stack/ac016-first-pass-db-trace.json)、[最终 SQLite 关系 trace](2026-10-04-real-stack/ac016-db-trace.json)。完整 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-827683-1791216502/`。
 - 状态：CL-AC-016 的 Given/When/Then 已由真实候选栈闭环，验收矩阵更新为通过。
+
+## CL-AC-017 候选栈验收
+
+- 日期：2026-10-06。分支：`codex/frontend-ui-hierarchy-cleanup`；候选基于 AC-017 真实验收脚手架变更的工作树构建。
+- 命令：`REAL_STACK_ONLY_AC017=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（21.4 秒）。候选项目：`interview-boss-real-e2e-849707-1791217498`。
+- 环境：一次性 SQLite volume、隔离 Redis、真实 frontend/Nginx/FastAPI/API 鉴权、ARQ dispatcher、两个 worker replica 和浏览器。模型供应商边界由本地确定性 HTTP provider stub 提供；没有 mock 业务 API、worker 或数据库，没有连接生产数据库或外部模型。
+- 验收：旧 job A/B 的兼容 retry 均以 HTTP 200 指向 job C、`created=false`；两个 owner 浏览器并发根 retry 都指向 attempt 3、`created_attempt=false`。任务中心恢复按钮显示“已有恢复任务正在继续处理未完成步骤”。两个不同答案 work key 经实际 dispatcher/worker 和 provider HTTP 请求并行完成，provider `max_active=2`；两个 marker 答案分别写回自己的题目，两个 answer job 均 completed、work key 分别为 `answer:1:v1`/`answer:2:v1`，无重复 active work key。SQLite 保留 3 代 attempt（A/B 仍 failed），成功 extraction checkpoint 的 JSON/hash 与种子一致，未创建 attempt D。
+- 候选镜像 digest：backend/worker `sha256:517d50ec4d79c6d42affb130476a7e7c1bf2e8014b01e70f663c19ac01a112e8`；nginx/frontend `sha256:cd3aec549e8c5e6384c7c3023f1f5008d600e24123ca308b00452a93d01c068a`；本地 HTTP 模型 stub `sha256:044776c3997edee0b8c5f450eec78d938277b38c3ce66e9a1978943c0309c8f1`；OAuth gateway `sha256:9e41311ac6e13ccb75abaa81484a6a7d578f527c6b04dfeaa54dce45e17d8346`。
+- 持久证据：[seed](2026-10-04-real-stack/ac017-seed.json)、[旧 ID/attempt SQLite trace](2026-10-04-real-stack/ac017-retry-db-trace.json)、[浏览器/API trace](2026-10-04-real-stack/ac017-browser-result.json)、[并行 job seed](2026-10-04-real-stack/ac017-parallel-answers-seed.json)、[最终 worker/provider/SQLite trace](2026-10-04-real-stack/ac017-parallel-answers-final.json)。完整 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-849707-1791217498/`。
+- 独立复审核验：该运行在根 retry 阶段停止了 worker；两个 worker 的不同答案 work key 虽然并行完成，但没有与浏览器 retry 请求交叠。因此此结果覆盖旧 ID 收敛、双浏览器 retry、双 worker 并行和 checkpoint 保留，不能单独证明 AC-017 的完整 Given/When/Then。矩阵暂记部分；扩展在途 provider 屏障的重跑结果另行追加。
+
+## CL-AC-024 候选栈验收
+
+- 日期：2026-10-06。分支：`codex/frontend-ui-hierarchy-cleanup`；候选基于 AC-024 浏览器验收脚手架和持久状态修复的工作树构建。
+- 命令：`REAL_STACK_ONLY_AC024=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（16.7 秒）；最终 SQLite/provider/browser 交叉断言通过。候选项目：`interview-boss-real-e2e-916693-1791219310`。
+- 环境：一次性 SQLite volume、隔离 Redis、真实 frontend/Nginx/FastAPI/API 鉴权、ARQ dispatcher、worker 和浏览器。模型供应商边界由本地确定性 HTTP provider stub 提供；没有 mock 业务 API、worker 或数据库，没有连接生产数据库或外部模型。
+- 兼容 retry：U1 对 rootless 旧 `submit_import` job 调用真实兼容 retry API，旧 job 仍保留且创建一个子 job；owner 的 retry job 完成并保存个人 JD，`interview_id=null`、`question_count=0`、没有答案 job。U2 对该旧 job 的 retry 和读取均为 404。
+- 审核发布：管理员真实读取 contribution，含不允许公开的 `contact_email` 投影返回 422；提交允许字段后真实批准，响应和 SQLite request 行均为 `published`，产生 owner-null 公共 JD。该历史运行的 review projection 含 `bonus=AC024_PUBLIC_BONUS_SQL`，但 `public_jd.bonus` 实际为空，发现了审核允许字段未落入 JD 物化白名单的缺口。另在最终状态修复前未核验重复审批幂等。
+- 历史兼容：旧 approved JD 和旧 approved interview 经真实 `/jd`、`/interview` 列表 API 与页面读取仍可见。读取前后计数不变，故旧记录读取没有触发 replay/retry；该历史运行没有普通面经上传任务，不能据此证明普通面经原路径未受影响。provider stub 对 AC-024 标记收到 1 次 HTTP 200。
+- 红绿根因：首轮候选栈的管理员批准 API 返回 `published`，但 SQLite contribution request 实际仍为 `approved_for_processing`。将真实持久行断言加入 `backend/tests/services/test_public_contributions_materialize.py::test_jd_approve_materializes_jd_not_interview` 后先红（期望 `published`、实际 `approved_for_processing`），再修正 JD materialization 更新语句，单测通过且该服务测试文件 `14 passed`。最终候选栈重建并重跑后通过。
+- 候选镜像 digest：backend/worker `sha256:2a4016596de3328b77e88f77951f974b0949afdb4a81afc4300b3ff72351986c`；nginx/frontend `sha256:63eea0b93a5547f71b25a8c1a5bf58a4c295bd3657cf42e9f3eacd3b7c18e910`；本地 HTTP 模型 stub `sha256:9d4d35c1a179ecc7dd001e18bf43a4ec2509b2d5e2f5449996b97ee40657f159`；OAuth gateway `sha256:123b7a67e96bd767973acda85065aa6f73e6686141f9cfe50672679f17d7c06e`。
+- 持久证据：[seed](2026-10-04-real-stack/ac024-seed.json)、[浏览器/API trace](2026-10-04-real-stack/ac024-browser-result.json)、[读取前计数](2026-10-04-real-stack/ac024-read-baseline.json)、[provider HTTP 账本](2026-10-04-real-stack/ac024-provider-access.json)、[SQLite 关系与读取后计数](2026-10-04-real-stack/ac024-db-trace.json)。完整 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-916693-1791219310/`。
+- 独立复审核验：以上候选栈覆盖 JD retry、review allowlist 拒绝/批准和旧 approved JD/面经读取，但 bonus 未实际物化、发布后的重复 approve 会被现有状态分支拒绝，且没有执行普通面经上传回归。此运行不足以关闭完整 AC-024，矩阵暂记部分。模型边界使用本地 stub，不代表真实模型供应商调用或模型内容质量通过。
+
+## 2026-10-06 独立复审与补验状态
+
+- 复审发现此前矩阵对 AC-017/024 的通过声明范围过宽：AC-017 缺少 worker 实际 claim 同一 root 的答案工作时浏览器 retry 交叠；AC-024 缺少 JD bonus 物化、published 后重复审批幂等和普通面经真实上传回归。
+- AC-024 已完成两处 TDD 修复：JD bonus 字段映射已补入；审批入口对相同 revision/相同 projection 的 `approved_for_processing` 与 `published` 状态幂等返回，对不同 projection 保持 `StateConflict`。测试先后分别因 bonus 值为空、published 状态冲突而失败，再在修复后通过；`backend/tests/services/test_public_contributions_materialize.py::test_jd_approve_materializes_jd_not_interview` 与 `backend/tests/services/test_public_contribution_transitions.py::test_repeated_approve_does_not_duplicate_events` 为 `2 passed`。
+- 普通面经实栈回归另发现 upload snapshot 从嵌套 extraction checkpoint 读取计数时返回 0。对应回归先红后绿：`_stage_counts` 同时读取持久化的 `提取计数` 和旧版平铺数据；实栈浏览器确认普通导入返回提取/保留数均为 1。
+- 两条第一次 AC-024 候选浏览器均已通过，但数据库检查脚本先后错误地从响应读取不存在的 `doc_type/question_count`，以及把顶层权限断言读成了普通导入的子字段。保存的真实隔离 SQLite 快照在修正检查器后通过全套持久状态断言；再以完整候选栈确认一次成功，不能把这两次检查器失败当成产品失败或验收通过。
+- 最终状态：AC-017 的 provider 在途并发 retry 和 AC-024 的 JD/普通面经完整流程均已在候选栈通过，11/11 AC 通过。各自最后一次成功运行见下列[AC-017 最终在途验收](#cl-ac-017-最终在途验收)及[AC-024 最终候选栈验收](#cl-ac-024-最终候选栈验收)。
+
+## CL-AC-017 最终在途验收
+
+- 日期：2026-10-06。候选项目：`interview-boss-real-e2e-954081-1791221139`；该运行复用了已部署的候选镜像。
+- 命令：`REAL_STACK_ONLY_AC017=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`。实际 UI、HTTP API、两个 worker、provider stub 和 SQLite 均参与验收。
+- 在途交叠：两个答案 job `answer:1:v1` 与 `answer:2:v1` 都已由不同 worker claim，数据库同时为 `running`；本地 provider HTTP barrier 记录两个请求同时 active (`max_active=2`)。barrier 未释放时两个浏览器再次并发 retry，响应都指向同一 root/C attempt 3，且 `created_attempt=false`；SQLite trace 确认没有 attempt D，也没有重复 active work key。之后释放 provider，两条答案 HTTP 请求各收到一次 200、对应 answer job 各完成一次，答案仍写入各自 marker。
+- 历史边界：A/B 的旧 ID retry 均收敛到 C；成功 extraction checkpoint hash 保持原值；A/B attempt 仍为 failed。该回归证明 retry 不会打断或重复在途 worker 答案任务。
+- 候选镜像 digest：backend/worker `sha256:23244a9c81b07b1558df890f46db1971464a3811a1d055b72eedf6b9912400f6`；nginx/frontend `sha256:546b7b9c32cfd6e54af48ee65482d12e9247619aa5802cdd66bc1cf97224ec5a`；本地 HTTP 模型 stub `sha256:d19dbac9dfb107c0050972d4c71fb533e8f5d91c9b7cd3916ca65d1ce4c99afe`；OAuth gateway `sha256:cfebac4fe9a5fd66b0b8e2405d394558feec36f55a23b4cc8d37d765597ecb82`。
+- 证据：[脱敏 seed](2026-10-04-real-stack/ac017-seed.json)、[浏览器/API retry trace](2026-10-04-real-stack/ac017-browser-result.json)、[attempt/checkpoint SQLite trace](2026-10-04-real-stack/ac017-retry-db-trace.json)、[并行答案 job](2026-10-04-real-stack/ac017-parallel-answers.json)、[在途 worker/provider/浏览器交叠 SQLite trace](2026-10-04-real-stack/ac017-parallel-answers-inflight.json)、[释放后的最终 worker/provider/SQLite trace](2026-10-04-real-stack/ac017-parallel-answers-final.json)。原始 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-954081-1791221139/`。
+- 状态：AC-017 完整 Given/When/Then 通过；此前“浏览器 retry 时 worker 已停止”的运行仅为历史部分证据，现已被本次交叠验收补全。
+
+## CL-AC-024 最终候选栈验收
+
+- 日期：2026-10-06。候选项目：`interview-boss-real-e2e-1028935-1791222989`；部署了真实 frontend/Nginx、FastAPI/auth、SQLite、Redis、dispatcher、worker 和浏览器栈。
+- 命令：`REAL_STACK_PORT=18341 REAL_STACK_STUB_PORT=18342 REAL_STACK_ONLY_AC024=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_CAPTURE_FAILURE_DB=1 ./scripts/real_stack_smoke.sh`。
+- 结果：退出码 `0`；Playwright `1 passed, 0 failed, 0 skipped`（17.0 秒），provider HTTP 与 SQLite 最终断言通过。
+- 旧 JD retry：U1 以真实兼容 API 重试 rootless 旧 JD job，保留旧 job 并创建其子任务；结果为 JD，保存个人 JD，不生成 interview/detail、question resolution 或答案 job。U2 对 retry 与任务读取均为 404。
+- 审核投影：管理员提交不允许公开的联系人字段得到 422；允许字段批准后状态为 `published`，公共 JD 的 owner 为 null，`bonus=AC024_PUBLIC_BONUS_SQL` 持久化，私有联系人/公司 sentinel 未进入公开投影。重复批准同一 revision/projection 不新增事件或公共实体；不同 projection 返回冲突，由服务回归核验。
+- 普通私人面经：通过真实 `/import` 界面提交并由 worker 完成。owner 的上传记录、interview 和题目 detail 均在 SQLite 持久化；snapshot 提取/保留数为 1；owner 能在个人列表读取，U2 的公共面经列表不可见，且没有 contribution request。
+- 历史兼容：旧 approved JD 和旧 approved 面经在真实列表页面仍可读取；读取前后 SQLite job/import/attempt/entity/resolution 计数完全相同，没有 replay 或重复投影。provider stub 对 JD 与普通面经 marker 均各收到一次 HTTP 200。
+- 本轮边界回归：JD bonus 物化及审批幂等/冲突服务测试先红后绿；嵌套 extraction 计数测试先因实际值为 0 而红，修复后通过。此前实栈检查器的字段/路径假设错误已按真实 API response contract 和 DB relation 修正；最后一轮整体验收未再遇到检查器错误。
+- 最终候选镜像 digest：backend/worker `sha256:b06645e87645a9f1283a358ee3a46426063a3760ffc88c41ed047ea2de91bdb9`；nginx/frontend `sha256:3059df72b704fefbea20a4f97bb1172cbb8755bef64279861fc21dad33139b60`；本地 HTTP 模型 stub `sha256:972b528a50b9228feb9b39aff47ea0aa90dfb1d65ca7e02bae1092be00da97f7`；OAuth gateway `sha256:c97adb86de0baf8e91ffc5d1436b4971fbfdb68fed1b6e1c79a7fe7d0d820c1f`。
+- 证据：[seed](2026-10-04-real-stack/ac024-seed.json)、[浏览器/API trace](2026-10-04-real-stack/ac024-browser-result.json)、[读取前计数](2026-10-04-real-stack/ac024-read-baseline.json)、[provider HTTP 账本](2026-10-04-real-stack/ac024-provider-access.json)、[SQLite 关系及读取后计数](2026-10-04-real-stack/ac024-db-trace.json)。原始 runner artifacts 位于 `test-results/real-stack/interview-boss-real-e2e-1028935-1791222989/`。
+- 单元回归命令：`OPENAI_BASE_URL= OPENAI_API_KEY= PYTHONPATH=backend ./.venv/bin/python -m pytest -q backend/tests/services/test_public_contributions_materialize.py backend/tests/services/test_public_contribution_transitions.py backend/tests/infra/test_upload_stream_contract.py::test_stage_counts_reflect_extract_counts_and_resolutions backend/tests/pipeline/test_upload_task_question_counts.py`；结果 `27 passed`（23.13 秒）。
+- 状态：AC-024 完整 Given/When/Then 通过。模型供应商边界是本地确定性 HTTP stub；本验收不声称真实外部模型凭据或模型生成质量已验证。

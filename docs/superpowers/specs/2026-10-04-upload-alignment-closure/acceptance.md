@@ -2,7 +2,7 @@
 
 属于[闭环规格](README.md)。每个 `CL-REQ` 对应原 AC 的尚未闭环范围。下表记录当前验证状态；详细证据见[2026-10-04 候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。
 
-截至 2026-10-06，本地隔离候选栈还验证了 AC-016 的追加贡献累计、worker 重启后恢复和私人同 URL 来源保护。AC-001/002 的真实 share→review→publish 任务卡定位、服务端分页和 JD 本地分页回归，AC-011 的 8/2 答案部分失败与仅恢复失败题，AC-013 的真实 HTTP 错误与共享物理调用预算，以及 AC-022 的 multipart 超限早停、spool 清理和幂等重提也已通过。按本矩阵的完整 Given/When/Then 逐项审查后，只有已覆盖全部要求的条目才记为通过；相关路径的回归或局部真实栈场景记为部分。
+截至 2026-10-06，本批 11 个 AC 均按完整 Given/When/Then 在隔离候选栈验收通过。独立复审发现的 AC-017 worker 在途 retry 交叠，以及 AC-024 bonus 物化、重复审批幂等和普通面经路径缺口，已补测试、修复并通过候选栈复验。逐项命令、镜像 digest 和证据见[候选栈验证账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md)。模型供应商边界使用本地确定性 HTTP stub，不代表真实模型或生产模型凭据验收。
 
 | 闭环 AC | 当前状态 | 未闭环证据 |
 |---|---|---|
@@ -14,9 +14,9 @@
 | CL-AC-011 | 通过 | 独立候选栈真实浏览器/API/SSE/worker/SQLite/provider 调用账本验证了首轮 8/2、仅重试题 9/10、8 个成功答案 hash 与 10 个 resolution ID/规范映射稳定，完成后 6 秒仍可从历史打开结果。证据见[AC-011 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-011-独立候选栈验收)。 |
 | CL-AC-013 | 通过 | 隔离候选栈真实浏览器/API/SSE/worker/SQLite/provider HTTP 验证了 401/403 单次失败、429 三次预算后经旧 retry 完成、格式错误三次预算及超时账本；旧 SSE 只读且日志脱敏通过。详见[AC-013 独立验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-013-独立候选栈验收)。 |
 | CL-AC-016 | 通过 | 全新候选栈真实浏览器/API/worker/SQLite 验收了同 URL 两次 contribution 累计、B 失败期间不提前公开、worker 重启后再管理员恢复、A/B 各一次且顺序稳定，以及 U1 同 URL 私人原稿完整保留；两个复审边界也由红绿回归和独立复审闭合。证据见[AC-016 候选栈验收账](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-016-候选栈闭环验收)。 |
-| CL-AC-017 | 部分 | 同一 active attempt 的并发恢复已过；A/B/C 三代旧 attempt 收敛和多 work_key 并行真实验收尚未运行。 |
+| CL-AC-017 | 通过 | 两个 worker 的答案 job 均处于 running、provider HTTP 同时在途时，两个浏览器并发 retry 都返回同一 C/attempt 3 且 `created_attempt=false`；释放 provider 后两个 work key 均各完成一次，旧 A/B ID、checkpoint 和 attempt 历史保持稳定。详见[AC-017 最终在途验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-017-最终在途验收)。 |
 | CL-AC-022 | 通过 | 真实浏览器上传 20 MiB+1 文件；10 MiB 限额在解析器观察到 10,650,039 字节时拒绝，spool 只写入 10,387,895 字节、已关闭，端点文件读取为 0。真实 HTTP 400/400/413、页面草稿保留、拒绝 key 的 by-key 为 404、修正后只建一个 root/attempt/job、同 key/hash 重放原 root、异 hash 409 均通过。 |
-| CL-AC-024 | 未运行 | 尚无真实 JD 兼容 retry→审核发布和历史 approved 数据不重放验收。 |
+| CL-AC-024 | 通过 | 真实候选栈验证旧 JD retry 保持 JD 领域、审核允许字段 bonus 进入公共 JD、拒绝字段不泄漏、同一投影重复批准幂等、冲突投影被拒绝，普通面经经真实上传界面落库且仅 owner 可见，旧 approved JD/面经读取不触发重放。服务回归和完整浏览器/API/worker/SQLite/provider 断言均通过，证据见[AC-024 最终候选栈验收](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-024-最终候选栈验收)。 |
 
 AC-001/002 本次通过证据：候选项目 `interview-boss-real-e2e-579948-1791209764`，浏览器与 SQLite trace、命令及镜像 digest 见[2026-10-05 AC-001/002 候选栈记录](../../../verification/upload-recovery/2026-10-04-closure-real-stack.md#cl-ac-001002-候选栈闭环验收)。
 
@@ -117,9 +117,9 @@ AC-022 本次通过证据：候选项目 `interview-boss-real-e2e-643382-1791211
 <a id="cl-ac-017"></a>
 ### CL-AC-017（原 AC-017）：跨代恢复与并发 retry
 
-**Given** 同一 root 依次产生 A failed、B failed、C active 三代 attempt；每代含稳定 failed/succeeded work key。另有两个不同答案 work key 可并行。两个浏览器和两个 worker 可同时操作同一 root。
+**Given** 同一 root 依次产生 A failed、B failed、C active 三代 attempt；每代含稳定 failed/succeeded work key。另有两个不同答案 work key 可并行。两个浏览器和两个 worker 可同时操作同一 root，测试可将两个 worker 的 provider 请求保持在执行中。
 
-**When** 客户端分别从旧 A、旧 B 发恢复请求，并在 C 活跃时由两客户端并发 retry 根任务；之后检查各 worker claim/complete。
+**When** 客户端分别从旧 A、旧 B 发恢复请求，并在 C 活跃时由两客户端并发 retry 根任务；待两个不同答案 job 均被 worker claim 且 provider HTTP 请求同时在途时，再由两个浏览器并发 retry 根任务，并在保持 provider 请求未释放期间检查数据库 job 状态，随后释放 provider 并检查 worker complete。
 
 **Then** 所有旧 ID 均解析到 C，不创建 D；两个并发响应都引用同一 C，至多一个报告新 attempt。每个 work key 至多一个 active job；不同合法答案 work key 可并行且不覆盖对方结果。`created_attempt=false` 对应清楚的“任务已在运行/继续现有尝试”UI 文案。attempt 历史完整，成功检查点不回滚。
 
@@ -135,11 +135,11 @@ AC-022 本次通过证据：候选项目 `interview-boss-real-e2e-643382-1791211
 <a id="cl-ac-024"></a>
 ### CL-AC-024（原 AC-024）：JD retry 与旧数据兼容
 
-**Given** 临时库含一条需兼容 retry 的旧 JD job、一条没有新 publish 元数据的旧 approved JD、一条旧 approved 公共面经，以及一条普通面经上传任务。每条有独特 marker。
+**Given** 临时库含一条需兼容 retry 的旧 JD job、一条没有新 publish 元数据的旧 approved JD、一条旧 approved 公共面经，以及可由 U1 登录的真实浏览器提交普通私人面经。每条数据有独特 marker。
 
-**When** 经真实兼容 retry API `/api/submit-jobs/{job_id}/retry` 重试 JD job，完成其领域处理，管理员检查并批准相应 JD 投影；同时刷新旧 JD/面经列表，并观察公共 worker 队列。
+**When** U1 经真实兼容 retry API `/api/submit-jobs/{job_id}/retry` 重试 JD job，完成其领域处理；浏览器再经普通上传界面提交一份个人面经，由 worker 按面经路径完成；管理员检查并批准 JD 投影；同时刷新旧 JD/面经列表，并观察公共 worker 队列。
 
-**Then** JD retry 解析到原 JD 实体/owner，任务结果仍是 JD；JD marker 不出现在 interview detail、question resolution、题目聚类和答案 job 中。审核投影只包含允许公开的结构化 JD 字段，敏感原文/联系人不泄漏。旧 approved JD 和面经继续按历史兼容谓词可读；列表读取不自动 replay/retry、不新增 job 或重复投影。普通面经行为保持原路径。需有 U2 越权读取和非 owner retry 的负向断言。
+**Then** JD retry 解析到原 JD 实体/owner，任务结果仍是 JD；JD marker 不出现在 interview detail、question resolution、题目聚类和答案 job 中。审核投影中 allowlist 的字段（包括 bonus）全部物化到公共 JD，未允许的联系人/原文不泄漏；相同 revision/投影重复审批返回同一结果且不新增事件或实体，不同投影返回 409。普通面经仍走面经 pipeline，结果按 U1 私人权限可读且 U2 公共列表不可见。旧 approved JD 和面经继续按历史兼容谓词可读；列表读取不自动 replay/retry、不新增 job 或重复投影。需有 U2 越权读取和非 owner retry 的负向断言。
 
 ## 3. 闭环记录格式
 
