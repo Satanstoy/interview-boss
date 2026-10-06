@@ -1,7 +1,7 @@
 # severity	dimension	location	title	suggested-fix	effort	confidence
 🔴	D1	backend/app/services/public_contributions.py:1; backend/app/worker.py:1; backend/app/services/llm.py:1	shrink: 三个生产模块超过 1,500 行（2,041/1,867/1,550）	按领域拆分并保持模块边界与现有契约；每次拆分后跑对应回归。	3-5 days	certain
 🔴	D1	backend/tests/chat/test_react_loop.py:1; backend/tests/chat/test_chat.py:1; backend/tests/integration/test_upload_recovery_stack.py:1	shrink: 三个测试文件超过 1,500 行（3,790/2,046/1,512），line guard 已失败	按行为面拆成独立测试模块，保留 line guard 门禁。	2-4 days	certain
-🔴	D2	docs/status/codex-project-state.md:3,25,56,59-60	唯一事实源记录已过期且引用不存在的 spec；ADR-0048 已 accepted，文件却称进行中	更新当前分支/HEAD/spec 状态；删除或修正缺失链接；避免该文件继续充当错误状态源。	2-4 hours	certain
+🔴	D2	docs/status/codex-project-state.md:3,25,55-60	唯一事实源记录已过期；指向不存在的 taxonomy/audit/UIUX/practice spec，且把已 accepted 的 ADR-0048 标成进行中	更新当前分支/HEAD/spec 状态；删除或修正缺失链接；避免该文件继续充当错误状态源。	2-4 hours	certain
 🔴	D2	docs/verification/upload-recovery/2026-10-04-closure-real-stack.md:139,153	验收账指向不存在的 acceptance.md，相对链接少退一级	修正为 ../../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md，并加入 Markdown 链接检查。	1-2 hours	certain
 🟡	D2	docs/adr/0049-project-harness-release-provenance.md:1; docs/adr/0049-system-position-taxonomies.md:1	两个不同决策共用 ADR-0049 编号；按编号引用时含义不唯一	为岗位 taxonomy 决策分配唯一 ADR 编号，并更新所有引用。	1-2 hours	certain
 🟡	D2	docs/superpowers/specs/2026-09-29-upload-recovery/README.md:3,7; docs/superpowers/specs/2026-10-04-upload-alignment-closure/README.md:5,14-19	原规格仍标 Draft 且禁止自行接受；补充规格已宣布验收完成并把原规格有效条款列入优先级，整体生命周期状态冲突	由项目所有者确定原规格当前状态与批准记录，并同步两个文档的规范效力。	1-2 hours	certain

@@ -20,6 +20,18 @@
 
 本轮审查检查了仓库状态、代码和规范中的高风险行为，索引覆盖 2,224 个 tracked files，并审阅 D1–D16。`docs/adr` 与 `docs/superpowers/specs` 共 97 份 Markdown 文件；这个数字是文档库存量，不是 97 份规范逐条建立了“条款—代码—测试—候选/生产证据”矩阵。因此不能把本报告解读成所有历史设计文档每一条需求都已独立验收。需要的全仓可追踪矩阵仍是一个缺口。
 
+### 核心规范对齐快照
+
+| 规范 | 文档状态/验收记录 | 本轮结论 |
+|---|---|---|
+| 2026-09-29 上传恢复 spec + 2026-10-04 闭环补充 | 原 spec 仍是 Draft；原 29 个 AC 中 18 项先前通过记录来自不同级别证据，原先部分的 11 项现由补充文档列为 11/11 通过 | 11 项在本地 stub 隔离候选栈范围内通过；不能说 29 项在同一次生产部署、真实 provider 上验收。文档状态需要项目所有者明确。 |
+| ADR-0048 公共/个人题库边界 | Accepted；明确普通管理员不默认查看他人私人题，特殊访问要授权并审计 | **未全对齐/至少边界待裁决**：当前管理员可对他人私人 canonical 执行删除、批量删除和恢复，四条路径没有跨 owner 测试；不能只用上传 AC 通过推导 ADR-0048 全面通过。 |
+| 岗位 taxonomy 决策文件 | 代码文档列出 migration 104/105、系统 taxonomy 来源与旧用户 API 410；`codex-project-state.md` 仍称进行中，但状态文档已过期；岗位 taxonomy 文件和已接受 Harness 决策还复用了 ADR-0049 编号 | 代码实现有迹象，但本轮没有全量比对每个岗位分类迁移/回填/退休验收；状态及编号不可靠，不能标为完全对齐。 |
+| ADR-0018 / ADR-0024 评测队列与不可变 attempt | Accepted | **并发对齐未证实**：retry 入口与 worker claim 存在非原子窗口，缺少并发 retry/重复投递只产生一次有效执行的验收。 |
+| Harness 2.0 总规格及 ADR-0050 | 规格自述 P0、本地 replay/outbox 等进入代码；生产故障矩阵、真实 Provider Golden Trace、IAM/保留策略和灰度发布门禁仍明确未完成 | **部分完成**，这也是 spec 自身标注的剩余发布门槛；本轮未运行 Harness 的全量 provider/生产故障验收。 |
+
+这张快照覆盖当前最相关的业务边界、上传、评测重试和 Harness 发布规范；仓库其余历史设计文件仍需逐份按适用版本做需求到验收追踪，不能根据“文件存在”或旧状态表推定通过。
+
 ## 维度概览
 
 | 维度 | 主题 | 状态 | 🔴 | 🟡 | 🟢 |
@@ -68,7 +80,7 @@
 
 **状态：❌** · 状态源过期、验收链接失效，并有 ADR 与 spec 生命周期歧义。
 
-- 🔴 `docs/status/codex-project-state.md:3,25,56,59-60` 自称唯一事实源，但仍记载 2026-08-24 的 `master` 状态、指向不存在的 `2026-08-23-tech-audit-remediation-spec.md`，并把已 accepted 的 ADR-0048 标成进行中。
+- 🔴 `docs/status/codex-project-state.md:3,25,55-60` 自称唯一事实源，但仍记载 2026-08-24 的 `master` 状态；它引用的 taxonomy、audit、UIUX、practice spec 文件均不存在，并把已 accepted 的 ADR-0048 标成进行中。
 - 🔴 `docs/verification/upload-recovery/2026-10-04-closure-real-stack.md:139,153` 的验收矩阵链接少退一级，目标文件不存在。
 - 🟡 两份文档都使用 ADR-0049：Harness release provenance 与 system position taxonomies。按编号引用无法唯一定位决策。
 - 🟡 9/29 上传恢复 spec 仍禁止执行者自行将 Draft 改为 Accepted；10/04 补充 spec 已宣告 11/11 验收完成，并规定原 spec 非冲突条款继续有效。需要明确规范批准/实施/验收三种状态。
