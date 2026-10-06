@@ -1,0 +1,36 @@
+# severity	dimension	location	title	suggested-fix	effort	confidence
+🔴	D1	backend/app/services/public_contributions.py:1; backend/app/worker.py:1; backend/app/services/llm.py:1	shrink: 三个生产模块超过 1,500 行（2,041/1,867/1,550）	按领域拆分并保持模块边界与现有契约；每次拆分后跑对应回归。	3-5 days	certain
+🔴	D1	backend/tests/chat/test_react_loop.py:1; backend/tests/chat/test_chat.py:1; backend/tests/integration/test_upload_recovery_stack.py:1	shrink: 三个测试文件超过 1,500 行（3,790/2,046/1,512），line guard 已失败	按行为面拆成独立测试模块，保留 line guard 门禁。	2-4 days	certain
+🔴	D2	docs/status/codex-project-state.md:3,25,56,59-60	唯一事实源记录已过期且引用不存在的 spec；ADR-0048 已 accepted，文件却称进行中	更新当前分支/HEAD/spec 状态；删除或修正缺失链接；避免该文件继续充当错误状态源。	2-4 hours	certain
+🔴	D2	docs/verification/upload-recovery/2026-10-04-closure-real-stack.md:139,153	验收账指向不存在的 acceptance.md，相对链接少退一级	修正为 ../../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md，并加入 Markdown 链接检查。	1-2 hours	certain
+🟡	D2	docs/adr/0049-project-harness-release-provenance.md:1; docs/adr/0049-system-position-taxonomies.md:1	两个不同决策共用 ADR-0049 编号；按编号引用时含义不唯一	为岗位 taxonomy 决策分配唯一 ADR 编号，并更新所有引用。	1-2 hours	certain
+🟡	D2	docs/superpowers/specs/2026-09-29-upload-recovery/README.md:3,7; docs/superpowers/specs/2026-10-04-upload-alignment-closure/README.md:5,14-19	原规格仍标 Draft 且禁止自行接受；补充规格已宣布验收完成并把原规格有效条款列入优先级，整体生命周期状态冲突	由项目所有者确定原规格当前状态与批准记录，并同步两个文档的规范效力。	1-2 hours	certain
+🟡	D3	backend/tests/security/test_auth_normalization.py:26-98	认证归一化只覆盖基本大小写/首尾空格；缺少 NUL、Unicode 空白/大小写折叠、长度边界等对抗输入；文件头仍声称已被测试反驳的旧缺陷	补充边界/属性测试，确保 username/email 的验证、唯一性和登录归一化一致；修正过期测试说明。	1-2 days	certain
+🔴	D4	backend/app/routers/profile.py:266-274; backend/app/routers/profile_pkg/embedding.py:98-119; backend/data/interview-boss.db	旧设置写入路径绕过 Fernet 加密直接保存 API key；审计时数据库中仍有明文敏感配置且文件权限为 0644	统一所有密钥写入/读取入口到加密服务；迁移现存明文；数据库权限收紧并测试磁盘值非明文。	1-2 days	certain
+🟡	D4	deploy/docker-deploy.sh:848-853; /tmp/backups/pre_migration_v115_20261003_215804.db	审计时最新备份是未加密 SQLite 文件且权限为 0644，含整库敏感数据	为备份加独立密钥加密并限制文件权限；用隔离副本验证解密恢复。	1-2 days	certain
+🟡	D4	oauth-gateway/proxy.py:65-87; oauth-gateway/auth.py:33-41	OAuth JWT 带 scope，但 MCP proxy 验签后未按 scope 授权工具调用，直接转成用户完整 MCP token	按 MCP 方法实施 scope 到读/写操作的映射；未知或缺失 scope 默认拒绝；增加 read-only token 写调用拒绝测试。	1-2 days	certain
+🟡	D4	oauth-gateway/oauth.py:356-369; oauth-gateway/db.py:118-139	OAuth 登录失败限流依赖进程内 IP 状态，多实例重启可重置，且没有持久化账号锁定	把节流状态放入共享存储并统一用户名/IP 限额；测试多实例与重启下仍受限。	1-2 days	certain
+🟡	D4	backend/app/services/llm.py:1192-1196	非上传 LLM 重试日志打印完整 provider 异常，可能包含响应正文或敏感请求上下文	仅记录异常类、稳定错误码和 provider 状态；用含敏感正文的异常做日志断言。	2-4 hours	certain
+🟡	D5	backend/app/routers/questions_pkg/bulk.py:275-284,322-345,396-413,428-457; docs/adr/0048-public-personal-question-bank-boundaries.md:13-14	管理员可删除/批量删除/恢复其他用户的私人规范题，ADR 的默认边界则是管理员不访问他人私人题；现有测试没有覆盖这四条跨 owner 操作	明确管理员支持例外的授权与审计语义；默认拒绝跨 owner 私人写操作并为单条/批量删除和恢复添加正反例。	1-2 days	certain
+🟡	D7	frontend/package-lock.json: @mapbox/jsonlint-lines-primitives@2.0.2	前端生产依赖中有一个许可证未识别的包，当前无许可证兼容结论	核对上游许可证与分发义务；保留可审计结论或替换依赖。	2-4 hours	certain
+🟡	D7	.github/workflows/ci.yml; frontend/package-lock.json; uv.lock; oauth-gateway/requirements.lock	依赖有锁文件和扫描，但 CI 未生成 SBOM，也没有依赖许可证准入门禁	加入可复现 SBOM 生成和许可证策略检查，并保存构建产物。	1-2 days	certain
+🔴	D8	.tech-audit/debt.tsv:3; .github/workflows/ci.yml:38-40,62-78; scripts/check.sh:264-297; frontend/tsconfig.json:12	静态类型债务 551 项且到期日 2026-09-30 已过；Ruff/mypy 静态门禁只在本地 audit 模式，CI 未阻断；TypeScript strict 仍关闭	设定可执行的错误基线下降计划；把后端 Ruff/mypy 和前端 type-check 接入 CI，并由 CI 阻止新增债务。	3-5 days	certain
+🟡	D8	.github/workflows/ci.yml:38-40,103-148	npm audit 和 Trivy HIGH/CRITICAL 扫描均为 WARN-only/exit-code 0；当前仍有已知高危依赖告警	先逐项修复或登记带负责人/期限的例外，再把 HIGH/CRITICAL 未豁免项设为阻断。	2-4 days	certain
+🟡	D8	.shellcheckrc; .github/workflows/ci.yml; scripts/check.sh	ShellCheck 配置存在，但 CI 没有运行 ShellCheck	增加 ShellCheck CI 步骤并修正现有脚本告警。	2-4 hours	certain
+🟡	D8	.githooks/commit-msg:4; .github/workflows/ci.yml	提交信息校验依赖开发者手动安装 hook，CI 不做等效校验	在 CI 强制检查提交标题，hook 保留为本地快速反馈。	2-4 hours	certain
+🟡	D8	backend/Dockerfile; oauth-gateway/Dockerfile; nginx/Dockerfile	基础镜像使用可变标签，无法从文件确认重建时拿到相同镜像内容	使用 digest pin 并建立受控升级流程。	2-4 hours	certain
+🔴	D9	backend/app/db/migrations/auth.py:128-173; backend/app/db/migrations/__init__.py:16-17	迁移 012 在新表只要非空时就跳过整表旧数据复制，之后仍无条件 DROP 两张旧表；不属于破坏性迁移备份集合	改为逐行幂等迁移，校验源/目标映射和数量后才删除旧表；将 012 纳入迁移前备份，并覆盖“目标部分非空 + 旧表仍有数据”的混合状态测试。	2-4 days	certain
+🟡	D13	README.md:145-152; backend/.env.example:20-25; deploy/docker-deploy.sh:90-117	README 建议填写固定 JWT_SECRET 占位值；部署脚本只在变量为空时生成，照抄后会保留所有部署共享的签名密钥	README 改为保持 JWT_SECRET 未设置，由部署脚本生成并持久化；加入首次启动和二次启动密钥稳定性验收。	2-4 hours	certain
+🟡	D13	docker-compose.yml:39; backend/.env.example:11-17; backend/app/services/embedding_service.py:175-178; README.md:159	Compose 强制 siliconflow embedding，但示例配置没有 SILICONFLOW_API_KEY；README 同时宣称其他配置均有默认值	统一首启默认与示例配置；若 embedding key 必需，就在部署前校验并给出可执行配置步骤。	2-4 hours	certain
+🟡	D13	docker-compose.yml:273-278; README.md:145-159; backend/.env.example:29-32	Gateway 的 GATEWAY_BASE_URL 使用 Compose 根环境插值，默认生产域名；按文档写入 backend/.env 不会为 Compose 插值变量赋值	提供明确的根级 Compose 配置或修改实例化默认；自托管 OAuth discovery 做端到端验收。	2-4 hours	certain
+🟡	D13	deploy/docker-deploy.sh:812-819	部署状态命令只输出 compose ps 和资源使用，吞掉 docker stats 错误；没有部署文档所需的一站式健康诊断	增加 health/worker/backlog/关键环境配置诊断和非零失败码，关联现有运维 runbook。	1-2 days	certain
+🟡	D14	backend/app/routers/data.py:511-523,1084-1107; docs/superpowers/specs/2026-10-04-upload-alignment-closure/contracts.md:38	COUNT 与分页查询、目标与 rank 查询分开执行；SQLite SELECT 未显式共享读事务，并发写入时 items/total/rank 可来自不同快照	在一个一致读事务中执行相关查询；加入并发插入/删除期间的真实数据库验收。	1-2 days	certain
+🟡	D14	backend/app/routers/admin_evaluation.py:1221-1298; backend/app/services/evaluation_executor.py:444-531,545-561; docs/adr/0018-isolated-eval-queue.md; docs/adr/0024-immutable-eval-item-attempts.md	评测 retry 的 select-then-act 与 worker claim 非原子；并发 retry/重复投递可能重复启动同一 Run/Item，未找到并发唯一执行验收	增加原子 claim/fence/幂等键；两个请求与重复队列投递并发时断言只创建一次有效 attempt。	2-4 days	certain
+🟡	D15	frontend/src/views/InterviewView.vue:46,157-169	空态引用未注入的 isDataLoading，且未展示 dataLoadError/重试状态；首屏载入和失败可能落入错误空态	注入实际加载/错误状态并区分 loading、empty、error；添加加载中和失败后重试的 UI 验收。	2-4 hours	certain
+🟡	D15	frontend/src/components/business/SettingsInterview.vue:21-32,58-68	岗位与招聘偏好读取失败只写 console，表单保留默认值仍可保存，可能覆盖用户原值	显示错误与重试；加载失败时禁用保存，直到数据成功载入。	2-4 hours	certain
+🟡	D15	frontend/src/components/business/SettingsProfile.vue:100-108,456-464	简历删除直接调用 API，没有确认步骤；同一页面其它不可逆删除流程有确认对话框	删除前复用 ConfirmDialog，并在确认后执行；增加取消和确认两条交互验收。	2-4 hours	certain
+🟡	D15	frontend/src/components/business/ChatView.vue:32-37	可点击会话项使用 div，未提供键盘焦点、按钮/列表语义和键盘激活	改为 button 或合适的 listbox/button 组合，并覆盖键盘选择。	2-4 hours	certain
+🟡	D15	frontend/src/components/business/StagingPanel.vue:343-359,384-405	上传拖放区是 click-only div，隐藏 input 没有关联可访问标签；文本区 Label 也没有绑定控件	为 drop zone 提供键盘可操作语义与可见/辅助文本标签，并给表单 Label 设置 for/id。	2-4 hours	certain
+🟡	D15	frontend/src/components/business/SettingsSecurity.vue:181-194	密码 Label 没有 for/id 或包裹 Input，屏幕阅读器无法可靠关联字段名称	绑定 Label 与 Input，并运行自动化可访问性断言。	1-2 hours	certain
+🟡	D15	frontend/src/components/business/SettingsAIConfig.vue:241-263	API Key 显隐图标按钮没有 aria-label，且 Tooltip 未提供该按钮的可访问名称	为按钮添加随状态变化的“显示/隐藏 API Key”名称并验证读屏树。	1-2 hours	certain
+🟡	D16	frontend/src/components/business/PracticeStarChart.vue:47-58; frontend/src/utils/chartTokens.js:6-20	图表颜色直接写死，与共享 PORCELAIN token 重复并存在不同色值，主题调整容易漂移	改用共享 token，并增加颜色映射一致性断言；渲染级审查尚未运行。	2-4 hours	certain
