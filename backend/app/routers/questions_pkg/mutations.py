@@ -4,6 +4,7 @@ import logging
 import openai
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import build_tagging_prompt, TAGGING_PROMPT
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
@@ -46,6 +47,8 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                 ).fetchone()
                 if not row:
                     raise HTTPException(status_code=404, detail="未找到该题目")
+
+                assert_question_writable(row["owner_id"], admin, not_found="未找到该题目")
 
                 orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
                 orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
@@ -227,6 +230,10 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     "SELECT id, question, sources, original_questions, original_question_sources, ai_answer, answer_sources, owner_id, status FROM question_bank WHERE id = ?",
                     (req.target_id,)
                 ).fetchone()
+                if source:
+                    assert_question_writable(source["owner_id"], admin, not_found="未找到源聚类")
+                if target:
+                    assert_question_writable(target["owner_id"], admin, not_found="未找到目标聚类")
                 if not source:
                     raise HTTPException(status_code=404, detail="未找到源聚类")
                 if not target:
@@ -519,6 +526,8 @@ async def retag_master_question(question_id: int, user: dict = Depends(get_admin
 
     if not row or not row['question']:
         raise HTTPException(status_code=404, detail="未找到该题目")
+
+    assert_question_writable(row["owner_id"], user, not_found="未找到该题目")
 
     question_text = row['question']
     current_cat1 = row['cat1'] or '未分类'

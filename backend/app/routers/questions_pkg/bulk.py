@@ -4,6 +4,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import (
     get_db_connection,
@@ -39,7 +40,6 @@ async def delete_original_question(
     if not original_q:
         raise HTTPException(status_code=400, detail="original_question 不能为空")
 
-    is_admin = user.get("is_admin", 0)
     uid = user["id"]
 
     def _delete():
@@ -54,16 +54,10 @@ async def delete_original_question(
                 if not row:
                     raise HTTPException(status_code=404, detail="未找到该题目")
 
-                # 权限检查：管理员可删任何，普通用户只能删自己的
-                if not is_admin:
-                    if row["owner_id"] is None:
-                        raise HTTPException(
-                            status_code=403, detail="无权删除公共题目中的问题"
-                        )
-                    if str(row["owner_id"]) != str(uid):
-                        raise HTTPException(
-                            status_code=403, detail="无权删除他人题目中的问题"
-                        )
+                assert_question_writable(
+                    row["owner_id"], user, not_found="未找到该题目",
+                    public_forbidden="无权删除公共题目中的问题",
+                )
 
                 orig_qs = (
                     json.loads(row["original_questions"])
@@ -272,16 +266,10 @@ async def delete_master_question(
                     status_code=404, detail="未找到该题目，可能已被删除"
                 )
 
-            # 权限检查：公共题目仅管理员可删，个人题目仅本人可删
-            is_admin = user.get("is_admin", 0)
-            if row["owner_id"] is None and not is_admin:
-                raise HTTPException(status_code=403, detail="无权删除公共题目")
-            if (
-                row["owner_id"] is not None
-                and row["owner_id"] != user["id"]
-                and not is_admin
-            ):
-                raise HTTPException(status_code=403, detail="无权删除他人的个人题目")
+            assert_question_writable(
+                row["owner_id"], user, not_found="未找到该题目，可能已被删除",
+                public_forbidden="无权删除公共题目",
+            )
 
             cursor.execute(
                 "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
@@ -313,27 +301,21 @@ async def batch_delete_master_bank(
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
-                f"SELECT id, question, owner_id FROM question_bank WHERE id IN ({placeholders}) AND deleted_at IS NULL",
+                f"SELECT id, question, owner_id, deleted_at FROM question_bank WHERE id IN ({placeholders})",
                 req.ids,
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
-            # 权限检查
-            is_admin = user.get("is_admin", 0)
-            for r in rows:
-                if r["owner_id"] is None and not is_admin:
-                    raise HTTPException(
-                        status_code=403, detail=f"无权删除公共题目 (id={r['id']})"
-                    )
-                if (
-                    r["owner_id"] is not None
-                    and r["owner_id"] != user["id"]
-                    and not is_admin
-                ):
-                    raise HTTPException(
-                        status_code=403, detail=f"无权删除他人的个人题目 (id={r['id']})"
-                    )
+            # Authorize every existing requested ID before filtering by lifecycle state.
+            for row in rows:
+                assert_question_writable(
+                    row["owner_id"], user, not_found="未找到任何匹配记录",
+                    public_forbidden=f"无权删除公共题目 (id={row['id']})",
+                )
+            rows = [row for row in rows if row["deleted_at"] is None]
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
             found_ids = [r["id"] for r in rows]
             ph2 = ",".join("?" * len(found_ids))
@@ -393,15 +375,10 @@ async def restore_master_question(
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="未找到回收站中的题目")
-            is_admin = user.get("is_admin", 0)
-            if row["owner_id"] is None and not is_admin:
-                raise HTTPException(status_code=403, detail="无权恢复公共题目")
-            if (
-                row["owner_id"] is not None
-                and row["owner_id"] != user["id"]
-                and not is_admin
-            ):
-                raise HTTPException(status_code=403, detail="无权恢复他人的个人题目")
+            assert_question_writable(
+                row["owner_id"], user, not_found="未找到回收站中的题目",
+                public_forbidden="无权恢复公共题目",
+            )
             conn.execute(
                 "UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (question_id,),
@@ -429,26 +406,19 @@ async def batch_restore_master_bank(
         with get_db_connection() as conn:
             placeholders = ",".join("?" * len(req.ids))
             rows = conn.execute(
-                f"SELECT id, owner_id FROM question_bank WHERE id IN ({placeholders}) AND deleted_at IS NOT NULL",
+                f"SELECT id, owner_id, deleted_at FROM question_bank WHERE id IN ({placeholders})",
                 req.ids,
             ).fetchall()
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到回收站中的题目")
-            is_admin = user.get("is_admin", 0)
             for row in rows:
-                if row["owner_id"] is None and not is_admin:
-                    raise HTTPException(
-                        status_code=403, detail=f"无权恢复公共题目 (id={row['id']})"
-                    )
-                if (
-                    row["owner_id"] is not None
-                    and row["owner_id"] != user["id"]
-                    and not is_admin
-                ):
-                    raise HTTPException(
-                        status_code=403,
-                        detail=f"无权恢复他人的个人题目 (id={row['id']})",
-                    )
+                assert_question_writable(
+                    row["owner_id"], user, not_found="未找到回收站中的题目",
+                    public_forbidden=f"无权恢复公共题目 (id={row['id']})",
+                )
+            rows = [row for row in rows if row["deleted_at"] is not None]
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到回收站中的题目")
             found_ids = [row["id"] for row in rows]
             ph2 = ",".join("?" * len(found_ids))
             conn.execute(

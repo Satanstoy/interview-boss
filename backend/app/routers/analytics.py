@@ -362,7 +362,9 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
 
                     _retype_distribution_details_txn(cursor, [r["id"]])
                     updated_detail += 1
-            rows = cursor.execute("SELECT id, cat1, cat2 FROM question_bank").fetchall()
+            rows = cursor.execute(
+                "SELECT id, cat1, cat2 FROM question_bank WHERE owner_id IS NULL"
+            ).fetchall()
             for r in rows:
                 new_cat1 = normalize_category(r["cat1"])
                 new_cat2 = normalize_category(r["cat2"])

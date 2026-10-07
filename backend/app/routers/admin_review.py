@@ -2,6 +2,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.db.connection import get_db_connection, run_db
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
@@ -347,14 +348,27 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
             ).fetchone()
             if not mh:
                 raise HTTPException(status_code=404, detail="未找到该合并记录")
-            if mh["is_rolled_back"]:
-                raise HTTPException(status_code=400, detail="该合并已经回滚过了")
-
             pre_snapshot = json.loads(mh["pre_snapshot"]) if mh["pre_snapshot"] else {}
             merged_ids = json.loads(mh["merged_ids"]) if mh["merged_ids"] else []
             merged_questions = (
                 json.loads(mh["merged_questions"]) if mh["merged_questions"] else []
             )
+
+            # Rollback must not mutate another user's surviving private cluster.
+            affected_ids = [mh["survivor_id"], *merged_ids]
+            placeholders = ",".join("?" * len(affected_ids))
+            for row in conn.execute(
+                f"SELECT owner_id FROM question_bank WHERE id IN ({placeholders})",
+                affected_ids,
+            ).fetchall():
+                assert_question_writable(row["owner_id"], admin, not_found="未找到该合并记录")
+            if pre_snapshot.get("owner_id") is not None:
+                assert_question_writable(
+                    pre_snapshot["owner_id"], admin, not_found="未找到该合并记录"
+                )
+
+            if mh["is_rolled_back"]:
+                raise HTTPException(status_code=400, detail="该合并已经回滚过了")
 
             conn.execute("BEGIN")
             try:
@@ -578,6 +592,7 @@ async def clustering_maintenance(
                 conn,
                 execute=not dry_run,
                 merge_exact_duplicates=merge_exact_duplicates,
+                public_only=True,
             )
 
     return await run_db(_run)
@@ -608,7 +623,7 @@ async def fix_lone_islands(
     def _fix():
         with get_db_connection() as conn:
             if dry_run:
-                audit = audit_clustering_state(conn)
+                audit = audit_clustering_state(conn, public_only=True)
                 return {
                     "mode": "dry_run",
                     "message": "embedding 阈值不再用于自动合并；这里只返回确定性候选",
@@ -620,7 +635,7 @@ async def fix_lone_islands(
                     "merged": 0,
                 }
             return run_clustering_maintenance(
-                conn, execute=True, merge_exact_duplicates=True
+                conn, execute=True, merge_exact_duplicates=True, public_only=True
             )
 
     return await run_db(_fix)

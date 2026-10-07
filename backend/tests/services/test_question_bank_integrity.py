@@ -199,7 +199,7 @@ async def test_manual_merge_does_not_append_normalized_duplicate(
     await mutations.merge_question(
         20,
         MergeOriginalQuestionRequest(original_question="什么是RAG", target_id=21),
-        {"id": 99},
+        {"id": 99, "is_admin": 1},
     )
 
     target = test_db.execute(
