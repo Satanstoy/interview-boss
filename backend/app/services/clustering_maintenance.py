@@ -154,7 +154,7 @@ def _sync_normalized_tables(conn, qb_id: int, sources: list, original_sources: l
 
 
 def audit_clustering_state(conn, *, public_only: bool = False) -> Dict:
-    scope_clause = " AND owner_id IS NULL" if public_only else ""
+    scope_clause = " AND owner_id IS NULL AND status = 'approved'" if public_only else ""
     rows = conn.execute(
         "SELECT id, question, cat2, frequency, cluster_id, sources, "
         "original_questions, original_question_sources "
@@ -197,16 +197,16 @@ def audit_clustering_state(conn, *, public_only: bool = False) -> Dict:
         normalized_counts = {
             "question_sources": conn.execute(
                 "SELECT COUNT(*) FROM question_sources s JOIN question_bank qb "
-                "ON qb.id = s.question_bank_id WHERE qb.owner_id IS NULL"
+                "ON qb.id = s.question_bank_id WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL"
             ).fetchone()[0],
             "question_original_items": conn.execute(
                 "SELECT COUNT(*) FROM question_original_items i JOIN question_bank qb "
-                "ON qb.id = i.question_bank_id WHERE qb.owner_id IS NULL"
+                "ON qb.id = i.question_bank_id WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL"
             ).fetchone()[0],
             "question_original_item_sources": conn.execute(
                 "SELECT COUNT(*) FROM question_original_item_sources s "
                 "JOIN question_original_items i ON i.id = s.original_item_id "
-                "JOIN question_bank qb ON qb.id = i.question_bank_id WHERE qb.owner_id IS NULL"
+                "JOIN question_bank qb ON qb.id = i.question_bank_id WHERE qb.owner_id IS NULL AND qb.status = 'approved' AND qb.deleted_at IS NULL"
             ).fetchone()[0],
         }
 
@@ -314,7 +314,7 @@ def run_clustering_maintenance(
         }
 
     applied = {"metadata": [], "exact_merges": []}
-    scope_clause = " AND owner_id IS NULL" if public_only else ""
+    scope_clause = " AND owner_id IS NULL AND status = 'approved'" if public_only else ""
     rows = conn.execute(
         "SELECT id, question, cat2, frequency, cluster_id, sources, "
         "original_questions, original_question_sources "

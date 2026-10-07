@@ -134,13 +134,19 @@ async def list_admin_contributions(
                         "qb.difficulty, qb.created_at, u.username AS submitted_by_name "
                         "FROM question_bank qb LEFT JOIN users u ON qb.submitted_by = u.id "
                         "WHERE qb.owner_id IS NULL AND qb.status = 'pending' "
-                        "AND qb.deleted_at IS NULL ORDER BY qb.created_at DESC"
+                        "AND qb.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM question_promotion_requests p WHERE p.pending_question_id=qb.id AND p.status!='pending') ORDER BY qb.created_at DESC"
                     ).fetchall()
                 ]
             return items, legacy
 
     items, legacy = await run_db(_list)
-    return {"items": items, "total": len(items) + len(legacy)}
+    legacy_items = [{
+        **row, "source_type": "interview", "legacy": True, "status": "pending_review",
+        "summary": {"company": "", "round": "", "job_title": "", "item_count": 1,
+                    "question_previews": [{"question": row["question"]}]},
+    } for row in legacy]
+    combined = items + legacy_items
+    return {"items": combined, "total": len(combined)}
 
 
 @router.get("/api/admin/public-contributions/{request_id}")

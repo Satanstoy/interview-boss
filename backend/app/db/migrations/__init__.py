@@ -10,8 +10,9 @@ import logging
 import os
 import sqlite3
 
-from app.core.config import DB_PATH
+from app.core.config import DB_PATH as DB_PATH
 from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
+from app.db.migrations.question_promotions import _migration_126_question_promotions
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
 DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92, 115}
@@ -364,6 +365,7 @@ _MIGRATIONS = [
     (123, "public_publish_gate", _migration_123_public_publish_gate),
     (124, "upload_spec_stage_names", _migration_124_upload_spec_stage_names),
     (125, "upload_llm_api_format", _migration_125_upload_llm_api_format),
+    (126, "question_promotions", _migration_126_question_promotions),
 ]
 
 

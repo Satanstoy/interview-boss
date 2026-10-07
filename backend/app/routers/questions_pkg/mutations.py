@@ -4,7 +4,7 @@ import logging
 import openai
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
-from app.routers.questions_pkg.permissions import assert_question_writable
+from app.routers.questions_pkg.permissions import assert_question_writable, assert_question_lifecycle_mutable
 from app.core.cache import invalidate_master_bank_cache
 from app.core.prompts import build_tagging_prompt, TAGGING_PROMPT
 from app.db.connection import get_db_connection, run_db, get_current_job_position, get_taxonomy_for_position
@@ -49,6 +49,8 @@ async def split_question(question_id: int, req: SplitQuestionRequest, admin: dic
                     raise HTTPException(status_code=404, detail="未找到该题目")
 
                 assert_question_writable(row["owner_id"], admin, not_found="未找到该题目")
+
+                assert_question_lifecycle_mutable(conn, question_id)
 
                 orig_qs = json.loads(row['original_questions']) if row['original_questions'] else []
                 orig_qs_src = json.loads(row['original_question_sources']) if row['original_question_sources'] else []
@@ -238,6 +240,9 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                     raise HTTPException(status_code=404, detail="未找到源聚类")
                 if not target:
                     raise HTTPException(status_code=404, detail="未找到目标聚类")
+
+                assert_question_lifecycle_mutable(conn, question_id)
+                assert_question_lifecycle_mutable(conn, req.target_id)
 
                 src_orig = json.loads(source['original_questions']) if source['original_questions'] else []
                 src_orig_src = json.loads(source['original_question_sources']) if source['original_question_sources'] else []

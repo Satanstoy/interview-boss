@@ -4,11 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
 from app.routers.questions_pkg.permissions import assert_question_writable
 from app.db.connection import get_db_connection, run_db
-from app.services.question_bank_integrity import (
-    canonicalize_question_bank_payload,
-    claim_public_original_questions,
-    sync_question_bank_projections,
-)
+
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
@@ -67,7 +63,7 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
             rows = conn.execute(
                 "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.created_at, u.username as submitted_by_name "
                 "FROM question_bank qb LEFT JOIN users u ON qb.submitted_by = u.id "
-                "WHERE qb.owner_id IS NULL AND qb.status = 'pending' ORDER BY qb.created_at DESC"
+                "WHERE qb.owner_id IS NULL AND qb.status = 'pending' AND qb.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM question_promotion_requests p WHERE p.pending_question_id=qb.id AND p.status!='pending') ORDER BY qb.created_at DESC"
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -75,132 +71,14 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
     return {"items": items, "total": len(items)}
 
 
-def _approve_cleanup_private_copy(conn, pending_id: int) -> None:
-    """审核批准后清理：删除分享者同题的私有副本（分享时保留的）。
-
-    匹配条件：owner_id = pending.submitted_by 且归一化文本相同。
-    """
-    pending = conn.execute(
-        "SELECT id, question, submitted_by FROM question_bank WHERE id = ?",
-        (pending_id,),
-    ).fetchone()
-    if not pending or not pending["submitted_by"]:
-        return
-    from app.routers.questions_pkg.share import _normalize_question_text
-
-    target_norm = _normalize_question_text(pending["question"])
-    if not target_norm:
-        return
-    rows = conn.execute(
-        "SELECT id, question FROM question_bank "
-        "WHERE owner_id = ? AND deleted_at IS NULL",
-        (pending["submitted_by"],),
-    ).fetchall()
-    for r in rows:
-        if _normalize_question_text(r["question"]) == target_norm:
-            conn.execute(
-                "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (r["id"],),
-            )
-            sync_question_bank_projections(conn.cursor(), r["id"], [], [], [])
-            break
-
-
 @router.post("/approve/{question_id}")
 async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
-    """审核通过题目（批准后清理分享者的私有副本，duplicate_of 镜像机制已废除）"""
+    """批准明确提交的快照，不根据文本推断私人来源。"""
+    from app.services.question_promotions import review_question_promotion
 
     def _approve():
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT id, question, status, cat2, job_position, submitted_by, sources, "
-                "original_questions, original_question_sources, owner_id "
-                "FROM question_bank WHERE id = ? AND owner_id IS NULL",
-                (question_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="未找到该待审核题目")
-
-            # Idempotent approval: do not re-merge an already approved row into
-            # itself when an administrator retries the request.
-            if row["status"] == "approved":
-                return dict(row)
-
-            from app.routers.questions_pkg.share import find_matching_public_question
-
-            matching_id = find_matching_public_question(
-                conn, row["question"], row["cat2"], row["job_position"]
-            )
-            if matching_id and matching_id != question_id:
-                # A second pending contribution for an already approved
-                # question is a source contribution, not a new question card.
-                from app.routers.questions_pkg.share import _merge_private_into_public
-
-                _merge_private_into_public(conn, matching_id, row)
-                conn.execute(
-                    "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (question_id,),
-                )
-                if row["submitted_by"]:
-                    _approve_cleanup_private_copy(conn, question_id)
-                conn.commit()
-                return dict(row)
-
-            sources, original_questions, original_question_sources = (
-                canonicalize_question_bank_payload(
-                    json.loads(row["sources"] or "[]"),
-                    json.loads(row["original_questions"] or "[]"),
-                    json.loads(row["original_question_sources"] or "[]"),
-                )
-            )
-            if row["question"] and not original_questions:
-                original_questions = [row["question"]]
-                original_question_sources = [
-                    {"question": row["question"], "sources": sources}
-                ]
-                sources, original_questions, original_question_sources = (
-                    canonicalize_question_bank_payload(
-                        sources, original_questions, original_question_sources
-                    )
-                )
-            conn.execute(
-                "UPDATE question_bank SET status = 'approved', frequency = ?, sources = ?, "
-                "original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (
-                    len(original_questions),
-                    json.dumps(sources, ensure_ascii=False),
-                    json.dumps(original_questions, ensure_ascii=False),
-                    json.dumps(original_question_sources, ensure_ascii=False),
-                    question_id,
-                ),
-            )
-            conn.execute(
-                "UPDATE question_bank SET cluster_id = ? WHERE id = ? AND cluster_id IS NULL",
-                (question_id, question_id),
-            )
-            claim_public_original_questions(
-                conn,
-                question_id,
-                row["owner_id"],
-                "approved",
-                original_questions,
-            )
-            sync_question_bank_projections(
-                conn.cursor(),
-                question_id,
-                sources,
-                original_questions,
-                original_question_sources,
-            )
-            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-            mark_cluster_review_pending(conn, question_id, "public_question_approved")
-            # 分享链路：批准后删除分享者保留的私有副本
-            if row["submitted_by"]:
-                _approve_cleanup_private_copy(conn, question_id)
-            conn.commit()
-            return dict(row)
+            review_question_promotion(conn, question_id, admin["id"], approve=True)
 
     await run_db(_approve)
     return {"status": "success", "message": "已通过审核"}
@@ -208,21 +86,11 @@ async def approve_question(question_id: int, admin: dict = Depends(get_admin_use
 
 @router.post("/reject/{question_id}")
 async def reject_question(question_id: int, admin: dict = Depends(get_admin_user)):
-    """拒绝题目"""
+    from app.services.question_promotions import review_question_promotion
 
     def _reject():
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL",
-                (question_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="未找到该待审核题目")
-            conn.execute(
-                "UPDATE question_bank SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (question_id,),
-            )
-            conn.commit()
+            review_question_promotion(conn, question_id, admin["id"], approve=False)
 
     await run_db(_reject)
     return {"status": "success", "message": "已拒绝"}

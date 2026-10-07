@@ -14,3 +14,20 @@ def assert_question_writable(
     if owner_id is not None:
         raise HTTPException(status_code=404, detail=not_found)
     raise HTTPException(status_code=403, detail=public_forbidden)
+
+
+def assert_question_lifecycle_mutable(conn, question_id: int):
+    """Request projections and retired redirects have their own lifecycle."""
+    promotion = conn.execute(
+        "SELECT status,target_question_id FROM question_promotion_requests WHERE pending_question_id=?",
+        (question_id,),
+    ).fetchone()
+    projection = conn.execute(
+        "SELECT owner_id,status FROM question_bank WHERE id=?", (question_id,)
+    ).fetchone()
+    if projection and projection["owner_id"] is None and projection["status"] == "pending":
+        raise HTTPException(status_code=409, detail="请使用发布申请的审核或撤回操作")
+    if promotion and (
+        promotion["status"] != "approved" or promotion["target_question_id"] != question_id
+    ):
+        raise HTTPException(status_code=409, detail="请使用发布申请的审核或撤回操作")

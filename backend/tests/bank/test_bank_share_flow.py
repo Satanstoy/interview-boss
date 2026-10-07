@@ -81,24 +81,24 @@ class TestDeterministicDedup:
 class TestShareEndpoint:
     """POST /api/master-bank/{id}/share"""
 
-    def test_share_matches_existing_merges_and_deletes_private(self, test_db):
+    def test_share_matches_existing_creates_pending_without_public_mutation(self, test_db):
         from app.routers.questions_pkg.share import share_private_question
 
         _seed_share_data(test_db)
         result = share_private_question(test_db, question_id=102, user_id=1)
 
-        assert result["result"] == "merged"
-        assert result["target_id"] == 100
-        # 公共题 frequency 增加
+        assert result["result"] == "pending"
+        assert result["pending_id"] is not None
+        # Sharing is not approval: the public canonical must remain unchanged.
         row = test_db.execute(
             "SELECT frequency FROM question_bank WHERE id = 100"
         ).fetchone()
-        assert row["frequency"] >= 3
+        assert row["frequency"] == 2
         # 私有副本软删除
         row = test_db.execute(
             "SELECT deleted_at FROM question_bank WHERE id = 102"
         ).fetchone()
-        assert row["deleted_at"] is not None
+        assert row["deleted_at"] is None
 
     def test_share_no_match_creates_pending_keeps_private(self, test_db):
         from app.routers.questions_pkg.share import share_private_question
@@ -192,15 +192,15 @@ class TestApproveRemovesPrivateCopy:
         )
         test_db.commit()
 
-        from app.routers.admin_review import _approve_cleanup_private_copy
+        from app.services.question_promotions import review_question_promotion
 
-        _approve_cleanup_private_copy(test_db, pending_id=301)
+        review_question_promotion(test_db, 301, 1, approve=True)
 
-        # 私有副本 101 被软删
+        # Historical text-only pending rows cannot establish private ownership consent.
         row = test_db.execute(
             "SELECT deleted_at FROM question_bank WHERE id = 101"
         ).fetchone()
-        assert row["deleted_at"] is not None
+        assert row["deleted_at"] is None
 
     def test_approve_keeps_unrelated_private(self, test_db):
         _seed_share_data(test_db)
@@ -211,9 +211,9 @@ class TestApproveRemovesPrivateCopy:
         )
         test_db.commit()
 
-        from app.routers.admin_review import _approve_cleanup_private_copy
+        from app.services.question_promotions import review_question_promotion
 
-        _approve_cleanup_private_copy(test_db, pending_id=302)
+        review_question_promotion(test_db, 302, 1, approve=True)
 
         # 私有题 101 未被删（文本不同）
         row = test_db.execute(

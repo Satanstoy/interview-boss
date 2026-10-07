@@ -84,14 +84,14 @@
                   </div>
                   <div class="flex gap-2 shrink-0">
                     <Button
-                      @click="handleApprove(item.id)"
-                      :disabled="processingIds.has(item.id)"
+                      @click="handleApprove(item)"
+                      :disabled="processingIds.has(reviewKey(item))"
                       size="sm"
                       class="bg-emerald-500 text-white hover:bg-emerald-600"
                     >通过</Button>
                     <Button
-                      @click="handleReject(item.id)"
-                      :disabled="processingIds.has(item.id)"
+                      @click="handleReject(item)"
+                      :disabled="processingIds.has(reviewKey(item))"
                       variant="destructive"
                       size="sm"
                     >拒绝</Button>
@@ -117,7 +117,7 @@
 
 <script setup>
 import { ref, watch } from 'vue'
-import { fetchPublicContributions, approvePublicContribution, rejectPublicContribution, fetchPendingQuestions, approveQuestion, rejectQuestion } from '@/api/index.js'
+import { fetchPublicContributions, approvePublicContribution, rejectPublicContribution, approveQuestion, rejectQuestion } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -142,18 +142,8 @@ watch(sourceType, () => { if (props.visible) loadPending() })
 async function loadPending() {
   loading.value = true
   try {
-    const [data, legacyData] = await Promise.all([
-      fetchPublicContributions({ sourceType: sourceType.value }),
-      !sourceType.value || sourceType.value === 'interview' ? fetchPendingQuestions() : Promise.resolve({ items: [] }),
-    ])
-    const contributionItems = data.items || []
-    const legacyItems = (legacyData.items || []).map(item => ({
-      ...item,
-      source_type: 'interview',
-      legacy: true,
-      summary: { company: '', round: '', job_title: '', item_count: 1, question_previews: [{ question: item.question }] },
-    }))
-    items.value = [...contributionItems, ...legacyItems]
+    const data = await fetchPublicContributions({ sourceType: sourceType.value })
+    items.value = data.items || []
   } catch (e) {
     showError('加载公共贡献失败: ' + (e.message || '未知错误'))
   } finally {
@@ -161,38 +151,44 @@ async function loadPending() {
   }
 }
 
-async function handleApprove(id) {
-  processingIds.value = new Set(processingIds.value).add(id)
+function reviewKey(item) {
+  return `${item.legacy ? 'legacy' : 'contribution'}-${item.id}`
+}
+
+async function handleApprove(item) {
+  const id = item.id
+  const key = reviewKey(item)
+  processingIds.value = new Set(processingIds.value).add(key)
   try {
-    const item = items.value.find(candidate => candidate.id === id)
     if (item?.legacy) await approveQuestion(id)
     else await approvePublicContribution(id)
-    items.value = items.value.filter(i => i.id !== id)
+    items.value = items.value.filter(i => reviewKey(i) !== key)
     success('已通过审核')
     emit('reviewed')
   } catch (e) {
     showError('审核失败: ' + (e.message || '未知错误'))
   } finally {
     const next = new Set(processingIds.value)
-    next.delete(id)
+    next.delete(key)
     processingIds.value = next
   }
 }
 
-async function handleReject(id) {
-  processingIds.value = new Set(processingIds.value).add(id)
+async function handleReject(item) {
+  const id = item.id
+  const key = reviewKey(item)
+  processingIds.value = new Set(processingIds.value).add(key)
   try {
-    const item = items.value.find(candidate => candidate.id === id)
     if (item?.legacy) await rejectQuestion(id)
     else await rejectPublicContribution(id)
-    items.value = items.value.filter(i => i.id !== id)
+    items.value = items.value.filter(i => reviewKey(i) !== key)
     success('已拒绝')
     emit('reviewed')
   } catch (e) {
     showError('操作失败: ' + (e.message || '未知错误'))
   } finally {
     const next = new Set(processingIds.value)
-    next.delete(id)
+    next.delete(key)
     processingIds.value = next
   }
 }

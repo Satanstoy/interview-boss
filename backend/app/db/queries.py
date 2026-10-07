@@ -175,9 +175,23 @@ def build_bank_where_clause(
         where = (
             f"WHERE ({prefix}owner_id = ? OR "
             f"({prefix}owner_id IS NULL AND {prefix}status = 'pending' "
-            f"AND {prefix}submitted_by = ?)) AND {deleted_filter}"
+            f"AND {prefix}submitted_by = ? AND NOT EXISTS (SELECT 1 FROM question_promotion_requests pending_p "
+            f"WHERE pending_p.pending_question_id = {prefix or 'question_bank.'}id AND pending_p.status != 'pending')) OR "
+            f"({prefix}owner_id IS NULL AND {prefix}status = 'approved' AND ("
+            "EXISTS (SELECT 1 FROM question_resolutions mine_r "
+            "JOIN questions_detail mine_qd ON mine_qd.id = mine_r.detail_id "
+            "LEFT JOIN interview mine_i ON mine_i.id = mine_qd.interview_id "
+            f"WHERE mine_r.canonical_id = {prefix or 'question_bank.'}id "
+            "AND mine_r.occurrence_scope = 'private' AND mine_r.occurrence_owner_id = ? "
+            "AND mine_r.canonical_scope = 'public' AND mine_r.status IN ('matched','created') "
+            "AND mine_r.invalidated_at IS NULL AND mine_qd.owner_id = ? AND mine_qd.deleted_at IS NULL "
+            "AND (mine_qd.interview_id IS NULL OR (mine_i.owner_id = ? AND mine_i.deleted_at IS NULL))) "
+            "OR EXISTS (SELECT 1 FROM question_promotion_requests mine_p "
+            f"WHERE mine_p.target_question_id = {prefix or 'question_bank.'}id "
+            "AND mine_p.requester_id = ? AND mine_p.status = 'approved')))) "
+            f"AND {deleted_filter}"
         )
-        params = [user_id, user_id]
+        params = [user_id] * 6
     else:
         raise ValueError(f"Unsupported filter_mode={filter_mode!r}")
 

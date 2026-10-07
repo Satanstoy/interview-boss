@@ -93,3 +93,35 @@ test('管理员可拒绝公共贡献', async ({ page }) => {
   await expect(page.getByText('已拒绝').first()).toBeVisible()
   await expect(page.getByText(/暂无待审核贡献/).first()).toBeVisible()
 })
+test('统一列表中相同ID的贡献和旧单题分别审核且不会重复展示', async ({ page }) => {
+  const requests = []
+  page.on('pageerror', e => console.log('ALIGNMENT_PAGE_ERROR', e.message))
+  page.on('console', m => { if (m.type() === 'error') console.log('ALIGNMENT_CONSOLE_ERROR', m.text()) })
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (!path.startsWith('/api/')) return route.continue()
+    requests.push({ path, method: route.request().method() })
+    if (path === '/api/admin/public-contributions') return route.fulfill({ json: { items: [
+      { ...CONTRIBUTION, id: 9, summary: { item_count: 1, question_previews: [{ question: 'NEW_CONTRIBUTION' }] } },
+      { id: 9, source_type: 'interview', legacy: true, summary: { item_count: 1, question_previews: [{ question: 'LEGACY_QUESTION' }] } },
+    ], total: 2 } })
+    if (path === '/api/master-bank/pending') return route.fulfill({ json: { items: [{ id: 9, question: 'LEGACY_QUESTION' }] } })
+    return route.fulfill({ json: { status: 'success', items: [], total: 0 } })
+  })
+  await page.route('**/__review_alignment', route => route.fulfill({ contentType: 'text/html', body: `
+    <html><body><div id="app"></div><script type="module">
+    import {createApp,ref,onMounted,h} from '/node_modules/.vite/deps/vue.js';
+    import Review from '/src/components/business/AdminReview.vue';
+    createApp({setup(){const visible=ref(false);onMounted(()=>visible.value=true);return()=>h(Review,{visible:visible.value})}}).mount('#app');
+    </script></body></html>` }))
+  await page.goto('/__review_alignment')
+  await expect(page.getByText('NEW_CONTRIBUTION', { exact: false })).toBeVisible()
+  await expect(page.getByText('1. LEGACY_QUESTION', { exact: true })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '通过', exact: true })).toHaveCount(2)
+  await page.getByRole('button', { name: '通过', exact: true }).nth(1).click()
+  await expect.poll(() => requests.some(r => r.path === '/api/master-bank/approve/9' && r.method === 'POST')).toBe(true)
+  await expect(page.getByText('1. NEW_CONTRIBUTION')).toBeVisible()
+  await expect(page.getByText('1. LEGACY_QUESTION')).toHaveCount(0)
+  await page.getByRole('button', { name: '通过', exact: true }).click()
+  await expect.poll(() => requests.some(r => r.path === '/api/admin/public-contributions/9/approve' && r.method === 'POST')).toBe(true)
+})

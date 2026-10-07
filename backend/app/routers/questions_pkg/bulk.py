@@ -4,7 +4,7 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user
-from app.routers.questions_pkg.permissions import assert_question_writable
+from app.routers.questions_pkg.permissions import assert_question_writable, assert_question_lifecycle_mutable
 from app.core.cache import invalidate_master_bank_cache
 from app.db.connection import (
     get_db_connection,
@@ -43,6 +43,7 @@ async def delete_original_question(
     uid = user["id"]
 
     def _delete():
+        original_q = req.original_question.strip()
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("BEGIN")
@@ -58,6 +59,8 @@ async def delete_original_question(
                     row["owner_id"], user, not_found="未找到该题目",
                     public_forbidden="无权删除公共题目中的问题",
                 )
+
+                assert_question_lifecycle_mutable(conn, question_id)
 
                 orig_qs = (
                     json.loads(row["original_questions"])
@@ -256,6 +259,7 @@ async def delete_master_question(
 ):
     def _delete():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             row = cursor.execute(
                 "SELECT id, question, sources, owner_id FROM question_bank WHERE id = ? AND deleted_at IS NULL",
@@ -270,6 +274,7 @@ async def delete_master_question(
                 row["owner_id"], user, not_found="未找到该题目，可能已被删除",
                 public_forbidden="无权删除公共题目",
             )
+            assert_question_lifecycle_mutable(conn, question_id)
 
             cursor.execute(
                 "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
@@ -298,6 +303,7 @@ async def batch_delete_master_bank(
 
     def _batch_delete():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
@@ -313,6 +319,8 @@ async def batch_delete_master_bank(
                     row["owner_id"], user, not_found="未找到任何匹配记录",
                     public_forbidden=f"无权删除公共题目 (id={row['id']})",
                 )
+            for row in rows:
+                assert_question_lifecycle_mutable(conn, row["id"])
             rows = [row for row in rows if row["deleted_at"] is None]
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
@@ -369,6 +377,7 @@ async def restore_master_question(
 
     def _restore():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT id, owner_id FROM question_bank WHERE id = ? AND deleted_at IS NOT NULL",
                 (question_id,),
@@ -379,6 +388,7 @@ async def restore_master_question(
                 row["owner_id"], user, not_found="未找到回收站中的题目",
                 public_forbidden="无权恢复公共题目",
             )
+            assert_question_lifecycle_mutable(conn, question_id)
             conn.execute(
                 "UPDATE question_bank SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (question_id,),
@@ -404,6 +414,7 @@ async def batch_restore_master_bank(
 
     def _restore():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             placeholders = ",".join("?" * len(req.ids))
             rows = conn.execute(
                 f"SELECT id, owner_id, deleted_at FROM question_bank WHERE id IN ({placeholders})",
@@ -416,6 +427,8 @@ async def batch_restore_master_bank(
                     row["owner_id"], user, not_found="未找到回收站中的题目",
                     public_forbidden=f"无权恢复公共题目 (id={row['id']})",
                 )
+            for row in rows:
+                assert_question_lifecycle_mutable(conn, row["id"])
             rows = [row for row in rows if row["deleted_at"] is not None]
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到回收站中的题目")
