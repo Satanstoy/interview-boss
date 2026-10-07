@@ -1,0 +1,10 @@
+severity	dim	location	title	fix	effort	confidence
+4	D5	backend/app/routers/questions_pkg/share.py:155	旧分享精确命中公共题时绕过申请审核直接写公共规范题	所有私人公共化先生成快照申请并经审核投影处理	TBD	confirmed-http-sqlite
+3	D2	backend/app/routers/public_contributions.py:143	统一审核台只计数旧pending题却不返回待审条目	统一列表返回兼容条目并实现可访问的审核入口	TBD	confirmed-http-sqlite
+3	D5	backend/app/db/queries.py:174	本人私人原题引用公共canonical后mine题库缺题	将有效私人resolution关联的公共canonical接入mine查询	TBD	confirmed-http-sqlite
+4	D14	backend/app/db/operations.py:879	旧worker generation失效后公共上传持久化仍提交业务成果	在实际业务写事务内检查job fence及输入版本并提供独立续租	TBD	confirmed-sqlite-node
+3	D15	frontend/src/components/business/UploadTaskCenter.vue:136	上传root任务历史固定第一页20条且无分页入口	提供上传root历史分页或加载更多并维持已加载状态	TBD	confirmed-browser-component-mocked-api
+3	D15	frontend/src/components/business/UploadTaskCenter.vue:290	查看进度审核额度摘要动作渲染按钮但无处理分支	为服务端允许动作实现明确展示或导航	TBD	confirmed-browser-summary-and-source
+2	D15	frontend/src/components/business/UploadTaskCenter.vue:246	新任务接受后不立即入卡打开或回焦也不立即刷新	接入接受事件和可见性焦点刷新并保留用户隔离	TBD	source-confirmed
+3	D15	frontend/src/components/business/UploadTaskCenter.vue:146	列表响应可覆盖较新SSE快照且同revision业务状态被接受	所有快照入口按严格递增revision合并	TBD	needs-verification
+3	D14	backend/app/agents/submit/persist_personal.py:208	私人上传成果提交入队和import关联分属多个事务	把业务成果import关联与下游outbox纳入原子事务	TBD	needs-verification
