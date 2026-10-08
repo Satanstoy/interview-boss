@@ -29,6 +29,8 @@ test('real SQLite pagination and public share task target stay aligned', async (
           query: Object.fromEntries(url.searchParams.entries()),
           body: await response.json(),
         })
+        // Retain actual requests even when an early assertion fails.
+        writeFileSync(`${tracePath}.responses.json`, JSON.stringify(responses, null, 2))
       } catch {
         // The test assertions below report a missing/invalid response.
       }
@@ -58,7 +60,10 @@ test('real SQLite pagination and public share task target stay aligned', async (
   const login = await loginResponse.json()
   expect(login.user.username).toBe(USERNAME)
 
-  await page.goto('/')
+  await page.goto('/master-bank')
+  // Login navigation and the initial view must settle before testing sidebar clicks.
+  await expect(page).toHaveURL(/\/master-bank(?:\?|$)/)
+  await expect(page.locator('main').getByText('高频题库', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '面经库' }).click()
   await expect(page.getByRole('heading', { name: '面经库' })).toBeVisible()
   await expect(page.locator('[data-row-id]')).toHaveCount(20)

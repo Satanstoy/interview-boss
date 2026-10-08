@@ -51,6 +51,7 @@ copy_success_artifacts() {
     ac028-browser-result.png \
     ac028-browser-result.json \
     ac001-ac002-browser-result.json \
+    ac001-ac002-browser-result.json.responses.json \
     ac001-ac002-db-trace.json \
     ac022-browser-result.json \
     ac022-db-trace.json \
@@ -102,6 +103,7 @@ copy_success_artifacts() {
     ac009-same-second.json \
     ac009-db-trace.json \
     ac029-browser-result.json \
+    ac029-first-pass-resolutions.json \
     ac029-db-trace.json; do
     if [ -f "$TEMP_ARTIFACTS/$name" ]; then
       mkdir -p "$artifact_dir"
@@ -1032,6 +1034,8 @@ control_ac029_worker() {
   while [ "$attempt" -lt 7200 ]; do
     if [ -f "$ac029_control.stop" ]; then
       compose stop worker >>"$ac029_monitor_log" 2>&1
+      compose exec -T backend python /app/backend/e2e/capture_ac029_resolutions.py \
+        "$(cat "$ac029_control.stop")" >"$TEMP_ARTIFACTS/ac029-first-pass-resolutions.json" || return 1
       touch "$ac029_control.stopped"
       break
     fi
@@ -1084,8 +1088,8 @@ print(trace["import_id"], trace["contribution_request_id"])
 PY
 )
 compose exec -T backend python /app/backend/e2e/assert_ac029_public_trace.py \
-  "$ac029_import_id" "$ac029_request_id" \
-  >"$TEMP_ARTIFACTS/ac029-db-trace.json"
+  "$ac029_import_id" "$ac029_request_id" --baseline-stdin \
+  <"$TEMP_ARTIFACTS/ac029-first-pass-resolutions.json" >"$TEMP_ARTIFACTS/ac029-db-trace.json"
 fi
 
 # AC-009: two authenticated browsers enqueue distinct private interviews while

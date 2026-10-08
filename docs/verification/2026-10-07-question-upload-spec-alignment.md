@@ -62,7 +62,7 @@ UPLOAD_TEST_DB_PATH="$spec_test_dir/test.sqlite3" UPLOAD_TEST_REDIS_PREFIX="spec
  backend/tests/services/test_upload_leases.py backend/tests/security/test_upload_task_budget_scope.py -q
 ```
 
-## 单元3：任务中心（实现与定向验证通过，待 checkpoint）
+## 单元3：任务中心（已本地提交 ca454d2f）
 
 新增历史分页、summary/progress/review/budget内容、打开/回焦/接收任务即时刷新，严格递增revision合并并防账号旧响应。budget接口仅所有者可读，管理员他人任务与不存在均404。新UI行为9项先红后绿；预算JWT/真实路由/SQLite权限3项先红后绿。真实Vue组件及整应用API mock浏览器回归44 passed，1.5m（`/tmp/spec-align-ui-latest.log`）；eslint通过、build成功5.48s（既有chunk大小警告）。这组UI测试不等于真实栈验收。
 
@@ -77,4 +77,46 @@ npm run build
 
 当前隔离Docker/SQLite/Redis/HTTP模型stub的 AC001/002 面经分页与公共任务跳转：1 passed，1.9m。命令 `REAL_STACK_PORT=18121 REAL_STACK_STUB_PORT=18122 REAL_STACK_CAPTURE_FAILURE_DB=1 bash /tmp/spec-align-ac001.sh`，临时runner使用原smoke初始化与完整AC001/002块，跳过无关的前置AC011。证据：`test-results/real-stack/interview-boss-real-e2e-3881165-1791439855/`。本次正确发出page2、season、asc和page size请求。此前分页失败本次未复现，未凭猜测修改产品分页代码；浏览器测试增加中途响应证据保存以便下次失败定位。
 
-公共贡献AC029正在当前镜像执行；新增公共分类/标签和恢复前成功resolution身份断言，尚不能宣称通过。当前未执行整个默认smoke与全部AC、实际外部模型及生产环境；不宣称所有spec验收完成。
+公共贡献AC029独立候选栈：浏览器1 passed，14.8m，最终SQLite断言exit0。核对私人/公共明细及公共canonical分类标签；worker停止后保存三项成功结果detail/resolution/canonical ID，恢复后相同。项目`interview-boss-real-e2e-3892085-1791440069`，日志`/tmp/spec-align-ac029-latest.log`。最终分类/标签断言助手复制到该明确隔离backend容器后执行；运行中的产品代码未变。首轮临时ID文件实际用于最终比对，但旧success retention未保存该文件；脚本已加入保留，完整smoke重跑会重新产生并归档。
+
+AC010当前候选1 passed，39.2s；AC024当前候选1 passed，30.2s，均有最终DB断言exit0。项目分别`interview-boss-real-e2e-3932895-1791440459`、`interview-boss-real-e2e-3949429-1791440556`。归档DB证据位于`docs/verification/upload-recovery/2026-10-08-spec-alignment/`，仅确定性隔离fixture字段，不提交浏览器认证token。
+
+```bash
+python3 .tech-audit/work/2026-10-07/make_ac029_runner.py
+REAL_STACK_PORT=18131 REAL_STACK_STUB_PORT=18132 REAL_STACK_CAPTURE_FAILURE_DB=1 bash /tmp/spec-review-ac029.sh
+REAL_STACK_PORT=18151 REAL_STACK_STUB_PORT=18152 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_ONLY_AC010=1 bash scripts/real_stack_smoke.sh
+REAL_STACK_PORT=18161 REAL_STACK_STUB_PORT=18162 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_ONLY_AC024=1 bash scripts/real_stack_smoke.sh
+```
+
+### 广回归与旧fixture对齐
+
+最新题库/权限175 passed，1 warning，153.49s（`/tmp/spec-align-bank-final.log`，沿用单元1完整命令）；最新题库相关鉴权/上传/恢复广回归463 passed，1 warning，271.11s（`/tmp/spec-align-broad-green.log`）。额外服务回归75 passed/21 skipped，22.67s；21项为需要单独隔离环境的另一个Redis integration harness，未冒充通过。4项fullstack的显式隔离命令见单元2。
+
+广回归先9 failed/454 passed，315.33s：5个restore fixture引用不存在的岗位；匹配回归缺恢复原稿/执行身份或仍断言已不调用的SQL mock；收尾fixture检查点未绑定本job。仅修这些测试条件，不放宽生产校验，移除SQL writer/入队mock改真实SQL断言。修正后相关70 passed，1 warning，47.78s（`/tmp/spec-align-fixtures-final.log`），再跑完整463全绿。该测试单元已提交`5d0a6640`。`test_upload_credential_preflight_job.py`的两个ruff错误由`git show HEAD:<file> | ruff check --stdin-filename ... -`确认预先存在，未顺手修复。其他新改动ruff、eslint、shell/Node语法与diff check通过。
+
+```bash
+OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest \
+ backend/tests/pipeline/test_upload_*.py \
+ backend/tests/pipeline/test_public_personal_scope_contract.py \
+ backend/tests/pipeline/test_interview_server_pagination.py \
+ backend/tests/services/test_upload_*.py backend/tests/services/test_public_contribution*.py \
+ backend/tests/services/test_question_resolutions.py backend/tests/security/test_upload_task_privacy.py \
+ backend/tests/security/test_private_question_write_boundary.py backend/tests/infra/test_upload_*.py \
+ backend/tests/integration/test_upload_question_data_flow.py \
+ backend/tests/integration/test_upload_question_data_flow_worker.py -q --show-capture=no
+```
+
+### 完整smoke进展与失败证据
+
+完整候选smoke第一次被磁盘耗尽中止；相关SQLite/容器启动失败不算产品失败。只回收本轮临时测试数据库、已退出候选镜像和按明确ID匹配的本轮BuildKit缓存，保留baseline文件、容器和镜像。后续175/463与AC010/024重跑全绿。
+
+`/tmp/spec-align-smoke-final-v2.log`已通过AC011（2.0m）、AC001/002（1.2m）、AC022（14.1s）、AC007浏览器（28.7s），在AC007 DB assertion停止。根因是旧脚本对共享数据库全局attempt数断言2，计入AC011其他owner任务；新增真实SQLite回归1 failed（4!=2）→1 passed，0.67s；按owner root计数且额外本owner attempt仍检出3。生产代码未变。
+
+此前分页失败中一次trace明确显示初始登录导航尚未进入面经页、无面经API请求，已等待初始/master-bank及main view就绪再点击侧栏，无固定sleep。更早page2/升序失败未在独立候选复现，不将它们全部归因于这次导航证据。完整新smoke正在重跑（`/tmp/spec-align-smoke-final-v4.log`），不能提前标整体通过。
+
+```bash
+OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest backend/tests/infra/test_ac007_trace_scope.py -q
+REAL_STACK_PORT=18141 REAL_STACK_STUB_PORT=18142 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 bash scripts/real_stack_smoke.sh
+```
+
+当前未验收：完整默认smoke余下场景、全部原始AC的所有子场景、特殊支持访问产品流程、历史私人题重建完全收敛、实际外部模型质量/费用与生产历史脏数据、长期多进程故障与真实设备读屏。44项UI suite包含375/1440及键盘操作行为，但不能推导完整真实设备无障碍验收。未部署或推送。

@@ -26,7 +26,7 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def main(import_id: str, request_id: int) -> None:
+def main(import_id: str, request_id: int, baseline: list | None = None) -> None:
     with get_db_connection() as conn:
         root = conn.execute(
             "SELECT id, requester_id, target_intent, source_type, interview_id, "
@@ -70,6 +70,9 @@ def main(import_id: str, request_id: int) -> None:
         require(all(row["cat2"] == "B1.Agent架构与范式" for row in private_details),
                 "private category 2 differs from the system taxonomy")
 
+        require(all(row["tags"] == "Agent架构设计" for row in private_details),
+                "private tags differ from deterministic classification")
+
         private_canonical = conn.execute(
             "SELECT canonical_id, canonical_scope, status FROM question_resolutions "
             "WHERE detail_id = ? AND occurrence_scope = 'private' "
@@ -109,7 +112,7 @@ def main(import_id: str, request_id: int) -> None:
 
         item_rows = conn.execute(
             "SELECT i.id, i.ordinal, i.status, i.source_item_id, i.public_detail_id, "
-            "i.error_message, i.review_json, i.snapshot_json, d.question, d.source_ordinal "
+            "i.error_message, i.review_json, i.snapshot_json, d.question, d.source_ordinal, d.cat1, d.cat2, d.tags "
             "FROM public_contribution_items i LEFT JOIN questions_detail d "
             "ON d.id = i.public_detail_id WHERE i.request_id = ? ORDER BY i.ordinal",
             (request_id,),
@@ -137,8 +140,12 @@ def main(import_id: str, request_id: int) -> None:
             expected_question = EDITED_QUESTION if source_ordinal == 10 else SOURCE_QUESTIONS[source_ordinal]
             require(item["question"] == expected_question,
                     f"public detail text does not match reviewed projection for ordinal {source_ordinal}")
+            require(item["cat1"] == "B.Agent与LLM应用" and item["cat2"] == "B1.Agent架构与范式",
+                    f"public classification changed for ordinal {source_ordinal}")
+            require(item["tags"] == "Agent架构设计",
+                    f"public tags changed for ordinal {source_ordinal}")
             resolution = conn.execute(
-                "SELECT r.canonical_id, r.canonical_scope, r.status, qb.owner_id, qb.question "
+                "SELECT r.id AS resolution_id, r.canonical_id, r.canonical_scope, r.status, qb.owner_id, qb.question, qb.cat1 AS canonical_cat1, qb.cat2 AS canonical_cat2, qb.tags AS canonical_tags "
                 "FROM question_resolutions r JOIN question_bank qb ON qb.id = r.canonical_id "
                 "WHERE r.detail_id = ? AND r.occurrence_scope = 'public' "
                 "AND r.occurrence_owner_id IS NULL AND r.invalidated_at IS NULL "
@@ -153,6 +160,10 @@ def main(import_id: str, request_id: int) -> None:
                     f"ordinal {source_ordinal} resolution is not successful")
             require(resolution["canonical_scope"] == "public" and resolution["owner_id"] is None,
                     f"ordinal {source_ordinal} resolved outside public scope")
+            require(resolution["canonical_cat1"] == "B.Agent与LLM应用" and resolution["canonical_cat2"] == "B1.Agent架构与范式",
+                    f"public canonical classification changed for ordinal {source_ordinal}")
+            require(resolution["canonical_tags"] == "Agent架构设计",
+                    f"public canonical tags changed for ordinal {source_ordinal}")
             if source_ordinal == 20:
                 require(int(resolution["canonical_id"]) == int(preseed["id"]),
                         "published matched item changed canonical")
@@ -167,7 +178,20 @@ def main(import_id: str, request_id: int) -> None:
                 "question": item["question"],
                 "canonical_id": int(resolution["canonical_id"]),
                 "resolution_status": resolution["status"],
+                "resolution_id": int(resolution["resolution_id"]),
+                "cat1": item["cat1"], "cat2": item["cat2"], "tags": item["tags"],
+                "canonical_cat1": resolution["canonical_cat1"],
+                "canonical_cat2": resolution["canonical_cat2"],
+                "canonical_tags": resolution["canonical_tags"],
             })
+
+        if baseline is not None:
+            require(len(baseline) == 3, "first pass must contain three successful resolutions")
+            for previous in baseline:
+                current = next((row for row in trace_items if row["contribution_item_id"] == previous["contribution_item_id"]), None)
+                require(current is not None, "successful item disappeared during retry")
+                require(all(current[key] == previous[key] for key in ("public_detail_id", "resolution_id", "canonical_id")),
+                        "retry replaced an already successful detail or resolution")
 
         require(set(published_by_source_ordinal) == {10, 20, 30, 40},
                 "final published source ordinals are not exactly the four retained questions")
@@ -222,6 +246,7 @@ def main(import_id: str, request_id: int) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: assert_ac029_public_trace.py <import_id> <request_id>")
-    main(sys.argv[1], int(sys.argv[2]))
+    if len(sys.argv) not in (3, 4):
+        raise SystemExit("usage: assert_ac029_public_trace.py <import_id> <request_id> [--baseline-stdin]")
+    baseline = json.load(sys.stdin) if len(sys.argv) == 4 and sys.argv[3] == "--baseline-stdin" else None
+    main(sys.argv[1], int(sys.argv[2]), baseline)

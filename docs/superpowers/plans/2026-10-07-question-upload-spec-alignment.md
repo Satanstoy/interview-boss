@@ -16,13 +16,13 @@
 6. 修改backend/app/routers/public_contributions.py统一返回规范化legacy条目及正确total；修改frontend/src/components/business/AdminReview.vue使用统一列表、按类型+ID路由操作避免ID碰撞。行为测试验证混合新旧申请与题库/JD过滤。
 7. 更新旧backend/tests/bank/test_bank_share_flow.py中立即发布和文本猜测清理的错误期望，补真实批准回归。运行新增security、bank share、public contributions、question resolutions、private write boundary全部相关测试，ruff、git diff --check，独立review后本地提交。
 
-## 单元2：实际业务事务的worker边界
+## 单元2：实际业务事务的worker边界（已提交4b20c83c，40+22回归通过）
 
 8. 添加真实SQLite持久化节点回归：generation失效、lease过期、job结束、root取消/源状态变化时零成果；合法代次完整提交；公共和私人事务故障回滚所有实体/关联/队列。
 9. 修改backend/app/db/operations.py、backend/app/agents/submit/persist_public.py：job_id/generation传入实际写事务，BEGIN IMMEDIATE内验证fence和root输入有效性；rooted job不能缺执行身份。并调查私人persist_personal.py事务缝隙，以崩溃/rollback测试决定原子修复。
 10. 检查backend/app/worker.py执行租约续期，添加独立续租与失效取消行为测试，只修确认缺口。运行job fence、upload recovery、data-flow worker集成回归，修复有效岗位fixture/跨测试污染根因，不削弱岗位失效保护。本地提交验证单元。
 
-## 单元3：任务中心可达性与快照一致性
+## 单元3：任务中心可达性与快照一致性（已提交ca454d2f，44浏览器回归通过）
 
 11. frontend/tests/e2e/upload-task-center.spec.js添加当前组件行为回归：25条历史访问第2页、summary/progress/review/budget动作内容、接受任务/打开/回焦即时刷新、延迟列表与同revision不能覆盖较新SSE、账号切换拒绝旧响应、错误保留旧快照。使用现有Playwright启动方式，逐项确认红。
 12. 修改frontend/src/components/business/UploadTaskCenter.vue及提交事件对应模块：增加可达历史分页、实现allowed_actions展示、接入即时刷新、统一严格递增revision合并和账号隔离；375/1440键盘按钮和焦点核对。只改任务中心相关流。
@@ -34,3 +34,5 @@
 15. 更新docs/verification/2026-10-07-question-upload-spec-alignment.md逐项记录红绿、命令、已关闭/仍未验证边界；保留历史审计结论，不把未执行AC标成通过。独立code-review、verification检查后提交报告。
 
 单元1复审扩展：通用题库变异与公共维护须排除申请投影；source/target外键SET NULL，pending ID作为独立不可变档案标识，无FK。新增43项spec行为回归。具体命令与红绿证据见 docs/verification/2026-10-07-question-upload-spec-alignment.md。
+
+2026-10-08复验：463项广回归全绿；旧恢复fixture已提交5d0a6640。AC001/002、AC010、AC024、增强分类/标签及resolution身份的AC029独立当前栈通过。完整smoke继续执行，不提前标全AC完成。已发现并纠正共享栈AC007全局attempt计数与分页初始导航测试前置条件，保留行为断言。

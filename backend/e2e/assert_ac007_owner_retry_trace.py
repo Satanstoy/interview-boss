@@ -9,6 +9,13 @@ import time
 from app.db.connection import get_db_connection
 
 
+def count_owner_attempts(conn, owner_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM upload_attempts a JOIN upload_imports r ON r.id=a.import_id "
+        "WHERE r.requester_id=?", (owner_id,),
+    ).fetchone()[0]
+
+
 def main() -> None:
     import_id, checkpoint_hash = sys.argv[1:3]
     rootless_queue_id = int(sys.argv[3]) if len(sys.argv) > 3 else None
@@ -164,7 +171,7 @@ def main() -> None:
             ).fetchone()[0]
             if linked_roots:
                 raise AssertionError("rootless retry unexpectedly created an upload root")
-            attempts_total = conn.execute("SELECT COUNT(*) FROM upload_attempts").fetchone()[0]
+            attempts_total = count_owner_attempts(conn, int(root_row["requester_id"]))
             if attempts_total != 2:
                 raise AssertionError("rootless retry unexpectedly created an upload attempt")
             rootless_jobs = conn.execute(
