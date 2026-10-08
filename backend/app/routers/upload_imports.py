@@ -491,6 +491,23 @@ async def get_upload_import(import_id: str, user: dict = Depends(get_current_use
     return await run_db(_query)
 
 
+@router.get("/api/upload-imports/{import_id}/budget")
+async def get_upload_budget(import_id: str, user: dict = Depends(get_current_user)):
+    """Cumulative ledger usage for one's task, without other users' quota data."""
+    def _query():
+        with get_db_connection() as conn:
+            _load_owned(conn, import_id, user["id"])
+            usage = conn.execute(
+                "SELECT COUNT(*) AS calls, COALESCE(SUM(input_tokens),0) AS input_tokens, "
+                "COALESCE(SUM(output_tokens),0) AS output_tokens, "
+                "COALESCE(SUM(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL THEN 1 ELSE 0 END),0) AS unknown_calls "
+                "FROM upload_llm_calls WHERE root_import_id=?", (import_id,),
+            ).fetchone()
+            return {"import_id": import_id, **dict(usage),
+                    "total_tokens": usage["input_tokens"] + usage["output_tokens"]}
+    return await run_db(_query)
+
+
 OPERATION_FIELDS = (
     "import_id",
     "job_type",

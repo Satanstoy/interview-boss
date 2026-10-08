@@ -373,6 +373,10 @@ export function clearDraftKey(draftId) {
  * 幂等提交：同键同内容返回同一根任务；响应丢失先 by-key 查询，绝不直接新建。
  * 返回 { ...importSnapshot, created, idempotency_key }。
  */
+function announceUploadAccepted(result) {
+  if (result?.import_id || result?.job_id) window.dispatchEvent(new Event('upload-task-accepted'))
+}
+
 export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
   const key = getDraftKey(draftId) || createIdempotencyKey()
   rememberDraftKey(draftId, key)
@@ -381,6 +385,7 @@ export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
   try {
     const existing = await fetchUploadImportByKey(key)
     if (existing?.import_id) {
+      announceUploadAccepted(existing)
       return { ...existing, created: false, idempotency_key: key }
     }
   } catch {
@@ -389,12 +394,14 @@ export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
 
   try {
     const result = await createSubmitJobWithKey(formData, key)
+    announceUploadAccepted(result)
     return { ...result, idempotency_key: key }
   } catch (err) {
     // 2) 响应可能已到达服务端：再查一次 by-key，绝不重复创建
     try {
       const recovered = await fetchUploadImportByKey(key)
       if (recovered?.import_id) {
+        announceUploadAccepted(recovered)
         return { ...recovered, created: false, idempotency_key: key }
       }
     } catch { /* 保持原始错误 */ }

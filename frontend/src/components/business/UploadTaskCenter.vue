@@ -14,7 +14,7 @@ import {
   loadUploadTasks,
   retryUploadTask,
 } from '@/composables/useSubmitJobs.js'
-import { getSSE } from '@/services/http.js'
+import { get, getSSE } from '@/services/http.js'
 import {
   fetchInterviewLocation,
   fetchPersonalAnalysisFailures,
@@ -41,12 +41,16 @@ const busyIds = ref(new Set())
 const announcement = ref('')
 const triggerButton = ref(null)
 const closeButton = ref(null)
+const activeDetail = ref(null)
+const detailTask = computed(() => tasks.value.find(task => task.import_id === activeDetail.value?.importId))
+const reviewLabel = { pending: '待审核', pending_review: '待审核', approved_for_processing: '审核通过，处理中', published: '已发布', partially_published: '部分已发布', rejected: '已拒绝', withdrawn: '已撤回', changes_requested: '需要修改' }
 
 const PAGE_SIZE = 20
 const PERSONAL_FAILURE_PAGE_SIZE = 20
 const PERSONAL_FAILURE_REFRESH_BATCH_SIZE = 5000
 let pollTimer = null
 let activeUserId = null
+const taskSnapshots = new Map()
 let refreshSequence = 0
 let personalFailureLoadMoreSequence = 0
 
@@ -66,6 +70,13 @@ async function refreshPersonalFailureRange(loadedCount) {
     if (!cursor || !result.items?.length) break
   }
   return { items, total, page: 1, page_size: loadedCount }
+}
+
+function rememberSnapshot(snapshot) {
+  const previous = taskSnapshots.get(snapshot.import_id)
+  if (previous && Number(snapshot.revision || 0) <= Number(previous.revision || 0)) return previous
+  taskSnapshots.set(snapshot.import_id, snapshot)
+  return snapshot
 }
 
 const statusLabel = {
@@ -114,6 +125,7 @@ async function refresh({ silent = true } = {}) {
   personalAnalysisFailureRefreshing.value = true
   const requestedUserId = currentUser.value?.id == null ? null : String(currentUser.value.id)
   if (!requestedUserId) {
+    activeDetail.value = null
     tasks.value = []
     personalAnalysisFailures.value = []
     personalAnalysisFailurePage.value = 1
@@ -143,7 +155,7 @@ async function refresh({ silent = true } = {}) {
     const errors = []
     if (dataResult.status === 'fulfilled') {
       const data = dataResult.value
-      tasks.value = data.items || []
+      tasks.value = (data.items || []).map(rememberSnapshot)
       uploadTaskTotal.value = data.total || 0
       const changed = tasks.value.filter((task) => isTerminalStatus(task.status))
       if (changed.length) {
@@ -200,18 +212,19 @@ const sseControllers = new Map()
 function subscribePendingTasks() {
   for (const task of tasks.value) {
     if (isTerminalStatus(task.status) || sseControllers.has(task.import_id)) continue
+    const requestedUserId = activeUserId
     const controller = new AbortController()
     sseControllers.set(task.import_id, controller)
     getSSE(
       `/api/upload-imports/${encodeURIComponent(task.import_id)}/stream`,
       (event) => {
         if (!event || typeof event !== 'object') return
-        if (activeUserId !== String(currentUser.value?.id ?? '')) return
+        if (controller.signal.aborted || requestedUserId !== activeUserId || activeUserId !== String(currentUser.value?.id ?? '')) return
         const index = tasks.value.findIndex((item) => item.import_id === event.import_id)
         if (index < 0) return
         // 乱序 revision 不回退（AC-010）
-        if ((event.revision || 0) < (tasks.value[index].revision || 0)) return
-        tasks.value.splice(index, 1, { ...tasks.value[index], ...event })
+        if ((event.revision || 0) <= (tasks.value[index].revision || 0)) return
+        tasks.value.splice(index, 1, rememberSnapshot(event))
         if (isTerminalStatus(event.status)) {
           announcement.value = `任务状态更新：${event.import_id} ${statusLabel[event.status] || event.status}`
         }
@@ -246,7 +259,10 @@ function stopTaskStreams() {
 async function toggleTaskCenter() {
   open.value = !open.value
   await nextTick()
-  if (open.value) closeButton.value?.focus()
+  if (open.value) {
+    closeButton.value?.focus()
+    await refresh({ silent: true })
+  }
   else triggerButton.value?.focus()
 }
 
@@ -261,6 +277,8 @@ watch(
   (nextUserId) => {
     stopTaskStreams()
     activeUserId = nextUserId
+    taskSnapshots.clear()
+    activeDetail.value = null
     tasks.value = []
     personalAnalysisFailures.value = []
     personalAnalysisFailurePage.value = 1
@@ -287,7 +305,33 @@ function schedulePoll() {
   }, 15_000)
 }
 
+async function changeUploadPage(nextPage) {
+  if (loading.value || nextPage < 1 || nextPage > Math.ceil(uploadTaskTotal.value / PAGE_SIZE)) return
+  page.value = nextPage
+  activeDetail.value = null
+  stopTaskStreams()
+  await refresh({ silent: false })
+}
+
+function refreshOnFocus() {
+  if (currentUser.value?.id && document.visibilityState === 'visible') refresh({ silent: true })
+}
+
 async function onAction(task, action) {
+  if (['view_summary', 'view_progress', 'view_review_status', 'view_budget'].includes(action)) {
+    const detail = { importId: task.import_id, action, budget: null, requestId: Symbol() }
+    activeDetail.value = detail
+    if (action === 'view_budget') {
+      const userId = currentUser.value?.id
+      try {
+        const budget = await get(`/api/upload-imports/${encodeURIComponent(task.import_id)}/budget`, { noCache: true })
+        if (currentUser.value?.id === userId && activeDetail.value?.requestId === detail.requestId) activeDetail.value = { ...detail, budget }
+      } catch (err) {
+        if (currentUser.value?.id === userId) error.value = err?.message || '用量加载失败'
+      }
+    }
+    return
+  }
   if (action === 'open_result') {
     await openResult(task)
     return
@@ -316,11 +360,11 @@ async function onAction(task, action) {
     try {
       const snapshot = await retryUploadTask(task.import_id)
       const index = tasks.value.findIndex((item) => item.import_id === task.import_id)
-      if (index >= 0 && snapshot) tasks.value.splice(index, 1, { ...tasks.value[index], ...snapshot })
+      if (index >= 0 && snapshot) tasks.value.splice(index, 1, rememberSnapshot(snapshot))
+      await refresh({ silent: true })
       announcement.value = snapshot?.created_attempt === false
         ? '已有恢复任务正在继续处理未完成步骤'
         : '恢复请求已提交，将继续未完成步骤'
-      await refresh({ silent: true })
     } catch (err) {
       error.value = err?.message || '恢复失败，请稍后重试'
     } finally {
@@ -438,9 +482,15 @@ async function openResult(task) {
 
 onMounted(() => {
   schedulePoll()
+  window.addEventListener('focus', refreshOnFocus)
+  window.addEventListener('upload-task-accepted', refreshOnFocus)
+  document.addEventListener('visibilitychange', refreshOnFocus)
 })
 
 onUnmounted(() => {
+  window.removeEventListener('focus', refreshOnFocus)
+  window.removeEventListener('upload-task-accepted', refreshOnFocus)
+  document.removeEventListener('visibilitychange', refreshOnFocus)
   if (pollTimer) clearTimeout(pollTimer)
   stopTaskStreams()
 })
@@ -602,6 +652,27 @@ onUnmounted(() => {
           </li>
         </ul>
 
+        <section v-if="activeDetail && detailTask" role="region" :aria-label="actionLabel[activeDetail.action]" class="border-t px-4 py-3 text-xs space-y-1">
+          <div class="flex justify-between"><strong>{{ actionLabel[activeDetail.action] }}</strong><button type="button" aria-label="关闭任务详情" @click="activeDetail = null">关闭详情</button></div>
+          <template v-if="activeDetail.action === 'view_summary'">
+            <p>已识别题目 {{ detailTask.counts?.extracted ?? '待确认' }} · 保留 {{ detailTask.counts?.retained ?? '待确认' }} · 排除 {{ detailTask.counts?.excluded ?? '待确认' }}</p>
+            <p>答案成功 {{ detailTask.counts?.answered ?? 0 }} · 失败 {{ detailTask.counts?.failed ?? 0 }}</p>
+          </template>
+          <template v-else-if="activeDetail.action === 'view_progress'">
+            <p>处理进度：{{ statusLabel[detailTask.status] || detailTask.status }}</p>
+            <p>当前阶段：{{ detailTask.stage || '等待下一阶段' }} · {{ detailTask.progress?.completed ?? 0 }}/{{ detailTask.progress?.total ?? '待确认' }}</p>
+          </template>
+          <p v-else-if="activeDetail.action === 'view_review_status'">审核状态：{{ reviewLabel[detailTask.review_status] || '尚未提交审核' }}</p>
+          <template v-else-if="activeDetail.action === 'view_budget'">
+            <p>累计用量：{{ activeDetail.budget?.total_tokens ?? '加载中' }} tokens</p>
+            <p v-if="activeDetail.budget">模型调用 {{ activeDetail.budget.calls }} 次；用量未确认 {{ activeDetail.budget.unknown_calls }} 次。额度限制请查看模型服务账户。</p>
+          </template>
+        </section>
+        <nav v-if="uploadTaskTotal > PAGE_SIZE" aria-label="上传任务分页" class="flex items-center justify-between border-t px-4 py-2 text-xs">
+          <button type="button" aria-label="上一页上传任务" :disabled="page <= 1 || loading" @click="changeUploadPage(page - 1)">上一页</button>
+          <span>第 {{ page }} / {{ Math.ceil(uploadTaskTotal / PAGE_SIZE) }} 页</span>
+          <button type="button" aria-label="下一页上传任务" :disabled="page * PAGE_SIZE >= uploadTaskTotal || loading" @click="changeUploadPage(page + 1)">下一页</button>
+        </nav>
         <footer class="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
           <span>共 {{ total }} 条</span>
           <button type="button" class="rounded-md px-2 py-1 hover:bg-muted" @click="refresh({ silent: false })">

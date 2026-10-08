@@ -111,8 +111,8 @@ test('个人 rootless 失败项在任务中心由所有者重试原队列项', a
     refreshCalls += 1
     return route.fulfill({
       json: {
-        items: refreshCalls === 1 ? [ROOTLESS_FAILURE] : [],
-        total: refreshCalls === 1 ? 1 : 0,
+        items: retryRequest ? [] : [ROOTLESS_FAILURE],
+        total: retryRequest ? 0 : 1,
         page: 1,
         page_size: 20,
       },
@@ -319,9 +319,9 @@ test('较新的刷新结果优先，旧响应不能恢复已消失的失败项',
   await page.goto('/')
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const center = page.getByRole('region', { name: '上传任务中心' })
-  await expect.poll(() => refreshCalls).toBe(1)
-  await center.getByRole('button', { name: '刷新' }).click()
   await expect.poll(() => refreshCalls).toBe(2)
+  await center.getByRole('button', { name: '刷新' }).click()
+  await expect.poll(() => refreshCalls).toBe(3)
   releaseStale()
   await expect.poll(() => staleCompleted).toBe(true)
   await page.waitForTimeout(100)
@@ -358,7 +358,7 @@ test('较新的范围刷新完成后，迟到的分页响应不能恢复旧失�
     return route.fulfill({
       json: {
         items: firstPage,
-        total: refreshCalls === 1 ? 21 : 20,
+        total: refreshCalls <= 2 ? 21 : 20,
         page: 1,
         page_size: 20,
       },
@@ -532,7 +532,7 @@ test('范围刷新失败后下一次加载更多仍请求未加载的紧邻页',
   await expect.poll(() => pageTwoRequests).toBe(1)
 
   await center.getByRole('button', { name: '刷新' }).click()
-  await expect.poll(() => refreshCalls).toBe(2)
+  await expect.poll(() => refreshCalls).toBe(3)
   await expect(center.getByText(/范围刷新失败/)).toBeVisible()
   await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
   await expect.poll(() => pageTwoRequests).toBe(2)
@@ -1200,4 +1200,98 @@ test('375px 与 1440px 均可查看任务与恢复按钮', async ({ page }) => {
     await expect(center.getByRole('button', { name: '重试失败步骤' })).toBeVisible()
     await expect(center.getByRole('button', { name: '查看结果' })).toBeVisible()
   }
+})
+
+async function mountAlignmentCenter(page, listHandler, streamEvents = []) {
+  let streamDeliveries = 0
+  await page.route('**/api/**', async route => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    if (url.pathname === '/api/upload-imports') return listHandler(route, url)
+    if (url.pathname.endsWith('/stream')) return route.fulfill({ contentType: 'text/event-stream', body: (streamDeliveries++ === 0 ? streamEvents : []).map(snapshot => `event: snapshot\nid: ${snapshot.revision}\ndata: ${JSON.stringify(snapshot)}\n\n`).join('') })
+    if (url.pathname === '/api/submit-jobs') return route.fulfill({ json: { import_id: 'accepted-root', job_id: 77 } })
+    if (url.pathname.includes('/by-key/')) return route.fulfill({ status:404,json:{detail:'任务不存在'} })
+    if (url.pathname.endsWith('/budget')) return route.fulfill({ json: { calls: 1, total_tokens: 123, unknown_calls: 0 } })
+    return route.fulfill({ json: { items: [], total: 0 } })
+  })
+  await page.route('**/__task_alignment', route => route.fulfill({ contentType: 'text/html', body: `
+  <html><body><div id="app"></div><script type="module">
+  import {createApp,h} from '/node_modules/.vite/deps/vue.js';
+  import {createRouter,createWebHistory} from '/node_modules/.vite/deps/vue-router.js';
+  import Center from '/src/components/business/UploadTaskCenter.vue';
+  import {currentUser} from '/src/composables/useAuth.js';
+  currentUser.value=${JSON.stringify(MOCK_USER)};
+  const router=createRouter({history:createWebHistory(),routes:[{path:'/:pathMatch(.*)*',component:{render:()=>null}}]});
+  createApp({render:()=>h(Center)}).use(router).mount('#app');
+  </script></body></html>` }))
+  await page.goto('/__task_alignment')
+  await page.getByRole('button', { name: /上传任务中心/ }).click()
+}
+
+test('spec对齐：任务历史第二页可达', async ({ page }) => {
+  await mountAlignmentCenter(page, (route, url) => {
+    const number = Number(url.searchParams.get('page') || 1)
+    const start = (number - 1) * 20
+    return route.fulfill({ json: { items: Array.from({length: number === 1 ? 20 : 5}, (_,i)=>({...TASK, import_id:`history-${start+i+1}`, status:'completed', allowed_actions:[]})), total:25 } })
+  })
+  await expect(page.getByText(/history-20$/)).toBeVisible()
+  await page.getByRole('button', { name:'下一页上传任务' }).click()
+  await expect(page.getByText(/history-25$/)).toBeVisible()
+  await expect(page.getByText(/history-1$/)).toHaveCount(0)
+})
+
+for (const [action, label, detail] of [
+  ['view_summary','查看摘要','已识别题目'],
+  ['view_progress','查看进度','处理进度'],
+  ['view_review_status','查看审核状态','审核状态'],
+  ['view_budget','查看额度','累计用量'],
+]) {
+  test(`spec对齐：${label}可打开可读详情`, async ({ page }) => {
+    await mountAlignmentCenter(page, route => route.fulfill({json:{items:[{...TASK,status:'completed',allowed_actions:[action],counts:{extracted:3,answered:2,failed:1},review_status:'pending',budget:{total_tokens:123}}],total:1}}))
+    await page.getByRole('button',{name:label,exact:true}).click()
+    await expect(page.getByRole('region',{name:label})).toBeVisible()
+    await expect(page.getByRole('region',{name:label})).toContainText(detail)
+    if (action === 'view_budget') await expect(page.getByRole('region',{name:label})).toContainText('123 tokens')
+  })
+}
+
+test('spec对齐：打开及回焦立即刷新任务', async ({ page }) => {
+  let calls = 0
+  await mountAlignmentCenter(page, route => { calls++;return route.fulfill({json:{items:[{...TASK,status:'completed',allowed_actions:[]}],total:1}}) })
+  await expect.poll(()=>calls).toBeGreaterThanOrEqual(2)
+  const before = calls
+  await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
+  await expect.poll(()=>calls).toBeGreaterThan(before)
+})
+
+
+test('spec对齐：列表旧revision不能覆盖较新SSE', async ({ page }) => {
+  const old = {...TASK,status:'running',revision:3,stage:'OLD_STAGE',allowed_actions:[]}
+  const newer = {...old,status:'completed',revision:5,stage:'LATEST_STAGE'}
+  await mountAlignmentCenter(page, route=>route.fulfill({json:{items:[old],total:1}}),[newer])
+  await expect(page.getByText('当前阶段：LATEST_STAGE')).toBeVisible()
+  await page.getByRole('button',{name:'刷新',exact:true}).click()
+  await expect(page.getByText('当前阶段：LATEST_STAGE')).toBeVisible()
+})
+
+test('spec对齐：相同revision的SSE不能改写已有快照', async ({ page }) => {
+  const old = {...TASK,status:'running',revision:3,stage:'OLD_STAGE',allowed_actions:[]}
+  await mountAlignmentCenter(page, route=>route.fulfill({json:{items:[old],total:1}}),[
+    {...old,revision:5,stage:'LATEST_STAGE'}, {...old,revision:5,stage:'STALE_EQUAL'},
+  ])
+  await expect(page.getByText('当前阶段：LATEST_STAGE')).toBeVisible()
+  await expect(page.getByText('当前阶段：STALE_EQUAL')).toHaveCount(0)
+})
+
+test('spec对齐：真实提交composable接受任务后立即刷新中心', async ({ page }) => {
+  let calls=0
+  await mountAlignmentCenter(page, route=>{calls++;return route.fulfill({json:{items:[{...TASK,status:'completed',allowed_actions:[]}],total:1}})})
+  await expect.poll(()=>calls).toBeGreaterThanOrEqual(2)
+  const before=calls
+  await page.evaluate(async()=>{
+    const {submitUploadWithIdempotency}=await import('/src/composables/useSubmitJobs.js')
+    const data=new FormData();data.set('text','TEST_SOURCE');
+    await submitUploadWithIdempotency(data,{draftId:'alignment-accepted'})
+  })
+  await expect.poll(()=>calls).toBeGreaterThan(before)
 })
