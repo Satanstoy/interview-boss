@@ -477,6 +477,7 @@ test('范围刷新失败后下一次加载更多仍请求未加载的紧邻页',
   const stalePageTwoResponse = new Promise((resolve) => { releaseStalePageTwo = resolve })
   const requestedPages = []
   let refreshCalls = 0
+  let failNextRefresh = false
   await page.unroute('**/api/personal-analysis-queue/failed?**')
   await page.route('**/api/personal-analysis-queue/failed?**', async (route) => {
     const requestUrl = new URL(route.request().url())
@@ -516,7 +517,8 @@ test('范围刷新失败后下一次加载更多仍请求未加载的紧邻页',
   await page.unroute('**/api/personal-analysis-queue/failed/refresh')
   await page.route('**/api/personal-analysis-queue/failed/refresh', async (route) => {
     refreshCalls += 1
-    if (refreshCalls === 2) {
+    if (failNextRefresh) {
+      failNextRefresh = false
       return route.fulfill({ status: 400, json: { detail: '范围刷新失败' } })
     }
     return route.fulfill({
@@ -531,8 +533,10 @@ test('范围刷新失败后下一次加载更多仍请求未加载的紧邻页',
   await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
   await expect.poll(() => pageTwoRequests).toBe(1)
 
+  const refreshCallsBeforeClick = refreshCalls
+  failNextRefresh = true
   await center.getByRole('button', { name: '刷新' }).click()
-  await expect.poll(() => refreshCalls).toBe(3)
+  await expect.poll(() => refreshCalls).toBe(refreshCallsBeforeClick + 1)
   await expect(center.getByText(/范围刷新失败/)).toBeVisible()
   await center.getByRole('button', { name: /加载更多个人失败项/ }).click()
   await expect.poll(() => pageTwoRequests).toBe(2)
