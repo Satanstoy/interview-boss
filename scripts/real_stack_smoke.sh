@@ -983,6 +983,14 @@ REAL_STACK_E2E=1 PLAYWRIGHT_BASE_URL="$BASE_URL" \
   run_frontend_playwright tests/e2e/real-stack-smoke.spec.js \
   --timeout "${REAL_STACK_TEST_TIMEOUT:-120000}"
 
+# Earlier independent browser scenarios share a proxy IP. Their accumulated
+# refresh calls can exhaust the real 30/minute limit before AC-028 starts.
+# Restart only this disposable API process to isolate its in-memory limiter;
+# preserve SQLite, Redis, credentials and jobs, and keep production limits intact.
+cd "$PROJECT_DIR"
+compose restart backend
+compose up --no-deps -d --wait --wait-timeout 180 backend
+
 # AC-028: keep the API/Redis/provider/frontend stack alive but stop its worker.
 # The browser submits through the real UI and waits until its durable root job
 # is visible as queued. Its explicit signal lets this runner restart the same

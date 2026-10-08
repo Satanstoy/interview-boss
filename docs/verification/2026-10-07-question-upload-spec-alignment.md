@@ -2,6 +2,20 @@
 
 基线：`codex/frontend-ui-hierarchy-cleanup`，HEAD `d90794d5`；origin/Gitee 与既有 worktree 未变。用户已有未跟踪审计、spec、backup 链接和 AC007 证据全部保留。不推送、不部署生产。实施计划见 `docs/superpowers/plans/2026-10-07-question-upload-spec-alignment.md`。
 
+## 已确认缺口的闭合范围
+
+| 审计缺口 | 本轮实现与证明 |
+|---|---|
+| 管理员跨所有者私人规范题变更 | 单条/批量删除恢复及等价写入口统一所有权拒绝；批量拒绝无部分写；55项真实路由/SQLite回归。 |
+| 旧单题分享绕过审核、私人来源污染公共题 | 显式不可变申请快照、精确源ID、审核脱敏投影、同事务审计；43项新增spec行为回归。 |
+| 旧申请统一列表漏条目、mine漏公共canonical引用 | 统一条目与类型ID路由；有效私人resolution接入mine；相关JWT/SQLite与Vue行为回归。 |
+| 失效worker仍可提交、私人成果事务缝隙 | 实际公共/私人/JD写事务检查执行代次和输入版本，成果/关联/队列原子提交；失效/回滚/续租行为回归。 |
+| 历史只有20条、任务动作空按钮 | 历史分页及摘要/进度/审核/预算内容；预算owner-only；真实Vue/API mock行为回归。 |
+| 缺即时刷新、旧响应覆盖新SSE/跨账号 | 接受/打开/回焦刷新，严格递增revision合并与账号隔离；延迟响应行为回归。 |
+| AC029分类标签、恢复身份断言不足 | 私人/公共明细和公共canonical分类标签精确断言；恢复前后detail/resolution/canonical ID比对，隔离真栈证据。 |
+
+以上是本轮已确认缺口的修复范围，不等价于全部原始29项AC的每个子场景已完成。完整命令与证据、剩余边界见下文。
+
 ## 单元1：公共发布与私人引用（已验证）
 
 根因：旧单题 share 在公共题精确命中时绕过审批；历史批准按裸文本删除私人副本；统一列表只计数但漏掉旧申请；mine 未读取私人明细指向公共 canonical 的有效 resolution。新增显式申请档案，把不可变快照、精确源身份、脱敏投影、审核人和目标放在事务内。历史来源身份不可靠时不猜测删除私人数据。来源变化后保留新版本；来源被删除后拒绝批准旧快照。
@@ -112,7 +126,7 @@ OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/
 
 `/tmp/spec-align-smoke-final-v2.log`已通过AC011（2.0m）、AC001/002（1.2m）、AC022（14.1s）、AC007浏览器（28.7s），在AC007 DB assertion停止。根因是旧脚本对共享数据库全局attempt数断言2，计入AC011其他owner任务；新增真实SQLite回归1 failed（4!=2）→1 passed，0.67s；按owner root计数且额外本owner attempt仍检出3。生产代码未变。
 
-此前分页失败中一次trace明确显示初始登录导航尚未进入面经页、无面经API请求，已等待初始/master-bank及main view就绪再点击侧栏，无固定sleep。更早page2/升序失败未在独立候选复现，不将它们全部归因于这次导航证据。完整新smoke正在重跑（`/tmp/spec-align-smoke-final-v4.log`），不能提前标整体通过。
+此前分页失败中一次trace明确显示初始登录导航尚未进入面经页、无面经API请求，已等待初始/master-bank及main view就绪再点击侧栏，无固定sleep。更早page2/升序失败未在独立候选复现，不将它们全部归因于这次导航证据。完整smoke-v4在季筛选等待5秒时退出。保留的Playwright trace显示该请求尚未完成；backend同请求duration_ms=5150.0后返回200/61条，后续season-source响应正确。因此目前证据为断言先于响应超时，未证明产品丢弃响应。真实栈文件局部expect上限改为15秒（HTTP请求超时10秒），同时新增实际DOM行ID与page2/season/asc响应精确比对，不改分页产品代码或数据期望。分页API mock浏览器回归3 passed，21.1s，exit0（`/tmp/spec-align-pagination-ui.log`）。smoke-v5增强分页1 passed/49.9s，AC011/022、AC007浏览器与DB断言、通用栈2项也通过。随后AC028在导入前失败：trace确认register200→model-helper refresh200→llm配置200→goto/import后refresh429；compose日志明确同代理IP累计触发30/min限流，页面回登录，尚未接受上传或重启worker。保存AC028 trace/snapshot至该项目failure目录。runner在独立AC028边界重启本候选backend进程并等待健康，隔离内存limiter，保留SQLite/Redis/凭据/jobs，生产规则不改、不固定sleep。smoke-v6（`/tmp/spec-align-smoke-final-v6.log`）已再次通过AC011、增强分页、AC022、AC007浏览器及DB断言、通用栈2项；隔离后的AC028浏览器1 passed/12.6s，实际worker停止/重启后完成并精确定位。现执行AC029与余下并发场景，整体结果待退出码确认。
 
 ```bash
 OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest backend/tests/infra/test_ac007_trace_scope.py -q

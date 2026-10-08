@@ -1,6 +1,10 @@
 import { writeFileSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
+import { expect as baseExpect, test } from '@playwright/test'
 import { configureDisposableUserModel } from '../_helpers/real-stack-model.js'
+
+// Real-stack list responses can exceed the default 5s assertion wait (observed 5.15s).
+// Keep a bounded wait above the HTTP client's 10s timeout, then assert exact data.
+const expect = baseExpect.configure({ timeout: 15000 })
 
 const USERNAME = 'ac001_ac002_u1'
 const PASSWORD = 'Ac001-ac002-real-stack-123!'
@@ -103,6 +107,9 @@ test('real SQLite pagination and public share task target stay aligned', async (
   expect(secondIds).toEqual([...secondIds].sort((a, b) => b - a))
   expect(secondIds).not.toEqual(firstIds)
   expect(secondIds.some((id) => firstIds.includes(id))).toBe(false)
+  await expect.poll(() => page.locator('[data-row-id]').evaluateAll((rows) =>
+    rows.map((row) => Number(row.getAttribute('data-row-id'))),
+  )).toEqual(secondIds)
 
   const seasonSelect = page.getByText('招聘季筛选：').locator('xpath=..').getByRole('combobox')
   await seasonSelect.click()
@@ -112,6 +119,14 @@ test('real SQLite pagination and public share task target stay aligned', async (
     entry.status === 200 && entry.query.page === '1' && entry.query.page_size === '20' &&
     entry.query.season === '2025秋招' && entry.body.total === 61,
   )).toBe(true)
+
+  const filtered = responses.find((entry) =>
+    entry.query.page === '1' && entry.query.page_size === '20' && entry.query.season === '2025秋招',
+  )
+  expect(filtered.body.items.every((row) => row.season === '2025秋招')).toBe(true)
+  await expect.poll(() => page.locator('[data-row-id]').evaluateAll((rows) =>
+    rows.map((row) => Number(row.getAttribute('data-row-id'))),
+  )).toEqual(filtered.body.items.map((row) => row.id))
 
   await page.locator('button').filter({ hasText: '上传日期' }).click()
   await expect(page.getByText('共 61 条，第 1/4 页')).toBeVisible()
@@ -127,6 +142,9 @@ test('real SQLite pagination and public share task target stay aligned', async (
   const ascendingIds = ascending.body.items.map((row) => row.id)
   expect(ascendingIds).toEqual([...ascendingIds].sort((a, b) => a - b))
   expect(ascending.body.items.every((row) => row.owner_id === login.user.id)).toBe(true)
+  await expect.poll(() => page.locator('[data-row-id]').evaluateAll((rows) =>
+    rows.map((row) => Number(row.getAttribute('data-row-id'))),
+  )).toEqual(ascendingIds)
 
   await page.locator('[data-slot="pagination-next"]').click()
   await expect(page.getByText('共 61 条，第 2/4 页')).toBeVisible()
