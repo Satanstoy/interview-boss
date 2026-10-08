@@ -135,8 +135,8 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
         "INSERT INTO users (id, username, password_hash) VALUES (7, 'submit-owner', 'hash')"
     )
     test_db.execute(
-        "INSERT INTO question_bank (question, cat2, owner_id, status, job_position) "
-        "VALUES ('公共代表题', '系统设计', NULL, 'approved', '后端开发')"
+        "INSERT INTO question_bank (id, question, cat2, owner_id, status, job_position) "
+        "VALUES (999, '公共代表题', '系统设计', NULL, 'approved', '后端开发')"
     )
     test_db.commit()
 
@@ -204,17 +204,13 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
         patch("app.services.clustering.match_outcomes", new=AsyncMock(side_effect=_match)),
         patch("app.db.connection.get_current_job_position", return_value="后端开发"),
         patch("app.db.connection.run_db", new=_run_db),
-        patch("app.services.pipeline.enqueue_questions") as mock_enqueue,
+        patch("app.services.pipeline.queue._run_cluster_batch_in_background", AsyncMock(return_value=False)),
     ):
         result = asyncio.run(match_and_persist_personal_node(state))
 
     interview_id = result["saved_interview_id"]
-    mock_enqueue.assert_called_once_with(
-        interview_id,
-        owner_id=7,
-        question_detail_ids=[2],
-        root_import_id=None,
-    )
+    queued = test_db.execute("SELECT question_detail_id, owner_id, interview_id FROM analysis_queue").fetchall()
+    assert [tuple(row) for row in queued] == [(2, 7, interview_id)]
     assert test_db.execute(
         "SELECT COUNT(*) FROM question_bank WHERE owner_id = 7"
     ).fetchone()[0] == 0

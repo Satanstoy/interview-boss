@@ -29,6 +29,7 @@ def _db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     run_migrations(conn)
+    conn.execute("INSERT INTO job_positions(id,name) VALUES(1, '后端')")
     for uid in (101, 102, 201):
         conn.execute(
             "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, 'x')",

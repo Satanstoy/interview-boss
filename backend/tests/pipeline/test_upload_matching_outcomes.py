@@ -60,23 +60,12 @@ def test_node_match_outcomes_three_state_honors_failure_without_new_canonical(te
     from app.agents.submit.persist_personal import match_and_persist_personal_node
 
     _seed_user(test_db)
-    enqueued: list[int] = []
-
-    def _fake_enqueue(interview_id, *, owner_id=None, question_detail_ids=None, **kw):
-        enqueued.extend(question_detail_ids or [])
-        return 0
-
     with (
         patch("app.services.clustering.match_outcomes", AsyncMock(return_value=OUTCOMES)),
         patch("app.db.connection.get_current_job_position", return_value="后端开发"),
-        patch("app.services.pipeline.enqueue_questions", side_effect=_fake_enqueue),
         patch(
             "app.services.pipeline.queue._run_cluster_batch_in_background",
             AsyncMock(return_value=False),
-        ),
-        patch(
-            "app.db.operations.submit_interview_txn",
-            return_value=([], 9101, [601, 602]),
         ),
     ):
         result = asyncio.run(
@@ -93,12 +82,11 @@ def test_node_match_outcomes_three_state_honors_failure_without_new_canonical(te
             )
         )
 
-    # AC-006：failed 的题（new_id=0 → detail 601）不得入队列（阻断异步建新题）
-    assert 601 not in enqueued, (
-        "匹配失败（模型错误）的题目绝不能进入聚类队列异步建新题，AC-006"
-    )
-    assert 602 in enqueued, "no_match 真新题应正常入队聚类"
-    assert result["match_failed"] == 1, "节点必须暴露 failed 计数供根状态聚合"
+    details = {row["question"]: row["id"] for row in test_db.execute("SELECT id,question FROM questions_detail")}
+    enqueued = {row[0] for row in test_db.execute("SELECT question_detail_id FROM analysis_queue")}
+    assert details["TCP握手"] not in enqueued, "模型失败不能进入聚类队列"
+    assert details["Redis持久化"] in enqueued, "真正无匹配的题应进入聚类队列"
+    assert result["match_failed"] == 1
 
 
 def test_failed_question_never_reaches_the_personal_queue(test_db):
@@ -242,6 +230,12 @@ def test_retry_after_eight_of_ten_answers_failed_requeues_only_failed_questions(
         (import_id, attempt_id),
     )
     parent_job_id = test_db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    test_db.execute("UPDATE upload_imports SET interview_id=901, payload_json='{\"raw_text\":\"恢复原稿\"}' WHERE id=?", (import_id,))
+    retry_job_id = test_db.execute(
+        "INSERT INTO jobs(job_type,status,root_import_id,upload_attempt_id,lease_generation,locked_until) "
+        "VALUES('submit_import','running',?,?,1,datetime('now','+120 seconds'))",
+        (import_id, attempt_id),
+    ).lastrowid
     test_db.commit()
 
     root = test_db.execute(
@@ -273,7 +267,6 @@ def test_retry_after_eight_of_ten_answers_failed_requeues_only_failed_questions(
     with (
         patch("app.services.clustering.match_outcomes", AsyncMock(return_value=outcomes)),
         patch("app.db.connection.get_current_job_position", return_value="后端"),
-        patch("app.services.pipeline.enqueue_questions", return_value=0),
         patch(
             "app.services.pipeline.queue._run_cluster_batch_in_background",
             AsyncMock(return_value=False),
@@ -283,6 +276,9 @@ def test_retry_after_eight_of_ten_answers_failed_requeues_only_failed_questions(
             match_and_persist_personal_node(
                 {
                     "import_id": import_id,
+                    "job_id": retry_job_id,
+                    "_lease_generation": 1,
+                    "_input_version": 1,
                     "user_id": 1,
                     "credential_scope": "user",
                     "job_position": "后端",

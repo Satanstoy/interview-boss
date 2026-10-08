@@ -309,6 +309,9 @@ async def test_worker_match_failed_drives_partial_failed(
     )
     test_db.commit()
 
+    test_db.execute("UPDATE upload_stage_results SET job_id=? WHERE import_id='imp-1' AND unit_key IN ('extract:document:v1','match:failed:v1')", (job_id,))
+    test_db.commit()
+
     async def _stream(input_state, result_collector=None):
         yield format_sse(make_done_event("interview", "personal", {}))
         if result_collector is not None:
