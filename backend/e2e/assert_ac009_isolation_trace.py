@@ -214,14 +214,15 @@ def main() -> None:
             raise AssertionError(
                 f"both independent workers must claim one root each: {sorted(preflight_worker_ids)}"
             )
-        if len(set(submit_start_seconds)) != 1:
-            raise AssertionError(
-                f"the two submit jobs must start in the same second: {submit_start_seconds}"
-            )
+        overlap = json.load(sys.stdin)
+        if overlap != {"markers": sorted(case["marker"] for case in CASES),
+                       "passes": 2, "failures": 0}:
+            raise AssertionError(f"both real worker extraction calls must overlap: {overlap}")
 
         print(json.dumps({
             "same_second": evidence[0]["root"]["created_at"] == evidence[1]["root"]["created_at"],
-            "submit_start_second": submit_start_seconds[0],
+            "submit_start_seconds": submit_start_seconds,
+            "provider_overlap": overlap,
             "distinct_preflight_workers": sorted(preflight_worker_ids),
             "owners_roots_and_results": evidence,
         }, ensure_ascii=False, sort_keys=True))

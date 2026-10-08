@@ -215,6 +215,40 @@ _CALL_LEDGER = _StubCallLedger(
 )
 
 
+class _Ac009ExtractionGate:
+    """Release extraction replies only while both real worker calls are in flight."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._barrier = threading.Barrier(2)
+        self._lock = threading.Lock()
+        self._markers = set()
+        self._passes = 0
+        self._failures = 0
+
+    def enter(self, marker):
+        with self._lock:
+            self._markers.add(marker)
+        try:
+            self._barrier.wait(timeout=8)
+        except threading.BrokenBarrierError:
+            with self._lock:
+                self._failures += 1
+            raise
+        with self._lock:
+            self._passes += 1
+
+    def snapshot(self):
+        with self._lock:
+            return {"markers": sorted(self._markers), "passes": self._passes,
+                    "failures": self._failures}
+
+
+_AC009_GATE = _Ac009ExtractionGate()
+
+
 class StubHandler(BaseHTTPRequestHandler):
     server_version = "InterviewBossE2EStub/1.0"
 
@@ -233,6 +267,9 @@ class StubHandler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/__e2e/ac009-overlap":
+            self._send_json(200, _AC009_GATE.snapshot())
+            return
         if self.path == "/__e2e/calls":
             self._send_json(200, {"counts": _CALL_LEDGER.counts()})
             return
@@ -253,6 +290,7 @@ class StubHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/__e2e/reset":
             _CALL_LEDGER.reset()
+            _AC009_GATE.reset()
             self._send_json(200, {"status": "reset"})
             return
 
@@ -270,6 +308,16 @@ class StubHandler(BaseHTTPRequestHandler):
         messages = payload.get("messages") or []
         serialized = json.dumps(messages, ensure_ascii=False)
         prompt_text = "\n".join(_collect_message_text(messages))
+        if "请分析以下联合内容" in prompt_text:
+            marker = next((item for item in (
+                "AC009_USER_A_REAL_STACK", "AC009_USER_B_REAL_STACK",
+            ) if item in prompt_text), None)
+            if marker:
+                try:
+                    _AC009_GATE.enter(marker)
+                except threading.BrokenBarrierError:
+                    self._send_json(504, {"error": {"message": "AC009 extraction overlap timed out"}})
+                    return
 
         ac013_marker = next((marker for marker in _AC013_MARKERS if marker in prompt_text), None)
         parallel_answer_marker = next(

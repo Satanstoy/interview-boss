@@ -102,6 +102,7 @@ copy_success_artifacts() {
     ac009-browser-result.json \
     ac009-same-second.json \
     ac009-db-trace.json \
+    ac009-provider-overlap.json \
     ac029-browser-result.json \
     ac029-first-pass-resolutions.json \
     ac029-db-trace.json; do
@@ -1188,9 +1189,12 @@ with open(sys.argv[1], encoding="utf-8") as stream:
 print(*trace["users"])
 PY
 )
+compose exec -T llm-stub python -c \
+  'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/__e2e/ac009-overlap").read().decode())' \
+  >"$TEMP_ARTIFACTS/ac009-provider-overlap.json"
 compose exec -T backend python /app/backend/e2e/assert_ac009_isolation_trace.py \
   "$ac009_import_a" "$ac009_import_b" "$ac009_user_a" "$ac009_user_b" \
-  >"$TEMP_ARTIFACTS/ac009-db-trace.json"
+  <"$TEMP_ARTIFACTS/ac009-provider-overlap.json" >"$TEMP_ARTIFACTS/ac009-db-trace.json"
 
 if [ "${REAL_STACK_ONLY_AC009:-0}" = "1" ]; then
   exit 0
