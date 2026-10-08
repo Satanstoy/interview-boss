@@ -1,0 +1,63 @@
+{
+  "baseline": "3bf72bf6",
+  "test_exit_code": 1,
+  "failed": 7,
+  "passed": 1,
+  "interpretation": "failing spec assertions reproduce current gaps; not acceptance success",
+  "observations": [
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_survivor",
+      "endpoint": "list",
+      "status": 200,
+      "private_marker_exposed": true
+    },
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_merged",
+      "endpoint": "list",
+      "status": 200,
+      "private_marker_exposed": true
+    },
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_snapshot",
+      "endpoint": "list",
+      "status": 200,
+      "private_marker_exposed": false
+    },
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_survivor",
+      "endpoint": "detail",
+      "status": 200,
+      "private_marker_exposed": true
+    },
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_merged",
+      "endpoint": "detail",
+      "status": 200,
+      "private_marker_exposed": true
+    },
+    {
+      "kind": "HISTORY_OBSERVATION",
+      "shape": "private_snapshot",
+      "endpoint": "detail",
+      "status": 200,
+      "private_marker_exposed": true
+    },
+    {
+      "kind": "MERGE_OBSERVATION",
+      "status": 200,
+      "public_originals": "[\"PRIVATE_MERGE_MARKER\"]",
+      "public_sources": "[]",
+      "promotion_requests": 0
+    },
+    {
+      "kind": "ANSWER_OBSERVATION",
+      "read_status": 200,
+      "private_answer_exposed": true
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "buttons": [
+    "",
+    "全部",
+    "题库",
+    "JD",
+    "通过",
+    "拒绝",
+    " 刷新 "
+  ],
+  "editorCount": 0,
+  "detailRequests": 0,
+  "approveBody": {},
+  "apiMock": true,
+  "productComponent": "AdminReview.vue"
+}
