@@ -126,7 +126,7 @@ OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/
 
 `/tmp/spec-align-smoke-final-v2.log`已通过AC011（2.0m）、AC001/002（1.2m）、AC022（14.1s）、AC007浏览器（28.7s），在AC007 DB assertion停止。根因是旧脚本对共享数据库全局attempt数断言2，计入AC011其他owner任务；新增真实SQLite回归1 failed（4!=2）→1 passed，0.67s；按owner root计数且额外本owner attempt仍检出3。生产代码未变。
 
-此前分页失败中一次trace明确显示初始登录导航尚未进入面经页、无面经API请求，已等待初始/master-bank及main view就绪再点击侧栏，无固定sleep。更早page2/升序失败未在独立候选复现，不将它们全部归因于这次导航证据。完整smoke-v4在季筛选等待5秒时退出。保留的Playwright trace显示该请求尚未完成；backend同请求duration_ms=5150.0后返回200/61条，后续season-source响应正确。因此目前证据为断言先于响应超时，未证明产品丢弃响应。真实栈文件局部expect上限改为15秒（HTTP请求超时10秒），同时新增实际DOM行ID与page2/season/asc响应精确比对，不改分页产品代码或数据期望。分页API mock浏览器回归3 passed，21.1s，exit0（`/tmp/spec-align-pagination-ui.log`）。smoke-v5增强分页1 passed/49.9s，AC011/022、AC007浏览器与DB断言、通用栈2项也通过。随后AC028在导入前失败：trace确认register200→model-helper refresh200→llm配置200→goto/import后refresh429；compose日志明确同代理IP累计触发30/min限流，页面回登录，尚未接受上传或重启worker。保存AC028 trace/snapshot至该项目failure目录。runner在独立AC028边界重启本候选backend进程并等待健康，隔离内存limiter，保留SQLite/Redis/凭据/jobs，生产规则不改、不固定sleep。smoke-v6（`/tmp/spec-align-smoke-final-v6.log`）已再次通过AC011、增强分页、AC022、AC007浏览器及DB断言、通用栈2项；隔离后的AC028浏览器1 passed/12.6s，实际worker停止/重启后完成并精确定位。现执行AC029与余下并发场景，整体结果待退出码确认。
+此前分页失败中一次trace明确显示初始登录导航尚未进入面经页、无面经API请求，已等待初始/master-bank及main view就绪再点击侧栏，无固定sleep。更早page2/升序失败未在独立候选复现，不将它们全部归因于这次导航证据。完整smoke-v4在季筛选等待5秒时退出。保留的Playwright trace显示该请求尚未完成；backend同请求duration_ms=5150.0后返回200/61条，后续season-source响应正确。因此目前证据为断言先于响应超时，未证明产品丢弃响应。真实栈文件局部expect上限改为15秒（HTTP请求超时10秒），同时新增实际DOM行ID与page2/season/asc响应精确比对，不改分页产品代码或数据期望。分页API mock浏览器回归3 passed，21.1s，exit0（`/tmp/spec-align-pagination-ui.log`）。smoke-v5增强分页1 passed/49.9s，AC011/022、AC007浏览器与DB断言、通用栈2项也通过。随后AC028在导入前失败：trace确认register200→model-helper refresh200→llm配置200→goto/import后refresh429；compose日志明确同代理IP累计触发30/min限流，页面回登录，尚未接受上传或重启worker。保存AC028 trace/snapshot至该项目failure目录。runner在独立AC028边界重启本候选backend进程并等待健康，隔离内存limiter，保留SQLite/Redis/凭据/jobs，生产规则不改、不固定sleep。smoke-v6（`/tmp/spec-align-smoke-final-v6.log`）已再次通过AC011、增强分页、AC022、AC007浏览器及DB断言、通用栈2项；隔离后的AC028浏览器1 passed/12.6s，实际worker停止/重启后完成并精确定位。AC029浏览器1 passed/13.9m，最终DB断言通过，首轮三成功项和最终结果来自同一项目并归档，detail/resolution/canonical ID一致。最后AC009并发提交一个请求500，日志明确accept_upload/create_or_get_import INSERT处database is locked，整体exit1；未将此前已通过场景当作完整smoke通过。项目interview-boss-real-e2e-4100802-1791442643。
 
 ```bash
 OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest backend/tests/infra/test_ac007_trace_scope.py -q
@@ -134,3 +134,156 @@ REAL_STACK_PORT=18141 REAL_STACK_STUB_PORT=18142 REAL_STACK_CAPTURE_FAILURE_DB=1
 ```
 
 当前未验收：完整默认smoke余下场景、全部原始AC的所有子场景、特殊支持访问产品流程、历史私人题重建完全收敛、实际外部模型质量/费用与生产历史脏数据、长期多进程故障与真实设备读屏。44项UI suite包含375/1440及键盘操作行为，但不能推导完整真实设备无障碍验收。未部署或推送。
+
+
+## 2026-10-09续作：最终代码与并发受理
+
+继续时HEAD已由外部推进至a91bb3f1（d8952da4迁移身份/面经定位、a91bb3f1面经前端），分支、remotes不变。保留这两提交，不纳入本轮task commit；原有未跟踪文件继续保留。此前264项补跑先2 failed/262 passed：旧SQL参数数量不适配新增私人resolution，旧批准fixture审核人不存在且仍期望私人来源公开。改两项为真实JWT/TestClient/SQLite行为：mine排除外人并以实际查询保留personal→mine映射；批准验证快照保留u2、公共来源仅u1、脱敏投影及真实审核人。18 passed/5.16s及264 passed/96.96s，均读取exit0。bank SQL文件原有unused MagicMock由git show HEAD管道确认，未顺手修；integrity文件ruff通过。
+
+AC029配对证据已保存：ac029-first-pass-resolutions.json和ac029-db-trace.json。首轮三项成功的public_detail/resolution/canonical分别为22/28/21、23/30/16、24/31/22，恢复后不变；失败ordinal40恢复为25/33/23。公共分类和标签与私人投影逐项核对，ordinal20使用预先存在的唯一公共canonical16。该证据来自完整v6同一隔离项目，不从终态反推或制造首轮记录。
+
+AC009根因：main和legacy SSE受理使用BEGIN deferred，幂等读建立WAL快照后，并发写入使读事务升级写事务立即报SQLITE_BUSY；不是调度、所有权或模型错误。新增integration/test_upload_acceptance_concurrency.py：实际JWT/路由/独立临时WAL连接，SQLite trace交错真实第二连接写入，验证main202/legacy200、不同owner独立与foreign404、同owner同键去重。4 failed/16.68s → 4 passed/24.48s；相关46 passed/52.84s，均exit0。只把两受理事务改为BEGIN IMMEDIATE（同重试入口已有模式），不改限流、权限或数据库写入语义。提交ad562589；独立review无阻塞。
+
+```bash
+OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest \
+ backend/tests/integration/test_upload_acceptance_concurrency.py \
+ backend/tests/pipeline/test_upload_acceptance.py backend/tests/pipeline/test_upload_submit_api.py \
+ backend/tests/pipeline/test_submit_job_retry.py backend/tests/security/test_submit_multipart_stream_limit.py -q --show-capture=no
+REAL_STACK_PORT=18171 REAL_STACK_STUB_PORT=18172 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 REAL_STACK_ONLY_AC009=1 bash scripts/real_stack_smoke.sh
+```
+
+新候选app以既有隔离候选依赖镜像b324c3ba为基底，Dockerfile/pyproject/uv.lock/entrypoint自a3da6c02无变化，COPY当前backend（.dockerignore排除数据/.env）；nginx以48a420e9为基底COPY当前npm run build产物。使用DOCKER_BUILDKIT=0的本地两层构建，构建exit0；未重新下载或改变依赖，不挂生产数据、不部署。镜像分别beadd0c73950和3bb5c6b4076f，生成Dockerfile和日志在/tmp/spec-align-*。最终HEAD上传广回归469 passed/273.62s、题库鉴权264 passed/102.78s，日志分别/tmp/spec-align-broad-acceptance-final.log及/tmp/spec-align-authz-acceptance-final.log，实际exit0。469命令为上文463命令再增加backend/tests/integration/test_upload_acceptance_concurrency.py；264完整命令同2026-10-07-private-question-write-boundary.md，覆盖本轮修改的两个旧fixture。
+
+
+### AC009真实并发执行证据（2026-10-09）
+
+受理修复后首次AC009浏览器1 passed/23.2s，但旧DB助手要求两个job.started_at落在同一墙钟秒（50与51），整体仍失败。规格要求固定根任务时刻及两个worker交错处理，不要求调度时间戳同秒。保留原有root固定2026-10-04 12:00:00、不同worker、所有owner/成果/来源/答案隔离断言，改用本地HTTP stub的双请求Barrier证明真正执行重叠；单路8秒超时返回504，最终助手必须读取两不同marker、passes=2、failures=0。新增真实ThreadingHTTPServer测试先缺观测端点404失败，再1 passed/4 deselected/0.56s。该stub全suite还存在先前已有的call ledger字段期望失配，未顺手修改或声称全suite通过。
+
+当前AC009隔离项目interview-boss-real-e2e-456931-1791478349：浏览器1 passed/18.9s，SQL及双HTTP重叠证据均通过，整命令exit0，日志/tmp/spec-align-ac009-overlap-final.log。4个harness文件已独立review及ruff/bash/diff检查并提交02aa843b。新候选app f8323beac0ab仅从beadd0c73950 COPY当前DB断言助手；stub ce4e9486ab22从既有52ef238bcc6b COPY当前provider，依赖未变。nginx 3bb5c6b4076f不变。
+
+完整默认smoke-v7正在独立项目interview-boss-real-e2e-466258-1791478576运行；尚未以定向AC009通过代替整轮结果。
+
+
+### 最终前端行为回归
+
+当前代码47项（task center/public review/interview pagination）首次46 passed/1 failed，失败在空页面等待任务中心；日志出现浏览器本地网络检查阻止Vite WebSocket，单独相同测试1 passed/10.2s，未据此猜测修改产品。整组再跑46 passed/1 failed，此次故障测试仍在refreshCalls===2注入错误，与本轮新增打开即时刷新不兼容；定向相同错误提示断言复现失败。改fixture在用户点击前设置failNextRefresh、按点击前计数+1核对请求；保留错误提示、紧邻页和迟到旧响应全部断言。定向1 passed/7.9s，独立review无阻塞；最终47 passed/1.7m，exit0，日志/tmp/spec-align-ui-current-verified.log。未改产品以掩盖测试故障；整组是模拟API的Vue浏览器验证，不是生产验收。
+
+```bash
+cd frontend
+npx playwright test tests/e2e/upload-task-center.spec.js --grep '范围刷新失败后下一次加载更多仍请求未加载的紧邻页' --trace on
+npx playwright test tests/e2e/upload-task-center.spec.js --grep '范围刷新失败后下一次加载更多仍请求未加载的紧邻页' --output /tmp/spec-align-ui-refresh-green-artifacts
+npx playwright test tests/e2e/upload-task-center.spec.js tests/e2e/public-contribution-review.spec.js tests/e2e/interview-pagination.spec.js --output /tmp/spec-align-ui-current-final-artifacts
+```
+
+本轮磁盘空间不足时，仅删除已结束的本轮临时pytest SQLite目录/tmp/pytest-of-ubuntu/pytest-165、166、167及/tmp/spec-align-pytest.LMzNlJ，保留测试日志和真实栈证据；未执行全局prune、生产清理或删除用户文件。
+
+
+### 本轮文件清单
+
+下列是d90794d5之后本任务checkpoint触及的文件（不把外部d8952da4/a91bb3f1新增改动归为本任务；同文件后续外部修改保留）。原始权限修复dce70f24文件及四接口根因详见2026-10-07-private-question-write-boundary.md。
+
+
+后端实现：
+
+- `backend/app/agents/shared/state.py`
+- `backend/app/agents/submit/persist_personal.py`
+- `backend/app/agents/submit/persist_public.py`
+- `backend/app/db/migrations/__init__.py`
+- `backend/app/db/migrations/question_promotions.py`
+- `backend/app/db/operations.py`
+- `backend/app/db/queries.py`
+- `backend/app/routers/admin_review.py`
+- `backend/app/routers/public_contributions.py`
+- `backend/app/routers/questions_pkg/bulk.py`
+- `backend/app/routers/questions_pkg/mutations.py`
+- `backend/app/routers/questions_pkg/permissions.py`
+- `backend/app/routers/questions_pkg/share.py`
+- `backend/app/routers/submit.py`
+- `backend/app/routers/upload_imports.py`
+- `backend/app/services/clustering_maintenance.py`
+- `backend/app/services/public_contributions.py`
+- `backend/app/services/question_promotions.py`
+- `backend/app/services/upload_lifecycle.py`
+- `backend/app/worker.py`
+
+前端实现：
+
+- `frontend/src/components/business/AdminReview.vue`
+- `frontend/src/components/business/UploadTaskCenter.vue`
+- `frontend/src/composables/useSubmitJobs.js`
+
+后端测试：
+
+- `backend/tests/bank/test_bank_mode_sql.py`
+- `backend/tests/bank/test_bank_share_flow.py`
+- `backend/tests/infra/test_ac007_trace_scope.py`
+- `backend/tests/integration/test_upload_acceptance_concurrency.py`
+- `backend/tests/integration/test_upload_question_data_flow_worker.py`
+- `backend/tests/pipeline/test_public_personal_scope_contract.py`
+- `backend/tests/pipeline/test_upload_acceptance.py`
+- `backend/tests/pipeline/test_upload_credential_preflight_job.py`
+- `backend/tests/pipeline/test_upload_execution_plan.py`
+- `backend/tests/pipeline/test_upload_graph_recovery_regressions.py`
+- `backend/tests/pipeline/test_upload_matching_outcomes.py`
+- `backend/tests/pipeline/test_upload_worker_policy_wiring.py`
+- `backend/tests/security/test_question_bank_spec_alignment.py`
+- `backend/tests/security/test_upload_task_budget_scope.py`
+- `backend/tests/services/test_question_bank_integrity.py`
+- `backend/tests/services/test_submit_personal_commit_atomicity.py`
+- `backend/tests/services/test_submit_public_commit_fence.py`
+- `backend/tests/services/test_submit_worker_finalize_fence.py`
+- `backend/tests/services/test_submit_worker_heartbeat.py`
+
+浏览器测试：
+
+- `frontend/tests/e2e/interview-pagination-real-stack.spec.js`
+- `frontend/tests/e2e/public-contribution-review.spec.js`
+- `frontend/tests/e2e/upload-task-center.spec.js`
+
+数据库验收助手：
+
+- `backend/e2e/assert_ac007_owner_retry_trace.py`
+- `backend/e2e/assert_ac009_isolation_trace.py`
+- `backend/e2e/assert_ac029_public_trace.py`
+- `backend/e2e/capture_ac029_resolutions.py`
+
+模型stub测试工具：
+
+- `e2e/stub-llm/provider.py`
+- `e2e/stub-llm/test_provider.py`
+
+隔离验收脚本：
+
+- `scripts/real_stack_smoke.sh`
+
+计划及验证证据：
+
+- `docs/superpowers/plans/2026-10-07-question-upload-spec-alignment.md`
+- `docs/verification/2026-10-07-question-upload-spec-alignment.md`
+- `docs/verification/upload-recovery/2026-10-08-spec-alignment/ac001-ac002-db-trace.json`
+- `docs/verification/upload-recovery/2026-10-08-spec-alignment/ac010-db-trace.json`
+- `docs/verification/upload-recovery/2026-10-08-spec-alignment/ac024-db-trace.json`
+- `docs/verification/upload-recovery/2026-10-08-spec-alignment/ac029-db-trace.json`
+
+此外本轮保留真实ac029-first-pass-resolutions.json以及ac009-db-trace.json、ac009-provider-overlap.json配对证据。
+
+新增HTTP重叠测试命令：
+
+```bash
+PYTHONPATH=e2e/stub-llm .venv/bin/pytest e2e/stub-llm/test_provider.py -k ac009 -q
+bash -n scripts/real_stack_smoke.sh
+.venv/bin/ruff check backend/e2e/assert_ac009_isolation_trace.py e2e/stub-llm/provider.py e2e/stub-llm/test_provider.py
+git diff --check
+```
+
+
+最终候选镜像的本地构建命令（均读到exit0）：
+
+```bash
+DOCKER_BUILDKIT=0 docker build -f /tmp/spec-align-acceptance.Dockerfile -t interview-boss-app:spec-align-acceptance-20261009 .
+DOCKER_BUILDKIT=0 docker build -f /tmp/spec-align-ac009-app.Dockerfile -t interview-boss-app:spec-align-ac009-overlap .
+DOCKER_BUILDKIT=0 docker build -f /tmp/spec-align-ac009-stub.Dockerfile -t interview-boss-llm-stub:spec-align-ac009-overlap .
+DOCKER_BUILDKIT=0 docker build -t interview-boss-nginx:spec-align-acceptance-20261009 /tmp/spec-align-nginx-context.dHuvbF
+```
+
+基础依赖镜像与生产镜像分开保留，临时Dockerfile内容为上文指定FROM和COPY；完整smoke用最终real-e2e标签对应app f8323beac0ab、nginx 3bb5c6b4076f、stub ce4e9486ab22。
