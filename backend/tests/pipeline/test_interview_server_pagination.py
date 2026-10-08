@@ -190,3 +190,16 @@ def test_location_for_unauthorized_target_is_404(api, test_db):
     _seed_interviews(test_db, count=5)
     resp = api.get("/api/data/interview/2000/location?sort=created_at_desc&position_id=P1")
     assert resp.status_code == 404, "不得透露他人记录的存在性"
+
+
+@pytest.mark.parametrize('sort', ['created_at_asc', 'created_at_desc'])
+def test_location_rank_matches_list_with_missing_dates(api, test_db, sort):
+    _seed_interviews(test_db, count=5)
+    test_db.execute('UPDATE interview SET created_at=NULL WHERE id IN (1000,1001)')
+    test_db.commit()
+    query = f'sort={sort}&position_id=P1&page_size=2'
+    for page in range(1, 4):
+        rows = api.get(f'/api/data/interview?{query}&page={page}').json()['items']
+        for row in rows:
+            location = api.get(f"/api/data/interview/{row['id']}/location?{query}").json()
+            assert location['page'] == page

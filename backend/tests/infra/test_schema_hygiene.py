@@ -55,8 +55,11 @@ def full_db():
         "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, "
         "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     )
-    for v in range(81, 87):
-        conn.execute("INSERT INTO schema_version (version, name) VALUES (?, 'preseed')", (v,))
+    from app.db.migrations import _MIGRATIONS
+
+    for version, name, _ in _MIGRATIONS:
+        if 81 <= version <= 86:
+            conn.execute("INSERT INTO schema_version (version, name) VALUES (?, ?)", (version, name))
     conn.commit()
     run_migrations(conn)
     yield conn

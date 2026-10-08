@@ -60,6 +60,23 @@ def _conn_is_memory(conn) -> bool:
         return True
 
 
+# These identities were shipped on the onboarding/evaluation branch before
+# upload recovery reused their version numbers. Never rewrite their history.
+_LEGACY_MIGRATION_NAMES = {
+    121: "onboarding", 122: "onboarding_revision",
+    123: "user_owned_fk_cleanup", 124: "onboarding_actions",
+    125: "evaluation_review_identity", 126: "evaluation_worker_claim",
+}
+
+
+def _migration_127_reconcile_branch_identities(conn):
+    """Record completion of reconciliation performed in dependency order.
+
+    The runner applies colliding additions at their original position before
+    dependent migrations, preserving each shipped version/name record.
+    """
+
+
 # ── Domain submodules ──────────────────────────────────────────────────────
 from app.db.migrations.question_bank import (
     _migration_001_base_tables,
@@ -366,11 +383,15 @@ _MIGRATIONS = [
     (124, "upload_spec_stage_names", _migration_124_upload_spec_stage_names),
     (125, "upload_llm_api_format", _migration_125_upload_llm_api_format),
     (126, "question_promotions", _migration_126_question_promotions),
+    (127, "reconcile_branch_identities", _migration_127_reconcile_branch_identities),
 ]
 
 
 def run_migrations(conn):
     """Apply all pending migrations in order."""
+    versions = [version for version, _, _ in _MIGRATIONS]
+    if len(versions) != len(set(versions)):
+        raise RuntimeError("Duplicate migration version in registry")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -379,9 +400,22 @@ def run_migrations(conn):
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    applied = {row[0] for row in cursor.execute("SELECT version FROM schema_version").fetchall()}
+    applied = dict(cursor.execute("SELECT version, name FROM schema_version").fetchall())
+    # Validate all identities before applying anything, so an unknown collision
+    # cannot leave a partially upgraded database or silently skip required DDL.
+    for version, name, _ in _MIGRATIONS:
+        previous = applied.get(version)
+        if previous is not None and previous != name and previous != _LEGACY_MIGRATION_NAMES.get(version):
+            raise RuntimeError(
+                f"Migration identity mismatch at {version:03d}: recorded {previous!r}, expected {name!r}"
+            )
     for version, name, func in _MIGRATIONS:
-        if version in applied:
+        reconcile = (
+            version in _LEGACY_MIGRATION_NAMES
+            and applied.get(version) == _LEGACY_MIGRATION_NAMES[version]
+            and 127 not in applied
+        )
+        if version in applied and not reconcile:
             continue
         logger.info(f"Applying migration {version:03d}: {name}")
         destructive = version in DESTRUCTIVE_VERSIONS
@@ -400,10 +434,11 @@ def run_migrations(conn):
         cursor.execute("BEGIN")
         try:
             func(conn)
-            cursor.execute(
-                "INSERT INTO schema_version (version, name) VALUES (?, ?)",
-                (version, name),
-            )
+            if not reconcile:
+                cursor.execute(
+                    "INSERT INTO schema_version (version, name) VALUES (?, ?)",
+                    (version, name),
+                )
             cursor.execute("COMMIT")
         except Exception:
             cursor.execute("ROLLBACK")

@@ -1087,23 +1087,12 @@ async def get_interview_location(
             ).fetchone()
             if target is None:
                 return None
-            desc = _list_order_by("interview", sort).find("DESC") >= 0
-            key_expr = "IFNULL(created_at, '0000-00-00 00:00:00')"
-            if desc:
-                rank_sql = (
-                    f"SELECT COUNT(*) FROM interview WHERE {where} AND ("
-                    f"{key_expr} > IFNULL(?, '0000-00-00 00:00:00') OR "
-                    f"({key_expr} = IFNULL(?, '0000-00-00 00:00:00') AND id > ?))"
-                )
-            else:
-                rank_sql = (
-                    f"SELECT COUNT(*) FROM interview WHERE {where} AND ("
-                    f"{key_expr} < IFNULL(?, '0000-00-00 00:00:00') OR "
-                    f"({key_expr} = IFNULL(?, '0000-00-00 00:00:00') AND id < ?))"
-                )
+            # Use the list's exact ordering, including NULL dates and ID ties.
+            order_by = _list_order_by("interview", sort)
             rank = conn.execute(
-                rank_sql,
-                (*params, target["created_at"], target["created_at"], int(record_id)),
+                f"SELECT rank FROM (SELECT id, ROW_NUMBER() OVER ({order_by}) - 1 AS rank "
+                f"FROM interview WHERE {where}) WHERE id = ?",
+                (*params, int(record_id)),
             ).fetchone()[0]
             # R09：position_id 必须是岗位 ID（前端 switchPositionById(Number(position))
             # 需要数字），岗位名称另放 position_name 供展示。
