@@ -1,6 +1,6 @@
 # 公私题库与上传规格对齐实施计划
 
-状态：实施中。用户于2026-10-07明确要求开始修改，对齐既有accepted ADR-0048、上传恢复contracts/acceptance与10-04闭环spec。基线d90794d5，分支codex/frontend-ui-hierarchy-cleanup；保留全部原有未跟踪文件，只本地提交，不部署、不推送。
+状态：本轮确认缺口已修复并完成验证；不代表原始全部AC子场景已覆盖。用户于2026-10-07明确要求开始修改，对齐既有accepted ADR-0048、上传恢复contracts/acceptance与10-04闭环spec。基线d90794d5，分支codex/frontend-ui-hierarchy-cleanup；保留全部原有未跟踪文件，只本地提交，不部署、不推送。
 
 依据审计：docs/verification/2026-10-07-upload-spec-review.md。目标为关闭已确认缺口、用行为测试裁定未确认边界、补真实栈验证断言。设计沿用既有作用域、审核和durable job流程。比较禁用旧share、把规范题伪装成面经申请、保留显式旧单题申请三种办法：选择第三种，保留兼容API，不制造不存在的面经事实。旧单题提交建立不可变快照和精确源ID；审核后形成默认隐藏来源的投影，批准只重定向实际提交的私人规范题，不按裸文本猜测其他私人副本。
 
@@ -36,3 +36,6 @@
 单元1复审扩展：通用题库变异与公共维护须排除申请投影；source/target外键SET NULL，pending ID作为独立不可变档案标识，无FK。新增43项spec行为回归。具体命令与红绿证据见 docs/verification/2026-10-07-question-upload-spec-alignment.md。
 
 2026-10-08复验：463项广回归全绿；旧恢复fixture已提交5d0a6640。AC001/002、AC010、AC024、增强分类/标签及resolution身份的AC029独立当前栈通过。完整smoke继续执行，不提前标全AC完成。已发现并纠正共享栈AC007全局attempt计数与分页初始导航测试前置条件，保留行为断言。
+
+
+2026-10-09完成：追加修复并发受理的SQLite WAL读事务升级冲突（ad562589，4 red→4 green）；AC009使用双真实HTTP请求同步门证明两worker真正交错执行（02aa843b）。最终后端上传469、题库鉴权264、前端47通过。完整默认隔离smoke-v7共9个浏览器行为及对应SQL断言通过、exit0，项目interview-boss-real-e2e-466258-1791478576。AC029首轮与恢复后身份、分类标签，AC009双用户隔离均有配对证据。最终限制和全部命令见验证报告。只本地提交、不推送、不部署；用户baseline与外部d8952da4/a91bb3f1保留。

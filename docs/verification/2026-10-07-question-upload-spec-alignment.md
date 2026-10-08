@@ -87,7 +87,7 @@ npx eslint src/components/business/UploadTaskCenter.vue src/composables/useSubmi
 npm run build
 ```
 
-## 单元4：真实栈复验（进行中）
+## 单元4：真实栈复验（本轮范围已通过）
 
 当前隔离Docker/SQLite/Redis/HTTP模型stub的 AC001/002 面经分页与公共任务跳转：1 passed，1.9m。命令 `REAL_STACK_PORT=18121 REAL_STACK_STUB_PORT=18122 REAL_STACK_CAPTURE_FAILURE_DB=1 bash /tmp/spec-align-ac001.sh`，临时runner使用原smoke初始化与完整AC001/002块，跳过无关的前置AC011。证据：`test-results/real-stack/interview-boss-real-e2e-3881165-1791439855/`。本次正确发出page2、season、asc和page size请求。此前分页失败本次未复现，未凭猜测修改产品分页代码；浏览器测试增加中途响应证据保存以便下次失败定位。
 
@@ -133,7 +133,7 @@ OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/
 REAL_STACK_PORT=18141 REAL_STACK_STUB_PORT=18142 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 bash scripts/real_stack_smoke.sh
 ```
 
-当前未验收：完整默认smoke余下场景、全部原始AC的所有子场景、特殊支持访问产品流程、历史私人题重建完全收敛、实际外部模型质量/费用与生产历史脏数据、长期多进程故障与真实设备读屏。44项UI suite包含375/1440及键盘操作行为，但不能推导完整真实设备无障碍验收。未部署或推送。
+尚未验证：全部原始AC的所有子场景、特殊支持访问产品流程、历史私人题重建完全收敛、实际外部模型质量/费用与生产历史脏数据、长期多进程故障与真实设备读屏。44项UI suite包含375/1440及键盘操作行为，但不能推导完整真实设备无障碍验收。未部署或推送。
 
 
 ## 2026-10-09续作：最终代码与并发受理
@@ -161,7 +161,7 @@ REAL_STACK_PORT=18171 REAL_STACK_STUB_PORT=18172 REAL_STACK_CAPTURE_FAILURE_DB=1
 
 当前AC009隔离项目interview-boss-real-e2e-456931-1791478349：浏览器1 passed/18.9s，SQL及双HTTP重叠证据均通过，整命令exit0，日志/tmp/spec-align-ac009-overlap-final.log。4个harness文件已独立review及ruff/bash/diff检查并提交02aa843b。新候选app f8323beac0ab仅从beadd0c73950 COPY当前DB断言助手；stub ce4e9486ab22从既有52ef238bcc6b COPY当前provider，依赖未变。nginx 3bb5c6b4076f不变。
 
-完整默认smoke-v7正在独立项目interview-boss-real-e2e-466258-1791478576运行；尚未以定向AC009通过代替整轮结果。
+完整默认smoke-v7最终已在独立项目interview-boss-real-e2e-466258-1791478576通过；结果及退出码见末尾。
 
 
 ### 最终前端行为回归
@@ -287,3 +287,16 @@ DOCKER_BUILDKIT=0 docker build -t interview-boss-nginx:spec-align-acceptance-202
 ```
 
 基础依赖镜像与生产镜像分开保留，临时Dockerfile内容为上文指定FROM和COPY；完整smoke用最终real-e2e标签对应app f8323beac0ab、nginx 3bb5c6b4076f、stub ce4e9486ab22。
+
+
+## 最终完整验收（2026-10-09，本轮修复范围）
+
+完整默认smoke-v7命令实际exit0，日志/tmp/spec-align-smoke-final-v7.log全部读取。9项真实浏览器测试通过：AC011失败答案选择恢复（2.3m）、AC001/002实际SQLite分页/公共任务定位（1.1m）、AC022文件拒绝（11.6s）、AC007所有者/并发重试及重启（33.4s）、通用真实栈2项（11.6s，含丢失POST响应恢复）、AC028worker重启后打开精确结果（12.4s）、AC029审核脱敏/部分失败恢复（13.3m）、AC009双owner并发隔离（18.3s）。对应数据库断言均成功，脚本未跳过默认路径。另行AC010/024的定向验收命令及结果见上文。
+
+AC029最终同项目首轮/终态配对：item3为22/28/21，item4为23/30/16，item5为24/31/22，均不变；失败item6恢复为25/33/23。四个公共成果分类均为B.Agent与LLM应用 / B1.Agent架构与范式，tags为Agent架构设计；预存canonical16匹配，ordinal50排除。AC009保存的最终证据来自本轮完整项目，两worker、两marker、真实HTTP重叠2 passes/0 failures，固定root时刻和所有权/结果/来源/答案隔离均通过。已用最新同项目文件同时更新ac029首轮/终态和ac009证据，没有混用跨次ID。final-smoke-manifest.json记录命令、exit0、候选镜像、各真实产物及日志SHA256；不提交浏览器认证trace。
+
+```bash
+REAL_STACK_PORT=18141 REAL_STACK_STUB_PORT=18142 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 bash scripts/real_stack_smoke.sh
+```
+
+本轮已确认缺口修复完成。上传→私人/公共分类→聚类→审核发布→部分恢复以及任务中心相关行为在上述测试条件下通过；模型为本地HTTP stub，不能推导真实外部模型质量、费用或生产验收。仍未覆盖全部29项原始AC的所有子场景、特殊支持授权产品流程、历史私人题重建完全收敛、生产旧数据、长期多进程故障、真实设备读屏。既有lint警告及原有stub ledger期望问题没有混入修复。任务只本地提交，未推送或部署，原有未跟踪文件和外部提交均保留。
