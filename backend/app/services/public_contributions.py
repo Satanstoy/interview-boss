@@ -140,7 +140,7 @@ def _serialize_request(row, items=None, include_snapshot=False) -> dict:
 
 
 def create_public_contribution_request(
-    conn, source_type: str, source_id: int, requester_id: int
+    conn, source_type: str, source_id: int, requester_id: int, *, commit: bool = True
 ) -> dict:
     """Create or return the active request for one private source."""
     if source_type not in ("interview", "jd"):
@@ -203,7 +203,8 @@ def create_public_contribution_request(
             (request_id, source_id, _json(snapshot["source"])),
         )
     _event(conn, request_id, requester_id, "submitted", None, "pending_review")
-    conn.commit()
+    if commit:
+        conn.commit()
     return _serialize_request(_request_row(conn, request_id))
 
 

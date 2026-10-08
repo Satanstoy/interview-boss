@@ -19,6 +19,7 @@ class SubmitState(TypedDict, total=False):
     # v2 执行上下文（R02/R03/R05）：LangGraph 只透传已声明的输入键
     import_id: str                          # 根任务 ID（upload_imports.id）
     attempt_id: int | None                  # 当前恢复批次 ID
+    _input_version: int                    # accepted root input version
     _lease_generation: int                  # worker fence for durable checkpoint writes
     thread_id: str                          # 当前执行的 LangGraph checkpoint 隔离键
     work_key: str                           # 本次执行的 work_key

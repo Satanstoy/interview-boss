@@ -38,11 +38,49 @@ GLOBAL_CONFIG = {
 }
 
 
+@pytest.fixture
+def worker_sqlite_connections(client, test_db, monkeypatch, tmp_path):
+    """Concurrent graph/worker transactions need separate real SQLite connections."""
+    import sqlite3
+    import sys
+    import threading
+    import app.db.connection as db_module
+    import app.worker  # noqa: F401 - Replace its imported connection reference too.
+
+    path = str(tmp_path / "worker-flow.sqlite3")
+    primary = sqlite3.connect(path, check_same_thread=False)
+    primary.row_factory = sqlite3.Row
+    test_db.backup(primary)
+    primary.execute("PRAGMA journal_mode=WAL")
+    primary.execute("PRAGMA foreign_keys=ON")
+    local = threading.local()
+    connections = []
+
+    def connection():
+        if not hasattr(local, "conn"):
+            local.conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            local.conn.row_factory = sqlite3.Row
+            local.conn.execute("PRAGMA foreign_keys=ON")
+            connections.append(local.conn)
+        return local.conn
+
+    for name, module in list(sys.modules.items()):
+        if name.startswith("app.") and module and hasattr(module, "get_db_connection"):
+            monkeypatch.setattr(module, "get_db_connection", connection)
+    monkeypatch.setattr(db_module, "get_db_connection", connection)
+    yield primary
+    for conn in connections:
+        conn.close()
+    primary.close()
+
+
 @pytest.mark.asyncio
 async def test_http_upload_to_personal_and_public_question_trace(
-    client, test_db, monkeypatch, tmp_path
+    client, test_db, monkeypatch, tmp_path, worker_sqlite_connections
 ):
     """Trace each ordinal through private storage, review, public cluster and retry."""
+
+    test_db = worker_sqlite_connections
 
     import numpy as np
     import app.asgi as asgi_module
@@ -299,7 +337,7 @@ async def test_http_upload_to_personal_and_public_question_trace(
         "SELECT * FROM interview WHERE owner_id = 101 AND status = 'approved' "
         "ORDER BY id DESC LIMIT 1"
     ).fetchone()
-    assert private_interview is not None
+    assert private_interview is not None, dict(test_db.execute("SELECT status,error_code,error_message FROM upload_imports WHERE id=?", (import_id,)).fetchone())
     private_details = test_db.execute(
         "SELECT id, question, cat1, cat2, tags, source_ordinal, import_id "
         "FROM questions_detail WHERE interview_id = ? ORDER BY source_ordinal",
@@ -445,6 +483,8 @@ async def test_http_upload_to_personal_and_public_question_trace(
         (contribution["id"],),
     ).fetchall()
     assert len(contribution_items) == len(QUESTIONS)
+
+    test_db.commit()  # Make seeded practice history visible to the HTTP connection.
 
     # Real admin approval route: exclude ordinal 50, edit ordinal 10 and redact
     # private source fields before public details are materialized.
@@ -880,8 +920,9 @@ async def test_admin_public_import_persists_approved_projection_audit(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
         "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
         "VALUES ('imp-admin-public', 201, 'admin-public-1', 'hash-admin-public', 'share', "
-        "'interview', 'v1', '{\"audit_public_import\":true}', '{}', 'queued')"
+        "'interview', 'upload-pipeline-v1', '{\"audit_public_import\":true}', '{}', 'queued')"
     )
+    fence_job = test_db.execute("INSERT INTO jobs(job_type,status,root_import_id,lease_generation,locked_until) VALUES('submit_import','running','imp-admin-public',1,datetime('now','+120 seconds'))").lastrowid
     test_db.commit()
 
     result = await persist_public_node(
@@ -909,6 +950,7 @@ async def test_admin_public_import_persists_approved_projection_audit(
             "user_id": 201,
             "is_admin": True,
             "import_id": "imp-admin-public",
+            "job_id": fence_job, "_lease_generation": 1, "_input_version": 1,
         }
     )
     test_db.commit()

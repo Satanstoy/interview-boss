@@ -39,8 +39,42 @@ npx playwright test tests/e2e/public-contribution-review.spec.js -g '统一列�
 
 修改的 Python 文件运行 ruff check；审核组件运行 eslint；git diff --check。精确通过结果提交前再次核对。没有 mock 被测路由、授权或数据库写入；故障场景通过实际 SQLite 实现。LLM/Redis 测试依赖由既有离线 fixture 隔离。
 
-## 单元2–4：进行中，不能宣称全部规格完成
+## 单元2：上传事务与执行边界（2026-10-08 已验证）
 
-实际公共 worker 事务已添加失效执行回归，7种上下文红→绿；合法执行与私人持久化事务正在验证。私人 queue 故障 SQLite trigger 已复现留下已提交 interview/detail，正在修复原子性。任务中心历史分页、详情动作和即时刷新6项浏览器回归已红，尚未实现。新版真实栈及 AC029 完整分类/标签和 resolution 身份断言尚未执行。
+公共/私人/JD持久化现在在 BEGIN IMMEDIATE 内验证 job、lease generation、root、input version、来源与岗位有效性。面经、明细、导入关联、resolution、队列和公共申请在同一事务提交；公共申请服务保留默认 commit，持久化调用显式 commit=False。worker 在模型执行期间独立续租，失败取消执行；进度、答案子任务与收尾阶段应用业务 fence，收尾只更新本 job/本 input version 的检查点。
 
-仍未验收：独立 worker 续租、私人事务全部故障点、任务中心列表/SSE 同 revision 和账号切换、面经真实分页、新版全流程真实栈。审核台两条原有整应用 mock 测试未重跑，已执行的是新增真实组件行为。不得把这些边界标成通过，也不得把历史基线的真实栈结果算作当前修改验收。
+红绿：失效执行7类、私人队列/关联故障、独立续租、JD与申请事务4项、收尾3项均先复现失败再修复；复审补充输入版本变更后仍写旧进度，1 failed → 通过。原全链路fixture共用内存连接导致并发事务串扰，改成临时文件SQLite每线程真实连接；测试自建练习历史先提交再执行HTTP审核。未mock SQL写入。
+
+最新验证：40 passed，1 warning，30.87s（`/tmp/spec-align-worker-final-v2.log`）；隔离 fullstack/leases/budget 22 passed，1 warning，24.20s（`/tmp/spec-align-fullstack-final.log`）。fullstack采用模型stub，heartbeat/finalize用受控graph流测试实际worker与SQLite，不能视作模型或生产验收。独立review确认进度/收尾边界，无高影响阻塞。ruff、git diff --check通过。
+
+```bash
+OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest \
+ backend/tests/services/test_submit_public_commit_fence.py \
+ backend/tests/services/test_submit_personal_commit_atomicity.py \
+ backend/tests/services/test_submit_worker_heartbeat.py \
+ backend/tests/services/test_submit_worker_finalize_fence.py \
+ backend/tests/pipeline/test_upload_graph_recovery_regressions.py \
+ backend/tests/integration/test_upload_question_data_flow_worker.py -q
+spec_test_dir=$(mktemp -d /tmp/spec-align-fullstack-final.XXXXXX)
+UPLOAD_TEST_DB_PATH="$spec_test_dir/test.sqlite3" UPLOAD_TEST_REDIS_PREFIX="spec-align-$RANDOM" \
+ OPENAI_API_KEY=TEST_KEY_PLACEHOLDER OPENAI_BASE_URL='' PYTHONPATH=backend .venv/bin/pytest \
+ backend/tests/integration/test_upload_recovery_fullstack.py \
+ backend/tests/services/test_upload_leases.py backend/tests/security/test_upload_task_budget_scope.py -q
+```
+
+## 单元3：任务中心（实现与定向验证通过，待 checkpoint）
+
+新增历史分页、summary/progress/review/budget内容、打开/回焦/接收任务即时刷新，严格递增revision合并并防账号旧响应。budget接口仅所有者可读，管理员他人任务与不存在均404。新UI行为9项先红后绿；预算JWT/真实路由/SQLite权限3项先红后绿。真实Vue组件及整应用API mock浏览器回归44 passed，1.5m（`/tmp/spec-align-ui-latest.log`）；eslint通过、build成功5.48s（既有chunk大小警告）。这组UI测试不等于真实栈验收。
+
+```bash
+cd frontend
+npx playwright test tests/e2e/upload-task-center.spec.js tests/e2e/public-contribution-review.spec.js
+npx eslint src/components/business/UploadTaskCenter.vue src/composables/useSubmitJobs.js
+npm run build
+```
+
+## 单元4：真实栈复验（进行中）
+
+当前隔离Docker/SQLite/Redis/HTTP模型stub的 AC001/002 面经分页与公共任务跳转：1 passed，1.9m。命令 `REAL_STACK_PORT=18121 REAL_STACK_STUB_PORT=18122 REAL_STACK_CAPTURE_FAILURE_DB=1 bash /tmp/spec-align-ac001.sh`，临时runner使用原smoke初始化与完整AC001/002块，跳过无关的前置AC011。证据：`test-results/real-stack/interview-boss-real-e2e-3881165-1791439855/`。本次正确发出page2、season、asc和page size请求。此前分页失败本次未复现，未凭猜测修改产品分页代码；浏览器测试增加中途响应证据保存以便下次失败定位。
+
+公共贡献AC029正在当前镜像执行；新增公共分类/标签和恢复前成功resolution身份断言，尚不能宣称通过。当前未执行整个默认smoke与全部AC、实际外部模型及生产环境；不宣称所有spec验收完成。

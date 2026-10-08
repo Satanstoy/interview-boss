@@ -1034,3 +1034,24 @@ def accept_upload(
         "status_url": f"/api/upload-imports/{import_id}",
         "policy": policy.to_policy_json(),
     }
+
+
+def assert_upload_business_commit(conn, *, import_id, job_id, generation, input_version):
+    """Fence actual business writes inside their SQLite transaction."""
+    from app.services.job_lifecycle import JobFenceError, assert_job_fence
+
+    if import_id and (job_id is None or generation is None or input_version is None):
+        raise JobFenceError("上传业务提交缺少执行身份或输入版本", job_id=job_id, generation=generation)
+    if job_id is not None:
+        assert_job_fence(conn, job_id, generation)
+    if not import_id:
+        return
+    job = conn.execute("SELECT root_import_id FROM jobs WHERE id=?", (job_id,)).fetchone()
+    root = conn.execute("SELECT * FROM upload_imports WHERE id=?", (import_id,)).fetchone()
+    if not root or not job or job["root_import_id"] != import_id:
+        raise JobFenceError("任务与上传根不匹配", job_id=job_id, generation=generation)
+    if int(root["input_version"]) != int(input_version):
+        raise JobFenceError("上传输入版本已改变", job_id=job_id, generation=generation)
+    blocker = upload_execution_blocker(conn, root, json.loads(root["policy_json"] or "{}"))
+    if blocker or root["error_code"] in {"SOURCE_DELETED", "POSITION_RETIRED", "TAXONOMY_CHANGED"}:
+        raise JobFenceError("上传来源或执行上下文已失效", job_id=job_id, generation=generation)

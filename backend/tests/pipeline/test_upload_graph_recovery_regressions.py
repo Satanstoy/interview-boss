@@ -25,17 +25,11 @@ def test_classification_checkpoint_can_resume_without_reloading_taxonomy():
     assert result["taxonomy_config"] == {}
 
 
-def test_jd_persist_reports_zero_match_failures(monkeypatch):
-    import app.db.connection as db_connection
-    import app.db.operations as db_operations
+def test_jd_persist_reports_zero_match_failures(app_db_isolation):
     from app.agents.submit.persist_personal import jd_persist_node
 
-    monkeypatch.setattr(db_operations, "_insert_jd", lambda *args, **kwargs: 73)
-
-    async def run_db(func):
-        return func()
-
-    monkeypatch.setattr(db_connection, "run_db", run_db)
+    app_db_isolation.execute("INSERT INTO users(id,username,password_hash) VALUES(101,'jd-user','TEST_HASH')")
+    app_db_isolation.commit()
     state = {
         "user_id": 101,
         "target": "personal",
@@ -47,6 +41,8 @@ def test_jd_persist_reports_zero_match_failures(monkeypatch):
 
     assert result["public_contribution_request_id"] is None
     assert result["match_failed"] == 0
+
+    assert app_db_isolation.execute("SELECT owner_id FROM jd").fetchone()[0] == 101
 
 
 def test_langgraph_preserves_match_failure_count_in_submit_state():
@@ -67,75 +63,23 @@ def test_langgraph_preserves_match_failure_count_in_submit_state():
     assert result["match_failed"] == 2
 
 
-def test_match_outcome_is_adapted_to_database_writer_contract(monkeypatch):
-    import app.db.connection as db_connection
-    import app.db.operations as db_operations
+def test_match_outcome_is_adapted_to_database_writer_contract(app_db_isolation, monkeypatch):
     from app.agents.submit.persist_personal import match_and_persist_personal_node
 
-    submitted = {}
-
-    class EmptyResult:
-        def fetchall(self):
-            return []
-
-    class FakeConnection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def execute(self, *_args, **_kwargs):
-            return EmptyResult()
-
-    monkeypatch.setattr(db_connection, "get_db_connection", FakeConnection)
-
-    async def run_db(func):
-        return func()
-
-    monkeypatch.setattr(db_connection, "run_db", run_db)
-
-    def submit_interview(*args, **_kwargs):
-        submitted["matched"] = args[8]
-        return [], 73, [901]
-
-    monkeypatch.setattr(db_operations, "submit_interview_txn", submit_interview)
-    monkeypatch.setattr(
-        "app.services.clustering.match_outcomes",
-        AsyncMock(
-            return_value={
-                "results": [
-                    {
-                        "new_id": 0,
-                        "outcome": "matched",
-                        "canonical_id": 88,
-                        "canonical_scope": "private",
-                    }
-                ]
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "app.services.pipeline.enqueue_questions", lambda *_args, **_kwargs: 0
-    )
-
-    state = {
-        "extracted_data": {
-            "公司": "公司",
-            "面试轮次": "一面",
-            "具体题目清单": ["解释 TCP 三次握手"],
-        },
-        "tagged_rows": [
-            ["https://example.test/i", "公司", "一面", "解释 TCP 三次握手", "网络", "TCP", "协议", "L2-中等"]
-        ],
-        "saved_url": "https://example.test/i",
-        "user_id": 101,
-        "job_position": "后端",
-    }
-
-    asyncio.run(match_and_persist_personal_node(state))
-
-    assert submitted["matched"][0]["question_bank_id"] == 88
+    conn = app_db_isolation
+    conn.execute("INSERT INTO users(id,username,password_hash) VALUES(101,'match-user','TEST_HASH')")
+    monkeypatch.setattr('app.services.clustering.match_outcomes', AsyncMock(return_value={'results':[{'new_id':0,'outcome':'matched','canonical_id':88,'canonical_scope':'private'}]}))
+    canonical = conn.execute("INSERT INTO question_bank(id,question,cat2,job_position,owner_id,status) VALUES(88,'解释 TCP 三次握手','TCP','后端',101,'approved')").lastrowid
+    conn.commit()
+    result = asyncio.run(match_and_persist_personal_node({
+        "extracted_data": {"具体题目清单": ["解释 TCP 三次握手"]},
+        "tagged_rows": [["https://example.test/i", "公司", "一面", "解释 TCP 三次握手", "网络", "TCP", "协议", "L2-中等"]],
+        "saved_url": "https://example.test/i", "user_id":101, "job_position":"后端",
+    }))
+    assert result["match_result"]["matched"][0]["canonical_id"] == canonical
+    assert conn.execute("SELECT count(*) FROM interview WHERE id=?",(result["saved_interview_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM questions_detail WHERE interview_id=?",(result["saved_interview_id"],)).fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM question_bank WHERE owner_id=101").fetchone()[0] == 1
 
 
 def test_default_preflight_probes_the_selected_chat_model(monkeypatch):
@@ -723,9 +667,10 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
     conn.execute(
         "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
         "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
-        "VALUES ('admin-root', 201, 'k', 'h', 'share', 'interview', 'v1', "
+        "VALUES ('admin-root', 201, 'k', 'h', 'share', 'interview', 'upload-pipeline-v1', "
         "'{\"audit_public_import\":true,\"credential_scope\":\"global\"}', '{}', 'queued')"
     )
+    fence_job = conn.execute("INSERT INTO jobs(job_type,status,root_import_id,lease_generation,locked_until) VALUES('submit_import','running','admin-root',1,datetime('now','+120 seconds'))").lastrowid
     conn.commit()
     monkeypatch.setattr(db_operations, "get_db_connection", lambda: conn)
     monkeypatch.setattr(pipeline_queue, "get_db_connection", lambda: conn)
@@ -742,6 +687,7 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
                 "user_id": 201,
                 "is_admin": True,
                 "import_id": "admin-root",
+                "job_id": fence_job, "_lease_generation": 1, "_input_version": 1,
                 "job_position": "后端",
                 "saved_url": "https://public.example/admin-import",
                 "extracted_data": {

@@ -557,6 +557,9 @@ async def credential_preflight_task(ctx, job_id: int):
     return {"job_id": job_id, "status": outcome.status, "error_code": outcome.error_code}
 
 
+SUBMIT_LEASE_HEARTBEAT_SECONDS = 30
+
+
 async def submit_import_task(ctx, job_id: int):
     """后台任务：执行上传导入（面经/JD 提取 + 打标 + 聚类）
 
@@ -923,6 +926,7 @@ async def submit_import_task(ctx, job_id: int):
             "import_id": root_import_id,
             "attempt_id": attempt_id,
             "_lease_generation": lease_generation,
+            "_input_version": int(root_row["input_version"]) if root_row else None,
             "thread_id": thread_id,
             "work_key": work_key,
             "job_id": job_id,
@@ -941,6 +945,13 @@ async def submit_import_task(ctx, job_id: int):
 
             durable_stage, unit_key = checkpoint_for_upload_phase(phase)
             with get_db_connection() as conn:
+                from app.services.upload_lifecycle import assert_upload_business_commit
+
+                conn.execute("BEGIN IMMEDIATE")
+                assert_upload_business_commit(
+                    conn, import_id=root_import_id, job_id=job_id,
+                    generation=lease_generation, input_version=input_state["_input_version"],
+                )
                 if not touch_job(
                     conn,
                     job_id,
@@ -958,8 +969,8 @@ async def submit_import_task(ctx, job_id: int):
                         "INSERT OR IGNORE INTO upload_stage_results ("
                         "  import_id, stage, unit_key, input_version, pipeline_version, "
                         "  status, job_id"
-                        ") VALUES (?, ?, ?, 1, 'upload-pipeline-v1', 'running', ?)",
-                        (root_import_id, durable_stage, unit_key, job_id),
+                        ") VALUES (?, ?, ?, ?, ?, 'running', ?)",
+                        (root_import_id, durable_stage, unit_key, input_state["_input_version"], root_row["pipeline_version"], job_id),
                     )
                 conn.commit()
 
@@ -982,13 +993,15 @@ async def submit_import_task(ctx, job_id: int):
 
             def _apply():
                 with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
                     conn.execute(
                         "UPDATE upload_stage_results SET status = ?, "
                         "error_code = ?, updated_at = CURRENT_TIMESTAMP "
-                        "WHERE import_id = ? AND status IN ('running', 'pending')",
-                        (stage_status, normalized, root_import_id),
+                        "WHERE import_id = ? AND job_id = ? AND input_version = ? AND status IN ('running', 'pending')",
+                        (stage_status, normalized, root_import_id, job_id, input_state["_input_version"]),
                     )
-                    conn.commit()
                     return finalize_attempt_and_aggregate_root(
                         conn,
                         import_id=root_import_id,
@@ -1018,6 +1031,34 @@ async def submit_import_task(ctx, job_id: int):
         emitted_error = None
         emitted_error_code = None
         saw_done = False
+
+        # Renew during long graph/model calls even when no progress event is emitted.
+        heartbeat_stop = asyncio.Event()
+        submit_task = asyncio.current_task()
+
+        async def _renew_submit_lease():
+            from app.services.job_lifecycle import heartbeat_job
+            while not heartbeat_stop.is_set():
+                try:
+                    await asyncio.wait_for(heartbeat_stop.wait(), timeout=SUBMIT_LEASE_HEARTBEAT_SECONDS)
+                    return
+                except asyncio.TimeoutError:
+                    pass
+                def _renew():
+                    with get_db_connection() as conn:
+                        alive = heartbeat_job(conn, job_id, lease_generation)
+                        conn.commit()
+                        return alive
+                try:
+                    alive = await asyncio.to_thread(_renew)
+                except Exception as exc:
+                    logger.warning("上传续租失败: job_id=%s exception_type=%s", job_id, type(exc).__name__)
+                    alive = False
+                if not alive:
+                    submit_task.cancel()
+                    return
+
+        lease_heartbeat_task = asyncio.create_task(_renew_submit_lease())
 
         # 消费 graph 事件流（只读取事件，不产出 SSE）
         try:
@@ -1067,6 +1108,11 @@ async def submit_import_task(ctx, job_id: int):
                 type(e).__name__,
                 emitted_error_code,
             )
+
+        finally:
+            heartbeat_stop.set()
+            lease_heartbeat_task.cancel()
+            await asyncio.gather(lease_heartbeat_task, return_exceptions=True)
 
         # 如果 graph yield 了 error 事件，立刻标记失败
         if emitted_error:
@@ -1143,6 +1189,9 @@ async def submit_import_task(ctx, job_id: int):
 
             def _create_answer_jobs():
                 with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
                     ids = create_answer_generation_jobs(
                         conn,
                         job_id,
@@ -1164,10 +1213,13 @@ async def submit_import_task(ctx, job_id: int):
 
             def _finalize_root(success_result: str | None):
                 with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
                     seen_units = conn.execute(
                         "SELECT stage, unit_key FROM upload_stage_results "
-                        "WHERE import_id = ? AND status = 'running'",
-                        (root_import_id,),
+                        "WHERE import_id = ? AND job_id = ? AND input_version = ? AND status = 'running'",
+                        (root_import_id, job_id, input_state["_input_version"]),
                     ).fetchall()
                     for stage_row in seen_units:
                         # AC-006：匹配模型失败 → match 阶段标记 failed（成果
@@ -1180,11 +1232,11 @@ async def submit_import_task(ctx, job_id: int):
                                 "UPDATE upload_stage_results SET status = 'failed', "
                                 "error_code = 'MATCH_FAILED', updated_at = CURRENT_TIMESTAMP "
                                 "WHERE import_id = ? AND stage = ? AND unit_key = ? "
-                                "AND status = 'running'",
+                                "AND job_id = ? AND input_version = ? AND status = 'running'",
                                 (
                                     root_import_id,
                                     stage_row["stage"],
-                                    stage_row["unit_key"],
+                                    stage_row["unit_key"], job_id, input_state["_input_version"],
                                 ),
                             )
                             continue
@@ -1213,17 +1265,35 @@ async def submit_import_task(ctx, job_id: int):
                             "UPDATE upload_stage_results SET status = 'succeeded', "
                             "result_json = ?, updated_at = CURRENT_TIMESTAMP "
                             "WHERE import_id = ? AND stage = ? AND unit_key = ? "
-                            "AND status = 'running'",
+                            "AND job_id = ? AND input_version = ? AND status = 'running'",
                             (
                                 stage_payload,
                                 root_import_id,
                                 stage_row["stage"],
-                                stage_row["unit_key"],
+                                stage_row["unit_key"], job_id, input_state["_input_version"],
                             ),
                         )
                     conn.commit()
 
             await asyncio.to_thread(_finalize_root, json.dumps(result_data, ensure_ascii=False))
+
+        if root_import_id and request_public_review and not final_state_values.get("public_contribution_request_id"):
+            def _ensure_contribution():
+                from app.services.public_contributions import create_public_contribution_request, bind_contribution_request_to_root
+                from app.services.upload_lifecycle import assert_upload_business_commit
+                with get_db_connection() as conn:
+                    try:
+                        conn.execute("BEGIN IMMEDIATE")
+                        assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
+                        interview_id = final_state_values.get("saved_interview_id")
+                        if interview_id:
+                            contribution = create_public_contribution_request(conn, "interview", int(interview_id), int(payload.get("user_id") or 0), commit=False)
+                            bind_contribution_request_to_root(conn, import_id=root_import_id, contribution_request_id=int(contribution["id"]))
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+            await asyncio.to_thread(_ensure_contribution)
 
         _complete(result=json.dumps(result_data, ensure_ascii=False))
 
@@ -1246,44 +1316,6 @@ async def submit_import_task(ctx, job_id: int):
                 aggregated["status"],
                 aggregated["revision"],
             )
-            # R02：普通 share 优先走公共化申请而非直接完成
-            if request_public_review:
-                from app.db.connection import get_db_connection
-                from app.services.public_contributions import create_public_contribution_request
-
-                def _ensure_contribution():
-                    with get_db_connection() as conn:
-                        interview_id = aggregated.get("interview_id")
-                        if not interview_id:
-                            return None
-                        return create_public_contribution_request(
-                            conn, "interview", int(interview_id), int(payload.get("user_id") or 0)
-                        )
-
-                contribution = await asyncio.to_thread(_ensure_contribution)
-                if contribution:
-                    # 回写根任务关联（此前 upload_imports.contribution_request_id
-                    # 零写入，快照 review_status 恒空）。
-                    if root_import_id:
-                        from app.services.public_contributions import (
-                            bind_contribution_request_to_root,
-                        )
-
-                        def _bind_root():
-                            with get_db_connection() as conn:
-                                bind_contribution_request_to_root(
-                                    conn,
-                                    import_id=root_import_id,
-                                    contribution_request_id=int(contribution["id"]),
-                                )
-                                conn.commit()
-
-                        await asyncio.to_thread(_bind_root)
-                    logger.info(
-                        "share 已建公共化申请并绑定根任务: request=%s import=%s",
-                        contribution["id"],
-                        root_import_id,
-                    )
 
     except Exception as e:
         from app.services.upload_retry_budget import safe_upload_error_message

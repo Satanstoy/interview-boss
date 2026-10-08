@@ -853,6 +853,9 @@ def submit_interview_txn_tag_only(
     tagged_rows,
     *,
     import_id: str | None = None,
+    job_id: int | None = None,
+    lease_generation: int | None = None,
+    input_version: int | None = None,
     source_ordinals: list[int] | None = None,
     enqueue: bool = False,
     return_detail_ids: bool = False,
@@ -867,7 +870,11 @@ def submit_interview_txn_tag_only(
     with get_db_connection() as conn:
         cursor = conn.cursor()
         try:
-            cursor.execute("BEGIN")
+            cursor.execute("BEGIN IMMEDIATE")
+            from app.services.upload_lifecycle import assert_upload_business_commit
+
+            assert_upload_business_commit(conn, import_id=import_id, job_id=job_id,
+                                          generation=lease_generation, input_version=input_version)
             _insert_interview_txn(
                 cursor,
                 saved_url,
@@ -1039,6 +1046,15 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
 # ═══════════════════════════════════════════════════
 #  JD 插入（独立操作，不涉及聚类）
 # ═══════════════════════════════════════════════════
+
+
+def _insert_jd_in_conn(conn, saved_url, data, tech_stack, season="", owner_id=None, status="approved", job_position=""):
+    """Insert JD without committing the caller's upload transaction."""
+    cur = conn.execute(
+        "INSERT INTO jd (url,company,job_title,salary,tech_stack,bonus,season,owner_id,status,url_signature,job_position) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (saved_url, data.get("公司","未提供"),data.get("岗位名称","未提供"),data.get("薪资范围","未提供"),tech_stack,data.get("加分项","未提供"),season,owner_id,status,_extract_url_signature(saved_url),job_position),
+    )
+    return int(cur.lastrowid)
 
 
 def _insert_jd(
