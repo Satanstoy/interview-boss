@@ -223,7 +223,7 @@ async def _legacy_sse_via_accept_service(
 
     def _accept():
         with get_db_connection() as conn:
-            conn.execute("BEGIN")
+            conn.execute("BEGIN IMMEDIATE")
             try:
                 result = accept_upload(
                     conn,
@@ -405,7 +405,7 @@ async def create_submit_job(
 
     def _accept():
         with get_db_connection() as conn:
-            conn.execute("BEGIN")
+            conn.execute("BEGIN IMMEDIATE")
             try:
                 result = accept_upload(
                     conn,
