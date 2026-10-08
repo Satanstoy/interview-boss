@@ -43,7 +43,14 @@
       </AppTooltip>
     </div>
 
-    <div v-if="filteredInterviewData.length === 0 && !isDataLoading" class="rounded-xl border border-dashed border-border bg-card p-6 text-center">
+    <div v-if="interviewLoadError" role="alert" class="rounded-xl border border-destructive/30 bg-card p-6 text-center">
+      <p class="text-sm text-destructive">面经加载失败：{{ interviewLoadError }}</p>
+      <button @click="retryInterviewPage" class="mt-3 text-sm text-primary hover:underline">重试加载面经</button>
+    </div>
+    <div v-else-if="isInterviewLoading" role="status" class="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+      正在加载面经…
+    </div>
+    <div v-else-if="filteredInterviewData.length === 0" class="rounded-xl border border-dashed border-border bg-card p-6 text-center">
       <FileText class="mx-auto mb-2 size-8 text-muted-foreground/50" />
       <p class="text-sm text-muted-foreground">暂无面经数据</p>
       <router-link to="/import" class="mt-2 inline-block text-sm text-primary hover:underline">去导入面经</router-link>
@@ -51,6 +58,7 @@
 
     <!-- Interview DataTable -->
     <InterviewDataTable
+      v-if="!interviewLoadError && !isInterviewLoading"
       :columns="interviewColumns"
       :rows="filteredInterviewData"
       :server-total="interviewTotal"
@@ -157,6 +165,7 @@ const InterviewDataTable = DataTable
 const {
   filteredInterviewData, interviewSelection, interviewBatchActions,
   interviewCurrentPage, interviewPageSize,
+  isInterviewLoading, interviewLoadError,
   filterSeason, interviewSortOrder, interviewSeasons,
   highlightInterviewId, displayUser, safeUrl,
   saveField, deleteDataRow, reprocessInterview,
@@ -170,6 +179,10 @@ const {
 
 const toast = useToast()
 const contributionIds = ref(new Set())
+
+const retryInterviewPage = () => {
+  loadInterviewPage(interviewCurrentPage.value, interviewPageSize.value)
+}
 
 // R13/contracts §4.5：page/pageSize 变化时向服务端拉取对应页（server 模式）
 const onInterviewPageChange = (page) => {

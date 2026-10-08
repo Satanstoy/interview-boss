@@ -18,6 +18,8 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   const masterBank = ref([])
   const isDataLoading = ref(false)
   const dataLoadError = ref(null)
+  const isInterviewLoading = ref(false)
+  const interviewLoadError = ref(null)
   const analytics = ref({ tech_trends: {} })
   const popularTagsFromServer = ref([])
   const categoryCountsFromServer = ref([])
@@ -83,7 +85,9 @@ export function useMasterBankData({ onAfterFetch } = {}) {
       if (currentRequestVersion !== requestVersion.value) return
       // 招聘季全集独立拉取（server 模式下面经数据仅当前页，season 选项需全集）
       fetchInterviewSeasonSource()
-          .then(source => { interviewSeasonSource.value = source })
+          .then(source => {
+            if (currentRequestVersion === requestVersion.value) interviewSeasonSource.value = source
+          })
           .catch(() => {})
       jdData.value = (jdResp.items || jdResp).map(item => ({ ...item }))
       const items = (masterResp.items || masterResp).map(decorateQuestion)
@@ -122,29 +126,47 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   /** 招聘季全集（独立于分页数据，避免换页丢失 season 选项） */
   const interviewSeasonSource = ref([])
 
-  /** 招聘季全集来源：一次全量拉取（不用于展示，仅推断 season 选项） */
+  /** 招聘季和来源导航全集：遵守服务端100条上限，不受招聘季筛选影响。 */
   const fetchInterviewSeasonSource = async () => {
-    const resp = await api.fetchInterviewData({
-      page: 1,
-      page_size: 500,
-      season: filterSeason.value || undefined,
-      position_id: interviewPositionId.value || undefined,
-      sort: 'created_at_desc',
-      scope: 'all',
-    })
-    return resp.items || resp
+    const positionId = interviewPositionId.value || undefined
+    const items = []
+    let page = 1
+    while (true) {
+      const resp = await api.fetchInterviewData({
+        page,
+        page_size: 100,
+        position_id: positionId,
+        sort: 'created_at_desc',
+        scope: 'all',
+      })
+      const pageItems = resp.items || resp
+      items.push(...pageItems)
+      if (pageItems.length === 0 || items.length >= (resp.total ?? items.length)) return items
+      page += 1
+    }
   }
 
   /** 面经列表换页：向服务端拉取目标页并刷新当前页数据（合约 §4.5 server 模式） */
   const loadInterviewPage = async (page = 1, pageSize = 20) => {
     const currentRequestVersion = ++interviewPageRequestVersion.value
-    const { items, total } = await fetchInterviewPage(page, pageSize)
-    if (currentRequestVersion === interviewPageRequestVersion.value) {
-      interviewPageData.value = items.map(item => ({ ...item }))
-      interviewData.value = interviewPageData.value
-      interviewTotal.value = total
+    isInterviewLoading.value = true
+    interviewLoadError.value = null
+    try {
+      const { items, total } = await fetchInterviewPage(page, pageSize)
+      if (currentRequestVersion === interviewPageRequestVersion.value) {
+        interviewPageData.value = items.map(item => ({ ...item }))
+        interviewData.value = interviewPageData.value
+        interviewTotal.value = total
+      }
+      return { items, total }
+    } catch (error) {
+      if (currentRequestVersion === interviewPageRequestVersion.value) {
+        interviewLoadError.value = getFriendlyError(error, '请稍后重试')
+      }
+      return null
+    } finally {
+      if (currentRequestVersion === interviewPageRequestVersion.value) isInterviewLoading.value = false
     }
-    return { items, total }
   }
 
   /** 加载下一页题库数据（无限滚动） */
@@ -301,7 +323,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
   return {
     // data
     jdData, interviewData, masterBank, bankFilter,
-    isDataLoading, dataLoadError,
+    isDataLoading, dataLoadError, isInterviewLoading, interviewLoadError,
     analytics, practiceStats, popularTags, categoryCounts,
     masterBankTotal, masterBankOverallTotal, interviewTotal,
     interviewCurrentPage, interviewPageSize,
@@ -319,7 +341,7 @@ export function useMasterBankData({ onAfterFetch } = {}) {
     // functions
     fetchTableData, fetchAnalytics, fetchPracticeStats,
     loadActiveSeason, loadAllData,
-    loadInterviewPage, fetchInterviewPage,
+    loadInterviewPage, fetchInterviewPage, fetchInterviewSeasonSource,
     // utils
     formatDate,
   }

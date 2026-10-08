@@ -41,6 +41,7 @@ import { useAuth, initAuthSingleton } from '@/composables/useAuth.js'
 import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
+import { fetchInterviewLocation } from '@/services/dataApi.js'
 import { fetchCodingPlaylists } from '@/services/codingApi.js'
 import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
@@ -145,7 +146,7 @@ const {
 let afterFetchCleanup = () => {}
 const {
   jdData, interviewData, masterBank,
-  isDataLoading, dataLoadError,
+  isDataLoading, dataLoadError, isInterviewLoading, interviewLoadError,
   analytics, practiceStats, popularTags, categoryCounts,
   masterBankTotal, masterBankOverallTotal,
   activeSeason, availableSeasons,
@@ -160,7 +161,7 @@ const {
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadActiveSeason, loadAllData, formatDate,
   interviewTotal, interviewCurrentPage, interviewPageSize,
-  loadInterviewPage,
+  loadInterviewPage, fetchInterviewSeasonSource,
 } = useMasterBankData({ onAfterFetch: () => afterFetchCleanup() })
 
 // ── Build（题库重建） ──
@@ -494,7 +495,7 @@ const toggleSubTag = (tag) => {
   fetchTableData({ resetSubTags: false })
 }
 
-const onNavigateToInterview = (event) => {
+const onNavigateToInterview = async (event) => {
   const source = event?.source || event
   const questionId = event?.questionId
   const targetUrl = source.url || ''
@@ -505,25 +506,50 @@ const onNavigateToInterview = (event) => {
   }
   const targetPath = normalizeUrl(targetUrl)
 
-  const match = interviewData.value.find(row => {
+  const matchesSource = (row) => {
     const rowUrl = row['来源链接'] || row.url || ''
     return rowUrl === targetUrl || normalizeUrl(rowUrl) === targetPath
-  })
-  if (!match) { toast.warning('未找到该面经记录'); return }
+  }
+  let match = interviewData.value.find(matchesSource)
+  let location
+  try {
+    // 面经列表只缓存当前页，来源记录可能尚未加载。
+    if (!match && !isPreviewMode) match = (await fetchInterviewSeasonSource()).find(matchesSource)
+    if (!match) { toast.warning('未找到该面经记录'); return }
+    location = isPreviewMode ? {
+      page: Math.floor(interviewData.value.indexOf(match) / interviewPageSize.value) + 1,
+      page_size: interviewPageSize.value,
+    } : await fetchInterviewLocation(match.id, {
+      page_size: interviewPageSize.value,
+      sort: interviewSortOrder.value === 'asc' ? 'created_at_asc' : 'created_at_desc',
+      scope: 'all',
+      ...(interviewPositionId.value ? { position_id: interviewPositionId.value } : {}),
+    })
+  } catch {
+    toast.error('面经定位失败，请稍后重试')
+    return
+  }
 
   returnTab.value = activeTab.value
   const outerScroll = document.querySelector('.overflow-y-auto.custom-scrollbar')
   if (outerScroll) setSavedScrollTop(outerScroll.scrollTop)
 
   if (activeTab.value === 'Practice') returnToPracticeMode.value = true
-  router.push(routeLocation('/interview'))
-
   filterSeason.value = ''
-  const sortedIdx = filteredInterviewData.value.indexOf(match)
-  const idx = sortedIdx >= 0 ? sortedIdx : interviewData.value.indexOf(match)
-  interviewCurrentPage.value = Math.floor(idx / interviewPageSize.value) + 1
-
-  highlightInterviewId.value = match.id
+  if (isPreviewMode) {
+    interviewCurrentPage.value = location.page
+    highlightInterviewId.value = match.id
+    await router.push(routeLocation('/interview'))
+  } else {
+    await router.push({
+      path: '/interview',
+      query: {
+        page: String(location.page),
+        page_size: String(location.page_size || interviewPageSize.value),
+        highlight: String(match.id),
+      },
+    })
+  }
 
   const scrollAndHighlight = (attempt = 0) => {
     const el = document.querySelector(`[data-row-id="${match.id}"]`)
@@ -568,7 +594,7 @@ setOnJobDone((_jobId, _result) => {
 provide('appData', {
   // Data
   jdData, interviewData, masterBank,
-  isDataLoading, dataLoadError,
+  isDataLoading, dataLoadError, isInterviewLoading, interviewLoadError,
   analytics, practiceStats, popularTags, categoryCounts,
   masterBankTotal, masterBankOverallTotal,
   activeSeason, availableSeasons,
@@ -584,8 +610,6 @@ provide('appData', {
   // Fetch
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadAllData, formatDate,
-  interviewPageSize, interviewSortOrder,
-  filterSeason,
   interviewTotal,
   loadInterviewPage,
   // Auth
@@ -631,7 +655,7 @@ provide('appData', {
 // ── Lifecycle ──
 // initAuth() 在 App.vue 中执行，authCompleted 变为 true 后触发数据加载
 watch(authCompleted, (done) => {
-  if (done && currentUser.value) {
+  if (done && currentUser.value && !isPreviewMode) {
     loadAllData()
   }
 }, { immediate: true })
@@ -640,6 +664,7 @@ watch(authCompleted, (done) => {
 watch(
   () => currentUser.value?.current_position_id,
   (posId) => {
+    if (isPreviewMode) return
     interviewPositionId.value = posId ? String(posId) : ''
     interviewCurrentPage.value = 1
     fetchTableData()
@@ -651,22 +676,26 @@ watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeCon
 
 // ── AC-001：任务中心「查看结果」写入 page/position/highlight 查询参数，
 // 这里消费它们：切换岗位筛选、跳到目标页并高亮目标行（只主动打开时生效）。
-const locationQueryConsumed = ref(false)
+const locationQueryConsumed = ref('')
 watch(
   () => [route.path, route.query.page, route.query.highlight, route.query.position, route.query.position_name, route.query.page_size],
   async ([path, page, highlight, position, positionName, pageSize]) => {
-    if (path !== '/interview') return
+    if (path !== '/interview') {
+      locationQueryConsumed.value = ''
+      return
+    }
     const requestedPageSize = Number(pageSize)
     if ([10, 20, 50, 100].includes(requestedPageSize)) {
       interviewPageSize.value = requestedPageSize
     }
     if (!isAuthenticatedForUi.value) return
     if (!highlight) {
-      locationQueryConsumed.value = false
+      locationQueryConsumed.value = ''
       return
     }
     // 同一目标不重复触发（消费后我们清掉参数，再次进入不重复）
-    if (locationQueryConsumed.value && highlightInterviewId.value) return
+    const targetKey = [page, highlight, position, pageSize].map(value => String(value || '')).join(':')
+    if (locationQueryConsumed.value === targetKey && highlightInterviewId.value) return
     if (position && String(position) !== String(currentUser.value?.current_position_id || '')) {
       // 仅主动「查看结果」时切到目标岗位并回到第 1 页（spec §7）。
       // 通过个人岗位接口切换当前用户；管理员岗位维护端点禁止普通用户调用。
@@ -698,7 +727,7 @@ watch(
     highlightInterviewId.value = String(highlight)
     // contracts §4.5：定位目标页时向服务端拉取该页数据
     loadInterviewPage(pageNumber, interviewPageSize.value)
-    locationQueryConsumed.value = true
+    locationQueryConsumed.value = targetKey
     // 消费后清理 query，避免刷新再次触发/污染 URL
     if (String(route.query.page || '') !== String(pageNumber) || String(route.query.highlight || '') !== String(highlight)) {
       router.replace({

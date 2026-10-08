@@ -47,12 +47,12 @@ test('a slower previous sort response cannot replace the current interview page'
     } else if (path === '/api/data/interview') {
       const pageSize = url.searchParams.get('page_size')
       const sort = url.searchParams.get('sort')
-      if (pageSize === '100' && sort === 'created_at_desc') {
+      if (pageSize === '20' && sort === 'created_at_desc') {
         resolveStaleRequestStarted()
         await new Promise(resolve => setTimeout(resolve, 800))
         await route.fulfill({ json: { items: [row(1, '旧排序响应')], total: 1 } })
         resolveStaleResponseFinished()
-      } else if (pageSize === '100' && sort === 'created_at_asc') {
+      } else if (pageSize === '20' && sort === 'created_at_asc') {
         await route.fulfill({ json: { items: [row(2, '当前排序响应')], total: 1 } })
       } else {
         await route.fulfill({ json: { items: [], total: 0 } })

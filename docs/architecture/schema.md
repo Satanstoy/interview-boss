@@ -1,8 +1,8 @@
 # InterviewBoss SQLite Schema
 
-> Generated: 2026-10-01
-> Source migration commit: unknown
-> Latest migration: 123 (public_publish_gate)
+> Generated: 2026-10-08
+> Source migration commit: d8952da4
+> Latest migration: 127 (reconcile_branch_identities)
 > foreign_key_check: 0
 > Source of truth: `backend/app/db/migrations/` applied to a fresh in-memory SQLite database.
 > Runtime: SQLite WAL with `PRAGMA foreign_keys=ON`; soft-deleted rows use `deleted_at IS NULL` filters where documented by the owning service.
@@ -131,8 +131,12 @@
 | 121 | `upload_recovery_core` | yes |
 | 122 | `upload_resolution` | yes |
 | 123 | `public_publish_gate` | yes |
+| 124 | `upload_spec_stage_names` | yes |
+| 125 | `upload_llm_api_format` | yes |
+| 126 | `question_promotions` | yes |
+| 127 | `reconcile_branch_identities` | yes |
 
-## Tables (94)
+## Tables (95)
 
 ### `admin_assistant_log`
 - Columns: `id`:INTEGER, `session_id`:TEXT, `admin_id`:INTEGER, `role`:TEXT, `content`:TEXT, `tool_trace`:TEXT, `created_at`:TEXT
@@ -494,6 +498,11 @@
 - Foreign keys: `position_id` -> `job_positions`.`id` (CASCADE); `question_id` -> `question_bank`.`id` (CASCADE)
 - Indexes: `idx_qp_position_question` (position_id, question_id); `idx_qp_position` (position_id); `sqlite_autoindex_question_position_1` UNIQUE (question_id, position_id)
 
+### `question_promotion_requests`
+- Columns: `pending_question_id`:INTEGER, `source_question_id`:INTEGER, `requester_id`:INTEGER, `snapshot_json`:TEXT, `review_projection_json`:TEXT, `target_question_id`:INTEGER, `status`:TEXT, `reviewer_id`:INTEGER, `created_at`:TEXT, `reviewed_at`:TEXT
+- Foreign keys: `reviewer_id` -> `users`.`id` (NO ACTION); `target_question_id` -> `question_bank`.`id` (SET NULL); `requester_id` -> `users`.`id` (NO ACTION); `source_question_id` -> `question_bank`.`id` (SET NULL)
+- Indexes: `uq_pending_question_promotion` UNIQUE partial (source_question_id)
+
 ### `question_resolutions`
 - Columns: `id`:INTEGER, `detail_id`:INTEGER, `occurrence_scope`:TEXT, `occurrence_owner_id`:INTEGER, `canonical_id`:INTEGER, `canonical_scope`:TEXT, `status`:TEXT, `taxonomy_version`:TEXT, `pipeline_version`:TEXT, `input_version`:INTEGER, `confidence`:REAL, `decided_at`:TEXT, `invalidated_at`:TEXT, `reason`:TEXT
 - Foreign keys: `canonical_id` -> `question_bank`.`id` (NO ACTION); `occurrence_owner_id` -> `users`.`id` (NO ACTION); `detail_id` -> `questions_detail`.`id` (NO ACTION)
@@ -540,7 +549,7 @@
 - Indexes: `idx_upload_imports_requester` (requester_id, created_at); `sqlite_autoindex_upload_imports_1` UNIQUE (id); `uq_upload_imports_idempotency` UNIQUE (requester_id, idempotency_key)
 
 ### `upload_llm_calls`
-- Columns: `id`:INTEGER, `root_import_id`:TEXT, `stage`:TEXT, `unit_key`:TEXT, `call_key`:TEXT, `credential_scope`:TEXT, `payer_type`:TEXT, `payer_user_id`:INTEGER, `provider`:TEXT, `model`:TEXT, `config_fingerprint`:TEXT, `status`:TEXT, `input_tokens`:INTEGER, `output_tokens`:INTEGER, `started_at`:TEXT, `finished_at`:TEXT, `error_code`:TEXT
+- Columns: `id`:INTEGER, `root_import_id`:TEXT, `stage`:TEXT, `unit_key`:TEXT, `call_key`:TEXT, `credential_scope`:TEXT, `payer_type`:TEXT, `payer_user_id`:INTEGER, `provider`:TEXT, `model`:TEXT, `config_fingerprint`:TEXT, `status`:TEXT, `input_tokens`:INTEGER, `output_tokens`:INTEGER, `started_at`:TEXT, `finished_at`:TEXT, `error_code`:TEXT, `api_format`:TEXT
 - Foreign keys: `payer_user_id` -> `users`.`id` (NO ACTION); `root_import_id` -> `upload_imports`.`id` (NO ACTION)
 - Indexes: `idx_upload_llm_calls_root` (root_import_id, stage); `sqlite_autoindex_upload_llm_calls_1` UNIQUE (call_key)
 
