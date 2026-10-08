@@ -96,14 +96,16 @@ def test_sync_projection_fails_closed_and_matches_json(test_db):
     ).fetchone()[0] == 1
 
 
-@pytest.mark.asyncio
-async def test_approval_merges_pending_duplicate_into_existing_public_question(
-    test_db, monkeypatch
+def test_approval_merges_pending_duplicate_into_existing_public_question(
+    client, test_db
 ):
-    import app.routers.admin_review as admin_review
+    from app.core.auth import create_access_token
 
     test_db.execute(
         "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (1, 'submitter', 'x')"
+    )
+    test_db.execute(
+        "INSERT INTO users(id,username,password_hash,is_admin) VALUES (99, 'integrity-admin', 'TEST_HASH', 1)"
     )
     _insert_question(
         test_db,
@@ -129,21 +131,24 @@ async def test_approval_merges_pending_duplicate_into_existing_public_question(
     )
     test_db.commit()
 
-    async def run_sync(fn):
-        return fn()
-
-    monkeypatch.setattr(admin_review, "run_db", run_sync)
-    await admin_review.approve_question(11, {"id": 99})
+    response = client.post(
+        "/api/master-bank/approve/11",
+        headers={
+            "Authorization": "Bearer " + create_access_token({"user_id": 99, "type": "access"}),
+            "X-Requested-With": "XMLHttpRequest",
+        },
+    )
+    assert response.status_code == 200, response.text
 
     target = test_db.execute(
         "SELECT sources, original_questions, original_question_sources FROM question_bank WHERE id = 10"
     ).fetchone()
-    assert {item["url"] for item in json.loads(target["sources"])} == {"u1", "u2"}
+    assert {item["url"] for item in json.loads(target["sources"])} == {"u1"}
     assert len(json.loads(target["original_questions"])) == 1
     assert {
         item["url"]
         for item in json.loads(target["original_question_sources"])[0]["sources"]
-    } == {"u1", "u2"}
+    } == {"u1"}
     assert test_db.execute(
         "SELECT deleted_at FROM question_bank WHERE id = 11"
     ).fetchone()[0] is not None
@@ -151,6 +156,15 @@ async def test_approval_merges_pending_duplicate_into_existing_public_question(
         "SELECT COUNT(*) FROM question_bank WHERE owner_id IS NULL "
         "AND status = 'approved' AND deleted_at IS NULL"
     ).fetchone()[0] == 1
+    promotion = test_db.execute(
+        "SELECT status,reviewer_id,target_question_id,snapshot_json,review_projection_json "
+        "FROM question_promotion_requests WHERE pending_question_id=11"
+    ).fetchone()
+    assert promotion["status"] == "approved"
+    assert promotion["reviewer_id"] == 99 and promotion["target_question_id"] == 10
+    assert json.loads(promotion["snapshot_json"])["sources"] == '[{"url": "u2"}]'
+    assert json.loads(promotion["review_projection_json"])["sources"] == "[]"
+
 
 
 @pytest.mark.asyncio
