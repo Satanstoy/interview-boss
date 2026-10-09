@@ -227,26 +227,28 @@ test('AC-024 legacy retry stays JD, reviewed projection is public, and old appro
     expect(stillPending.body.status).toBe('pending_review')
     expect(stillPending.body.public_jd_id).toBeNull()
 
-    const approval = await api(
-      adminPage,
-      adminToken,
-      'POST',
-      `/api/admin/public-contributions/${requestId}/approve`,
-      {
-        review_fields: {
-          source: {
-            company: PUBLIC_COMPANY,
-            job_title: 'AC024 public platform engineer',
-            tech_stack: 'AC024_PUBLIC_TECH_GO',
-            bonus: 'AC024_PUBLIC_BONUS_SQL',
-            position: 'agent开发/大模型应用开发/大模型开发',
-            salary: null,
-            source_url: seed.reviewed_public_url,
-          },
-        },
-      },
-    )
+    await adminPage.getByRole('button', { name: ADMIN }).click()
+    await adminPage.getByRole('button', { name: '审核题库', exact: true }).click()
+    const card = adminPage.locator(`[data-review-key="contribution-${requestId}"]`)
+    await card.getByRole('button', { name: '通过', exact: true }).click()
+    await expect(adminPage.getByLabel('公开公司')).toHaveValue('')
+    await expect(adminPage.getByLabel('公开薪资')).toHaveValue('')
+    await adminPage.getByLabel('公开公司').fill(PUBLIC_COMPANY)
+    await adminPage.getByLabel('公开岗位名称').fill('AC024 public platform engineer')
+    await adminPage.getByLabel('公开技术栈').fill('AC024_PUBLIC_TECH_GO')
+    await adminPage.getByLabel('公开加分项').fill('AC024_PUBLIC_BONUS_SQL')
+    await adminPage.getByLabel('公开职位', { exact: true }).fill('agent开发/大模型应用开发/大模型开发')
+    await adminPage.getByLabel('公开来源 URL').fill(seed.reviewed_public_url)
+    await adminPage.getByRole('button', { name: '预览公开内容', exact: true }).click()
+    await expect(adminPage.getByTestId('review-projection-preview')).toContainText(PUBLIC_COMPANY)
+    await expect(adminPage.getByTestId('review-projection-preview')).not.toContainText(PRIVATE_COMPANY)
+    const approvalPromise = adminPage.waitForResponse(response =>
+      pathOf(response.url()) === `/api/admin/public-contributions/${requestId}/approve` && response.request().method() === 'POST')
+    await adminPage.getByRole('button', { name: '确认通过', exact: true }).click()
+    const approvalResponse = await approvalPromise
+    const approval = { status: approvalResponse.status(), body: await approvalResponse.json() }
     expect(approval.status, JSON.stringify(approval.body)).toBe(200)
+    expect(approvalResponse.request().postDataJSON().expected_revision).toBe(adminPending.body.revision)
     expect(approval.body.status).toBe('published')
     expect(approval.body.public_jd_id).toBeTruthy()
 

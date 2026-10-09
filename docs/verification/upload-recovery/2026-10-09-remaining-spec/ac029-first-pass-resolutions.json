@@ -1,0 +1,20 @@
+[
+  {
+    "canonical_id": 6,
+    "contribution_item_id": 1,
+    "public_detail_id": 6,
+    "resolution_id": 10
+  },
+  {
+    "canonical_id": 1,
+    "contribution_item_id": 2,
+    "public_detail_id": 7,
+    "resolution_id": 12
+  },
+  {
+    "canonical_id": 7,
+    "contribution_item_id": 3,
+    "public_detail_id": 8,
+    "resolution_id": 13
+  }
+]

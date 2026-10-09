@@ -1,0 +1,52 @@
+{
+  "import_id": "66dffe62-bd93-44d9-8245-6cb0a90babec",
+  "private_interview_id": 1,
+  "contribution_request_id": 1,
+  "public_interview_id": 2,
+  "source_ordinals": [
+    10,
+    20,
+    30,
+    40,
+    50
+  ],
+  "failed_source_ordinal": 40,
+  "excluded_source_ordinal": 50,
+  "first_pass_published": [
+    {
+      "id": 1,
+      "public_detail_id": 6
+    },
+    {
+      "id": 2,
+      "public_detail_id": 7
+    },
+    {
+      "id": 3,
+      "public_detail_id": 8
+    }
+  ],
+  "final_published_items": [
+    {
+      "id": 1,
+      "source_ordinal": 10,
+      "public_detail_id": 6
+    },
+    {
+      "id": 2,
+      "source_ordinal": 20,
+      "public_detail_id": 7
+    },
+    {
+      "id": 3,
+      "source_ordinal": 30,
+      "public_detail_id": 8
+    },
+    {
+      "id": 4,
+      "source_ordinal": 40,
+      "public_detail_id": 9
+    }
+  ],
+  "public_question_count": 4
+}

@@ -181,36 +181,43 @@ test('real upload → admin redacted review → one failed public item recovery 
     expect(listedRequest.summary.question_previews.map((item) => item.question)).toEqual(
       EXPECTED_EXTRACTED_QUESTIONS,
     )
-    await expect(adminPage.getByText(ROOT_QUESTIONS[0][1], { exact: false })).toBeVisible()
 
     const adminRoot = await api(adminPage, adminToken, 'GET', `/api/upload-imports/${encodeURIComponent(importId)}`)
     expect(adminRoot.response.status()).toBe(404)
-    const adminDetail = await readJson(
-      adminPage,
-      adminToken,
-      `/api/admin/public-contributions/${requestId}`,
-    )
+    const detailPromise = adminPage.waitForResponse(response =>
+      endpointPath(response.url()) === `/api/admin/public-contributions/${requestId}` && response.request().method() === 'GET')
+    const requestCard = adminPage.locator(`[data-review-key="contribution-${requestId}"]`)
+    await expect(requestCard).toBeVisible({ timeout: 30000 })
+    await expect(requestCard).toContainText(ROOT_QUESTIONS[0][1])
+    await requestCard.getByRole('button', { name: '通过', exact: true }).click()
+    const detailResponse = await detailPromise
+    expect(detailResponse.status()).toBe(200)
+    const adminDetail = await detailResponse.json()
     expect(adminDetail.snapshot.items).toHaveLength(5)
-    const editedItem = adminDetail.items.find((item) => item.snapshot.source_ordinal === 10)
-    const excludedItem = adminDetail.items.find((item) => item.snapshot.source_ordinal === 50)
-    expect(editedItem).toBeTruthy()
-    expect(excludedItem).toBeTruthy()
-
-    const approval = await api(
-      adminPage,
-      adminToken,
-      'POST',
-      `/api/admin/public-contributions/${requestId}/approve`,
-      {
-        excluded_item_ids: [excludedItem.id],
-        review_fields: {
-          source: { company: null, round: null, source_url: null },
-          items: [{ item_id: editedItem.id, question: EDITED_QUESTION }],
-        },
-      },
-    )
-    expect(approval.response.status(), JSON.stringify(approval.body)).toBe(200)
-
+    const editedIndex = adminDetail.items.findIndex(item => item.snapshot.source_ordinal === 10)
+    const excludedIndex = adminDetail.items.findIndex(item => item.snapshot.source_ordinal === 50)
+    expect(editedIndex).toBeGreaterThanOrEqual(0)
+    expect(excludedIndex).toBeGreaterThanOrEqual(0)
+    const excludedItem = adminDetail.items[excludedIndex]
+    await adminPage.getByLabel(`题干 ${editedIndex + 1}`, { exact: true }).fill(EDITED_QUESTION)
+    await adminPage.getByLabel(`排除题目 ${excludedIndex + 1}`, { exact: true }).check()
+    await expect(adminPage.getByLabel('公开公司')).toHaveValue('')
+    await expect(adminPage.getByLabel('公开轮次')).toHaveValue('')
+    await expect(adminPage.getByLabel('公开来源 URL')).toHaveValue('')
+    const previewPromise = adminPage.waitForResponse(response => endpointPath(response.url()) === `/api/admin/public-contributions/${requestId}/preview`)
+    await adminPage.getByRole('button', { name: '预览公开内容', exact: true }).click()
+    const previewResponse = await previewPromise
+    expect(previewResponse.status()).toBe(200)
+    const projectionPreview = await previewResponse.json()
+    expect(projectionPreview.projection.items).toHaveLength(4)
+    await expect(adminPage.getByTestId('review-projection-preview')).toContainText(EDITED_QUESTION)
+    const approvalPromise = adminPage.waitForResponse(response => endpointPath(response.url()) === `/api/admin/public-contributions/${requestId}/approve`)
+    await adminPage.getByRole('button', { name: '确认通过', exact: true }).click()
+    const approvalResponse = await approvalPromise
+    expect(approvalResponse.status()).toBe(200)
+    const approvedBody = approvalResponse.request().postDataJSON()
+    expect(approvedBody.expected_revision).toBe(adminDetail.revision)
+    expect(approvedBody.excluded_item_ids).toEqual([adminDetail.items[excludedIndex].id])
     await expect.poll(async () => {
       const result = await api(adminPage, adminToken, 'GET', `/api/admin/public-contributions/${requestId}`)
       if (!result.response.ok()) return `HTTP ${result.response.status()}`

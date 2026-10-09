@@ -1,0 +1,44 @@
+{
+  "users": [
+    {
+      "username": "ac010_u1",
+      "user_id": 2,
+      "import_id": "imp-ac010-real-stack-u1"
+    },
+    {
+      "username": "ac010_u2",
+      "user_id": 3,
+      "import_id": "imp-ac010-real-stack-u2"
+    },
+    {
+      "username": "ac010_u2",
+      "user_id": 3,
+      "import_id": "imp-ac010-real-stack-u2-recoverable"
+    }
+  ],
+  "initial_snapshot_revision": 8,
+  "stale_snapshot_revision": 7,
+  "stale_revision_kept_out_of_ui": true,
+  "list_get_failure_statuses": [
+    500,
+    500,
+    500,
+    500,
+    500,
+    500
+  ],
+  "detail_get_failure_statuses": [
+    500
+  ],
+  "recovery_failure_statuses": [
+    500,
+    500,
+    500
+  ],
+  "heartbeat_seen": true,
+  "user1_stream_count_at_switch": 2,
+  "user2_stream_count_after_switch": 2,
+  "old_draft_cleared": true,
+  "recovery_draft_preserved": true,
+  "generic_get_cache_user_after_switch": 3
+}
