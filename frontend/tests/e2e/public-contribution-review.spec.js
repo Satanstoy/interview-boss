@@ -34,6 +34,9 @@ const CONTRIBUTION = {
     source_url: 'https://example.com/interview-1',
     questions_list: ['TCP 三次握手', 'Redis 持久化'],
   },
+  revision: 1,
+  snapshot: { source: { focus: '网络' } },
+  items: [{ id: 11, ordinal: 0, snapshot: { question: 'TCP 三次握手', cat1: '网络', cat2: 'TCP', tags: 'tcp' } }],
   status: 'pending_review',
   created_at: '2026-09-30T08:00:00Z',
 }
@@ -48,6 +51,8 @@ async function mockApi(page) {
     if (route.request().url().includes('/approve') || route.request().url().includes('/reject')) {
       return route.fallback()
     }
+    if (new URL(route.request().url()).pathname.endsWith('/preview')) return route.fulfill({ json: { revision: 1, projection: { source: {}, items: route.request().postDataJSON().review_fields.items } } })
+    if (new URL(route.request().url()).pathname === '/api/admin/public-contributions/7001') return route.fulfill({ json: CONTRIBUTION })
     return route.fulfill({ json: MOCK_CONTRIBUTIONS })
   })
   await page.route('**/api/admin/public-contributions/7001/approve', (route) =>
@@ -77,6 +82,8 @@ test('管理员打开审核面板并批准待审公共贡献', async ({ page }) 
   await expect(page.getByRole('button', { name: '拒绝' }).first()).toBeVisible()
 
   await page.getByRole('button', { name: '通过' }).first().click()
+  await page.getByRole('button', { name: '预览公开内容', exact: true }).click()
+  await page.getByRole('button', { name: '确认通过', exact: true }).click()
   await expect(page.getByText('已通过审核').first()).toBeVisible()
   // approve 后从待审列表移除
   await expect(page.getByText(/暂无待审核贡献/).first()).toBeVisible()
@@ -105,6 +112,9 @@ test('统一列表中相同ID的贡献和旧单题分别审核且不会重复展
       { ...CONTRIBUTION, id: 9, summary: { item_count: 1, question_previews: [{ question: 'NEW_CONTRIBUTION' }] } },
       { id: 9, source_type: 'interview', legacy: true, summary: { item_count: 1, question_previews: [{ question: 'LEGACY_QUESTION' }] } },
     ], total: 2 } })
+    if (path === '/api/master-bank/pending/9/preview') return route.fulfill({ json: { projection: { question: 'LEGACY_QUESTION', cat1: '网络', cat2: 'TCP', tags: 'tcp' } } })
+    if (path === '/api/admin/public-contributions/9') return route.fulfill({ json: { ...CONTRIBUTION, id: 9 } })
+    if (path === '/api/admin/public-contributions/9/preview') return route.fulfill({ json: { revision: 1, projection: { source: {}, items: route.request().postDataJSON().review_fields.items } } })
     if (path === '/api/master-bank/pending') return route.fulfill({ json: { items: [{ id: 9, question: 'LEGACY_QUESTION' }] } })
     return route.fulfill({ json: { status: 'success', items: [], total: 0 } })
   })
@@ -119,9 +129,13 @@ test('统一列表中相同ID的贡献和旧单题分别审核且不会重复展
   await expect(page.getByText('1. LEGACY_QUESTION', { exact: true })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '通过', exact: true })).toHaveCount(2)
   await page.getByRole('button', { name: '通过', exact: true }).nth(1).click()
+  await page.getByRole('button', { name: '预览公开内容', exact: true }).click()
+  await page.getByRole('button', { name: '确认通过', exact: true }).click()
   await expect.poll(() => requests.some(r => r.path === '/api/master-bank/approve/9' && r.method === 'POST')).toBe(true)
   await expect(page.getByText('1. NEW_CONTRIBUTION')).toBeVisible()
   await expect(page.getByText('1. LEGACY_QUESTION')).toHaveCount(0)
   await page.getByRole('button', { name: '通过', exact: true }).click()
+  await page.getByRole('button', { name: '预览公开内容', exact: true }).click()
+  await page.getByRole('button', { name: '确认通过', exact: true }).click()
   await expect.poll(() => requests.some(r => r.path === '/api/admin/public-contributions/9/approve' && r.method === 'POST')).toBe(true)
 })

@@ -108,6 +108,7 @@ def _serialize_request(row, items=None, include_snapshot=False) -> dict:
         "source_id": row["source_id"],
         "requester_id": row["requester_id"],
         "status": row["status"],
+        "revision": int(row["revision"]),
         "public_interview_id": row["public_interview_id"],
         "public_jd_id": row["public_jd_id"],
         "reviewed_by": row["reviewed_by"],
@@ -406,6 +407,36 @@ def get_public_contribution_request(conn, request_id: int, *, include_snapshot=T
     return _serialize_request(row, items, include_snapshot=include_snapshot)
 
 
+def preview_public_contribution(conn, request_id, admin_id, payload):
+    """Read-only projection using the same immutable inputs and builder as approval."""
+    from app.models.upload_contracts import build_review_projection_request
+
+    conn.execute("BEGIN")
+    row = _request_row(conn, request_id)
+    request = build_review_projection_request(payload, source_type=row["source_type"])
+    revision = int(row["revision"])
+    if request.expected_revision != revision:
+        raise StateConflict("申请版本已变化，请重新读取审核详情")
+    if row["status"] not in APPROVABLE_STATES:
+        raise StateConflict("该申请已不在待审核状态")
+    items = []
+    for item in conn.execute(
+        "SELECT id, ordinal, snapshot_json FROM public_contribution_items WHERE request_id=? ORDER BY ordinal",
+        (request_id,),
+    ).fetchall():
+        data = _loads(item["snapshot_json"], {}) or {}
+        data.setdefault("item_id", int(item["id"]))
+        data.setdefault("ordinal", item["ordinal"])
+        items.append(data)
+    projection = build_review_projection(
+        snapshot=_loads(row["snapshot_json"], {}), items=items, request=request,
+        reviewer_id=admin_id, source_type=row["source_type"],
+    )
+    # The preview contains only publishable fields, never the retained private snapshot.
+    projection.pop("source_snapshot_unchanged", None)
+    return {"revision": revision, "projection": projection}
+
+
 def _insert_dynamic(conn, table: str, values: dict) -> int:
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
     filtered = {key: value for key, value in values.items() if key in columns}
@@ -522,7 +553,7 @@ def _materialize_public_jd(conn, snapshot: dict) -> int:
     return _insert_dynamic(conn, "jd", values)
 
 
-SENSITIVE_SOURCE_FIELDS = ("company", "round", "source_url")
+SENSITIVE_SOURCE_FIELDS = ("company", "round", "source_url", "salary")
 
 
 def build_review_projection(
@@ -538,7 +569,7 @@ def build_review_projection(
 
     规则（contracts §3.1）：
 
-    - 可识别来源字段 company/round/source_url 默认不公开，只有显式确认才公开；
+    - 可识别来源字段 company/round/source_url/salary 默认不公开，只有显式确认才公开；
       null/空串表示删除公开字段，**不得**回落原始 snapshot；
     - 题干/分类未修改时继承该项快照；排除项按 item_id；
     - 未知 item_id / 未知字段直接拒绝。

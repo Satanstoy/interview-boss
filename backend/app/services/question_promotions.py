@@ -27,6 +27,25 @@ _SOURCE_FIELDS = (
 )
 
 
+def build_question_promotion_projection(snapshot, question_id):
+    projection = {key: snapshot.get(key) for key in _SOURCE_FIELDS}
+    projection.update(
+        id=question_id, owner_id=None, status="approved", sources="[]", ai_answer=None, answer_sources="[]"
+    )
+    originals = json.loads(snapshot.get("original_questions") or "[]")
+    originals = originals or [snapshot["question"]]
+    sources, originals, original_sources = canonicalize_question_bank_payload(
+        [],
+        originals,
+        [{"question": q, "sources": []} for q in originals],
+    )
+    projection.update(
+        original_questions=json.dumps(originals, ensure_ascii=False),
+        original_question_sources=json.dumps(original_sources, ensure_ascii=False),
+    )
+    return projection, sources, originals, original_sources
+
+
 def retire_submitted_source(conn, promotion, snapshot, target_id):
     source_id = promotion["source_question_id"]
     if source_id is None:
@@ -116,21 +135,7 @@ def review_question_promotion(conn, question_id, reviewer_id, *, approve):
     if approve:
         # Legacy review UI confirms the question, not personal source metadata.
         # Public sources therefore require a separate explicit review mechanism.
-        projection = {key: snapshot.get(key) for key in _SOURCE_FIELDS}
-        projection.update(
-            id=question_id, owner_id=None, status="approved", sources="[]", ai_answer=None, answer_sources="[]"
-        )
-        originals = json.loads(snapshot.get("original_questions") or "[]")
-        originals = originals or [snapshot["question"]]
-        sources, originals, original_sources = canonicalize_question_bank_payload(
-            [],
-            originals,
-            [{"question": q, "sources": []} for q in originals],
-        )
-        projection.update(
-            original_questions=json.dumps(originals, ensure_ascii=False),
-            original_question_sources=json.dumps(original_sources, ensure_ascii=False),
-        )
+        projection, sources, originals, original_sources = build_question_promotion_projection(snapshot, question_id)
         from app.routers.questions_pkg.share import (
             find_matching_public_question,
             _merge_private_into_public,

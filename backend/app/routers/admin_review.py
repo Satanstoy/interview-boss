@@ -71,6 +71,31 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
     return {"items": items, "total": len(items)}
 
 
+@router.get("/pending/{question_id}/preview")
+async def preview_pending_question(question_id: int, admin: dict = Depends(get_admin_user)):
+    from app.services.question_promotions import build_question_promotion_projection
+
+    def _preview():
+        with get_db_connection() as conn:
+            conn.execute("BEGIN")
+            row = conn.execute(
+                "SELECT * FROM question_bank WHERE id=? AND owner_id IS NULL AND status='pending' AND deleted_at IS NULL",
+                (question_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            promotion = conn.execute(
+                "SELECT status,snapshot_json FROM question_promotion_requests WHERE pending_question_id=?", (question_id,)
+            ).fetchone()
+            if promotion and promotion["status"] != "pending":
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            snapshot = json.loads(promotion["snapshot_json"]) if promotion else dict(row)
+            projection, *_ = build_question_promotion_projection(snapshot, question_id)
+            return {"projection": projection}
+
+    return await run_db(_preview)
+
+
 @router.post("/approve/{question_id}")
 async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
     """批准明确提交的快照，不根据文本推断私人来源。"""

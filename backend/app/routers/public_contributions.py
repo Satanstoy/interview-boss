@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
@@ -16,6 +16,7 @@ from app.services.public_contributions import (
     finalize_public_contribution_approval,
     get_public_contribution_request,
     list_public_contribution_requests,
+    preview_public_contribution,
     reject_public_contribution,
     retry_failed_public_items,
     withdraw_public_contribution_v2,
@@ -159,6 +160,29 @@ async def get_admin_contribution(request_id: int, admin: dict = Depends(get_admi
         return await run_db(_get)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error))
+
+
+@router.post("/api/admin/public-contributions/{request_id}/preview")
+async def preview_contribution(
+    request_id: int,
+    request: ContributionApproveRequest,
+    admin: dict = Depends(get_admin_user),
+):
+    if request.expected_revision is None:
+        raise HTTPException(status_code=422, detail="预览必须提供 expected_revision")
+
+    def _preview():
+        with get_db_connection() as conn:
+            return preview_public_contribution(conn, request_id, admin["id"], request.model_dump())
+
+    try:
+        return await run_db(_preview)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except (ReviewFieldError, ValidationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    except ValueError as error:
+        _bad_request(error)
 
 
 @router.post("/api/admin/public-contributions/{request_id}/approve")

@@ -34,6 +34,7 @@ export const getAnalysisStatus = () => get(`${API}/master-bank/analysis-status`)
 export const uploadToBank = ({ question_text, cat1, cat2, tags, difficulty, target }) =>
   post(`${API}/master-bank/upload`, { question_text, cat1: cat1 || '', cat2: cat2 || '', tags: tags || '', difficulty: difficulty || '', target: target || 'public' })
 export const fetchPendingQuestions = () => get(`${API}/master-bank/pending`)
+export const previewPendingQuestion = (id) => get(`${API}/master-bank/pending/${id}/preview`, { noCache: true })
 export const approveQuestion = (id) => post(`${API}/master-bank/approve/${id}`)
 export const rejectQuestion = (id) => post(`${API}/master-bank/reject/${id}`)
 
@@ -47,6 +48,7 @@ export const fetchPublicContributions = ({ status = 'pending_review', sourceType
   return get(`${API}/admin/public-contributions?${params.toString()}`, { noCache: true })
 }
 export const fetchPublicContribution = (id) => get(`${API}/admin/public-contributions/${id}`, { noCache: true })
+export const previewPublicContribution = (id, payload) => post(`${API}/admin/public-contributions/${id}/preview`, payload)
 export const approvePublicContribution = (id, payload = {}) => post(`${API}/admin/public-contributions/${id}/approve`, payload)
 export const rejectPublicContribution = (id, reason = '') => post(`${API}/admin/public-contributions/${id}/reject`, { reason })
 
