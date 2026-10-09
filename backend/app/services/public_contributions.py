@@ -624,6 +624,12 @@ def build_review_projection(
                 if reviewed is not None and field in reviewed_fields
                 else item.get(field)
             )
+            if field == "tags" and isinstance(value, list):
+                if not all(isinstance(tag, str) for tag in value):
+                    raise ValueError("审核标签数组必须只包含文本")
+                # Normalize before hashing/preview so SQLite receives the exact
+                # same tag text that the reviewer confirmed in the projection.
+                value = ", ".join(tag.strip() for tag in value if tag.strip())
             if field != "tags" and isinstance(value, str):
                 value = value.strip() or None
             fields[field] = value

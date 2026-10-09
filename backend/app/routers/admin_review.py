@@ -243,9 +243,14 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
 
     def _rollback():
         with get_db_connection() as conn:
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN IMMEDIATE")
+            register_history_visibility(conn, admin["id"])
+            # Read and authorize under the same write transaction as restoration.
             # 获取合并历史
             mh = conn.execute(
-                "SELECT * FROM merge_history WHERE id = ?", (history_id,)
+                "SELECT * FROM merge_history WHERE id = ? AND merge_history_visible(survivor_id,merged_ids,pre_snapshot,post_snapshot)=1", (history_id,)
             ).fetchone()
             if not mh:
                 raise HTTPException(status_code=404, detail="未找到该合并记录")
@@ -268,10 +273,24 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                     pre_snapshot["owner_id"], admin, not_found="未找到该合并记录"
                 )
 
+            participant_owners = {}
+            for snapshot_json in (mh["pre_snapshot"], mh["post_snapshot"]):
+                participant_owners.update(json.loads(snapshot_json or "{}").get("participant_owners", {}))
+            survivor = conn.execute("SELECT owner_id FROM question_bank WHERE id=?", (mh["survivor_id"],)).fetchone()
+            if survivor is None:
+                raise HTTPException(status_code=404, detail="未找到该合并记录")
+            if "owner_id" in pre_snapshot and pre_snapshot["owner_id"] != survivor["owner_id"]:
+                raise HTTPException(status_code=409, detail="历史题库作用域已变化，不能跨作用域回滚")
+            for current in conn.execute(
+                f"SELECT id,owner_id FROM question_bank WHERE id IN ({placeholders})", affected_ids
+            ).fetchall():
+                key = str(current["id"])
+                if key in participant_owners and participant_owners[key] != current["owner_id"]:
+                    raise HTTPException(status_code=409, detail="历史题库作用域已变化，不能跨作用域回滚")
+
             if mh["is_rolled_back"]:
                 raise HTTPException(status_code=400, detail="该合并已经回滚过了")
 
-            conn.execute("BEGIN")
             try:
                 survivor_id = mh["survivor_id"]
 
@@ -315,8 +334,8 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                             "INSERT INTO question_bank "
                             "(id, question, cat1, cat2, frequency, status, "
                             "sources, original_questions, original_question_sources, "
-                            "job_position, created_at, updated_at) "
-                            "VALUES (?, ?, ?, ?, 1, 'approved', '[]', '[]', '[]', ?, "
+                            "job_position, owner_id, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, 1, 'approved', '[]', '[]', '[]', ?, ?, "
                             "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                             (
                                 mid,
@@ -324,6 +343,7 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                                 pre_snapshot.get("cat1", ""),
                                 pre_snapshot.get("cat2", ""),
                                 pre_snapshot.get("job_position", ""),
+                                participant_owners[str(mid)],
                             ),
                         )
 

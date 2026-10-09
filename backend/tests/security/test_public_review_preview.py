@@ -40,7 +40,7 @@ def test_preview_redacts_and_edits_without_writing(client, test_db, actors, cont
     assert result['projection']['source']['round'] is None
     assert result['projection']['source']['source_url'] is None
     assert [row['question'] for row in result['projection']['items']] == ['PUBLIC_EDIT']
-    assert result['projection']['items'][0]['tags'] == ['http']
+    assert result['projection']['items'][0]['tags'] == 'http'
     assert 'PRIVATE_COMPANY' not in response.text
     assert 'source_snapshot_unchanged' not in result['projection']
     assert tuple(test_db.iterdump()) == before
@@ -126,3 +126,30 @@ def test_jd_salary_requires_explicit_confirmation(client, test_db, actors, sourc
     row = test_db.execute('SELECT salary FROM jd WHERE id=?', (approved.json()['public_jd_id'],)).fetchone()
     assert row['salary'] == expected or (expected is None and row['salary'] == '')
     assert test_db.execute('SELECT salary FROM jd WHERE id=?', (jd,)).fetchone()[0] == 'PRIVATE_SALARY'
+
+
+@pytest.mark.parametrize('reuse_public', [False, True])
+def test_interview_array_tags_preview_equals_materialized_tags(client, test_db, actors, reuse_public):
+    source = test_db.execute("INSERT INTO interview(url,owner_id,status,job_position,questions_list) VALUES ('https://private.example/tags',8801,'approved','alignment-position','TAG_QUESTION')").lastrowid
+    test_db.execute("INSERT INTO questions_detail(interview_id,question,cat1,cat2,tags,owner_id,job_position) VALUES (?,'TAG_QUESTION','network','TCP','private-tag',8801,'alignment-position')", (source,))
+    if reuse_public:
+        test_db.execute("INSERT INTO interview(url,owner_id,status,job_position) VALUES ('https://review.example/public',NULL,'approved','alignment-position')")
+    test_db.commit()
+    created = client.post('/api/public-contributions', headers=actors(8801), json={'source_type': 'interview', 'source_id': source})
+    assert created.status_code == 200, created.text
+    rid = created.json()['id']
+    detail = client.get(f'/api/admin/public-contributions/{rid}', headers=actors(8802)).json()
+    item = detail['items'][0]['id']
+    payload = {'expected_revision': detail['revision'], 'review_fields': {
+        'source': {'source_url': 'https://review.example/public'},
+        'items': [{'item_id': item, 'tags': ['tcp', 'http']}]}}
+    preview = client.post(f'/api/admin/public-contributions/{rid}/preview', headers=actors(8802), json=payload)
+    assert preview.status_code == 200, preview.text
+    approved = client.post(f'/api/admin/public-contributions/{rid}/approve', headers=actors(8802), json=payload)
+    assert approved.status_code == 200, approved.text
+    result = test_db.execute('SELECT public_detail_id FROM public_contribution_items WHERE id=?', (item,)).fetchone()[0]
+    tags = test_db.execute('SELECT tags FROM questions_detail WHERE id=?', (result,)).fetchone()[0]
+    assert tags == preview.json()['projection']['items'][0]['tags'] == 'tcp, http'
+    stored = json.loads(test_db.execute('SELECT review_projection_json FROM public_contribution_requests WHERE id=?', (rid,)).fetchone()[0])
+    assert stored['hash'] == preview.json()['projection']['hash']
+    assert test_db.execute('SELECT tags FROM questions_detail WHERE interview_id=?', (source,)).fetchone()[0] == 'private-tag'

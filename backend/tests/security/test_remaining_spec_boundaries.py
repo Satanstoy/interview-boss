@@ -235,3 +235,43 @@ def test_public_compaction_rechecks_current_scope_before_writing(test_db, actors
     with pytest.raises(ValueError, match='公共'):
         _do_merge_to_existing(target, entry, confidence=0.95)
     assert tuple(test_db.iterdump()) == before
+
+
+@pytest.mark.parametrize('owner', [None, 8802, 8801])
+def test_rollback_restores_only_authorized_historical_scope(client, test_db, actors, owner):
+    survivor = question(test_db, owner, 'ROLLBACK_SURVIVOR')
+    merged = question(test_db, owner, 'ROLLBACK_DELETED')
+    snapshot = dict(test_db.execute('SELECT * FROM question_bank WHERE id=?', (survivor,)).fetchone())
+    snapshot['participant_owners'] = {str(survivor): owner, str(merged): owner}
+    hid = history(test_db, survivor, [merged], pre=snapshot)
+    test_db.execute('UPDATE merge_history SET merged_questions=? WHERE id=?', (json.dumps(['ROLLBACK_DELETED']), hid))
+    test_db.execute('DELETE FROM question_bank WHERE id=?', (merged,))
+    test_db.commit()
+    before = tuple(test_db.iterdump())
+    response = client.post(f'/api/master-bank/merge-rollback/{hid}', headers=actors(8802))
+    if owner == 8801:
+        assert response.status_code == 404, response.text
+        assert tuple(test_db.iterdump()) == before
+    else:
+        assert response.status_code == 200, response.text
+        row = test_db.execute('SELECT owner_id FROM question_bank WHERE id=?', (merged,)).fetchone()
+        assert row['owner_id'] == owner
+
+
+def test_rollback_rejects_deleted_foreign_participant(client, test_db, actors):
+    survivor = question(test_db, None)
+    hid = history(test_db, survivor, [999999], pre={'owner_id': None,
+        'participant_owners': {str(survivor): None, '999999': 8801}})
+    before = tuple(test_db.iterdump())
+    response = client.post(f'/api/master-bank/merge-rollback/{hid}', headers=actors(8802))
+    assert response.status_code == 404, response.text
+    assert tuple(test_db.iterdump()) == before
+
+
+def test_rollback_rejects_cross_scope_survivor_snapshot(client, test_db, actors):
+    survivor = question(test_db, None)
+    hid = history(test_db, survivor, pre={'owner_id': 8802, 'question': 'PRIVATE_HISTORICAL_QUESTION'})
+    before = tuple(test_db.iterdump())
+    response = client.post(f'/api/master-bank/merge-rollback/{hid}', headers=actors(8802))
+    assert response.status_code == 409, response.text
+    assert tuple(test_db.iterdump()) == before
