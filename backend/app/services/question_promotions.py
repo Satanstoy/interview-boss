@@ -118,7 +118,7 @@ def review_question_promotion(conn, question_id, reviewer_id, *, approve):
         # Public sources therefore require a separate explicit review mechanism.
         projection = {key: snapshot.get(key) for key in _SOURCE_FIELDS}
         projection.update(
-            id=question_id, owner_id=None, status="approved", sources="[]", answer_sources="[]"
+            id=question_id, owner_id=None, status="approved", sources="[]", ai_answer=None, answer_sources="[]"
         )
         originals = json.loads(snapshot.get("original_questions") or "[]")
         originals = originals or [snapshot["question"]]
@@ -157,7 +157,7 @@ def review_question_promotion(conn, question_id, reviewer_id, *, approve):
                     snapshot.get("cat2"),
                     snapshot.get("tags"),
                     snapshot.get("difficulty"),
-                    snapshot.get("ai_answer"),
+                    None,
                     projection["original_questions"],
                     projection["original_question_sources"],
                     len(originals),

@@ -241,6 +241,9 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
                 if not target:
                     raise HTTPException(status_code=404, detail="未找到目标聚类")
 
+                if source["owner_id"] != target["owner_id"]:
+                    raise HTTPException(status_code=409, detail="不能跨公共和私人题库合并，请使用公共贡献审核")
+
                 assert_question_lifecycle_mutable(conn, question_id)
                 assert_question_lifecycle_mutable(conn, req.target_id)
 

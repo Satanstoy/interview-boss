@@ -148,7 +148,7 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
     row = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
         "ai_answer, answer_sources, sources, original_questions, original_question_sources, "
-        "status, job_position, created_at, updated_at "
+        "owner_id, status, job_position, created_at, updated_at "
         "FROM question_bank WHERE id = ?",
         (qb_id,),
     ).fetchone()
@@ -206,6 +206,13 @@ def _do_merge_to_existing(
 
     # 合并前快照
     pre_snapshot = _snapshot_question(conn, survivor_id)
+    pre_snapshot["participant_owners"] = {
+        str(row["id"]): row["owner_id"]
+        for row in conn.execute(
+            "SELECT id, owner_id FROM question_bank WHERE id IN (?,?)",
+            (survivor_id, entry["id"]),
+        ).fetchall()
+    }
 
     s_src = _safe_json_list(existing["sources"])
     s_oqs = _safe_json_list(existing["original_questions"])

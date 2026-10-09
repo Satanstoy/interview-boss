@@ -111,7 +111,11 @@ async def get_merge_history(
 
     def _query():
         with get_db_connection() as conn:
-            where = ["1=1"]
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN")
+            register_history_visibility(conn, admin["id"])
+            where = ["merge_history_visible(mh.survivor_id,mh.merged_ids,mh.pre_snapshot,mh.post_snapshot)=1"]
             params = []
             if cat2:
                 where.append("mh.cat2 = ?")
@@ -165,6 +169,10 @@ async def get_merge_history_detail(
 
     def _query():
         with get_db_connection() as conn:
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN")
+            register_history_visibility(conn, admin["id"])
             row = conn.execute(
                 "SELECT mh.*, qb.question as survivor_question, "
                 "u.username as operator_name, "
@@ -173,7 +181,7 @@ async def get_merge_history_detail(
                 "LEFT JOIN question_bank qb ON mh.survivor_id = qb.id "
                 "LEFT JOIN users u ON mh.operator_id = u.id "
                 "LEFT JOIN users rb ON mh.rolled_back_by = rb.id "
-                "WHERE mh.id = ?",
+                "WHERE mh.id = ? AND merge_history_visible(mh.survivor_id,mh.merged_ids,mh.pre_snapshot,mh.post_snapshot)=1",
                 (history_id,),
             ).fetchone()
             if not row:
