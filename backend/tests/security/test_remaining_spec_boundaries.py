@@ -1,4 +1,4 @@
-"""Expected-spec probes: real JWT/client/SQLite; failures are audit counterexamples."""
+"""ADR-0048 regressions through authenticated routes and isolated SQLite."""
 import json
 import pytest
 from tests.security.test_question_bank_spec_alignment import actors as _actors_fixture, question
@@ -28,6 +28,9 @@ def test_private_merge_history_is_not_visible_to_other_admin(client, test_db, ac
     assert 'PRIVATE_HISTORY_MARKER' not in response.text
     if endpoint == 'detail':
         assert response.status_code == 404
+    else:
+        assert response.status_code == 200
+        assert response.json() == {'items': [], 'total': 0}
 
 
 def test_admin_private_to_public_merge_requires_promotion(client, test_db, actors):
@@ -60,6 +63,10 @@ def test_legacy_promotion_does_not_publish_private_model_answer(client, test_db,
     print('ANSWER_OBSERVATION', json.dumps({'read_status':response.status_code,
         'private_answer_exposed':'PRIVATE_USER_MODEL_ANSWER' in response.text}))
     assert 'PRIVATE_USER_MODEL_ANSWER' not in response.text
+    assert test_db.execute('SELECT ai_answer FROM question_bank WHERE id=?', (pending,)).fetchone()[0] is None
+    assert test_db.execute('SELECT ai_answer FROM question_bank WHERE id=?', (private,)).fetchone()[0] == 'PRIVATE_USER_MODEL_ANSWER'
+    snapshot = test_db.execute('SELECT snapshot_json FROM question_promotion_requests WHERE pending_question_id=?', (pending,)).fetchone()[0]
+    assert json.loads(snapshot)['ai_answer'] == 'PRIVATE_USER_MODEL_ANSWER'
 
 
 def history(db, survivor, merged=(), pre=None, post=None):
@@ -181,3 +188,50 @@ def test_compaction_records_ownership_before_deleting_participant(client, test_d
     row = test_db.execute('SELECT id,pre_snapshot FROM merge_history WHERE survivor_id=?', (survivor,)).fetchone()
     assert json.loads(row['pre_snapshot'])['participant_owners'] == {str(survivor): None, str(merged): None}
     assert client.get(f"/api/master-bank/merge-history/{row['id']}", headers=actors(8802)).status_code == 200
+
+
+def test_historical_content_without_owner_proof_is_hidden(client, test_db, actors):
+    public = question(test_db, None)
+    hid = history(test_db, public, pre={'question': 'HISTORICAL_UNKNOWN_SCOPE'})
+    response = client.get(f'/api/master-bank/merge-history/{hid}', headers=actors(8802))
+    assert response.status_code == 404
+    assert 'HISTORICAL_UNKNOWN_SCOPE' not in response.text
+
+
+def test_admin_compaction_cannot_merge_public_into_foreign_private(client, test_db, actors, monkeypatch):
+    """Only the external LLM response is stubbed; route, validation and writes are real."""
+    import app.services.pipeline.compact as compact
+    import app.services.clustering.matcher as matcher
+
+    source = question(test_db, None, 'PUBLIC_COMPACTION_SOURCE')
+    target = question(test_db, 8801, 'PRIVATE_COMPACTION_TARGET')
+    test_db.execute('UPDATE question_bank SET frequency=2 WHERE id=?', (target,))
+    test_db.commit()
+    before = tuple(test_db.iterdump())
+    prompts = []
+
+    async def model_response(*args, **kwargs):
+        prompts.append(str(args) + str(kwargs))
+        if len(prompts) == 1:
+            return json.dumps({'matches': [{'new_id': source, 'cluster_id': target, 'confidence': 0.99}]})
+        return json.dumps({'validations': [{'new_id': source, 'cluster_id': target, 'valid': True, 'confidence': 0.99}]})
+
+    monkeypatch.setattr(compact, '_call_llm_with_retry', model_response)
+    monkeypatch.setattr(matcher, '_call_llm_with_retry', model_response)
+    response = client.post('/api/master-bank/compact?match_existing=true', headers=actors(8802))
+    assert response.status_code == 200, response.text
+    assert tuple(test_db.iterdump()) == before
+    assert 'PRIVATE_COMPACTION_TARGET' not in ''.join(prompts)
+
+
+@pytest.mark.parametrize('owners', [(None, 8801), (8802, None), (8802, 8802)])
+def test_public_compaction_rechecks_current_scope_before_writing(test_db, actors, owners):
+    from app.services.pipeline.compact import _do_merge_to_existing
+
+    source = question(test_db, owners[0], 'COMPACTION_SCOPE_SOURCE')
+    target = question(test_db, owners[1], 'COMPACTION_SCOPE_TARGET')
+    entry = dict(test_db.execute('SELECT * FROM question_bank WHERE id=?', (source,)).fetchone())
+    before = tuple(test_db.iterdump())
+    with pytest.raises(ValueError, match='公共'):
+        _do_merge_to_existing(target, entry, confidence=0.95)
+    assert tuple(test_db.iterdump()) == before

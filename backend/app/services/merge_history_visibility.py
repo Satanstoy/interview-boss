@@ -24,6 +24,9 @@ def register_history_visibility(conn, user_id):
                 if 'owner_id' in snapshot and not allowed(snapshot['owner_id']):
                     return 0
                 manifest = snapshot.get('participant_owners', {})
+                if snapshot and 'owner_id' not in snapshot:
+                    if not isinstance(manifest, dict) or not {str(qid) for qid in participants}.issubset(manifest):
+                        return 0
                 if not isinstance(manifest, dict):
                     return 0
                 for key, owner in manifest.items():

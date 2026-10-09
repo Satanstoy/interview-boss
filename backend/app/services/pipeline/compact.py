@@ -163,13 +163,13 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
 
 
 async def _load_existing_clusters_for_compact() -> Dict[str, List[Dict]]:
-    """加载所有 frequency>1 且未删除的题(id, question, cat2),按 cat2 分组"""
+    """加载公共 frequency>1 且未删除的题(id, question, cat2),按 cat2 分组"""
 
     def _query():
         conn = get_db_connection()
         rows = conn.execute(
             "SELECT id, question, cat2 FROM question_bank "
-            "WHERE status = 'approved' AND deleted_at IS NULL "
+            "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
             "AND frequency > 1 ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -204,14 +204,23 @@ def _do_merge_to_existing(
     if not existing:
         return
 
+    # Candidate selection is not authorization: recheck both current rows
+    # inside the caller's write transaction, including stale model inputs.
+    participant_rows = conn.execute(
+        "SELECT id,owner_id,status,deleted_at FROM question_bank WHERE id IN (?,?)",
+        (survivor_id, entry["id"]),
+    ).fetchall()
+    if len(participant_rows) != 2 or any(
+        row["owner_id"] is not None or row["status"] != "approved" or row["deleted_at"] is not None
+        for row in participant_rows
+    ):
+        raise ValueError("公共聚类整理仅允许操作有效公共题目")
+
     # 合并前快照
     pre_snapshot = _snapshot_question(conn, survivor_id)
     pre_snapshot["participant_owners"] = {
         str(row["id"]): row["owner_id"]
-        for row in conn.execute(
-            "SELECT id, owner_id FROM question_bank WHERE id IN (?,?)",
-            (survivor_id, entry["id"]),
-        ).fetchall()
+        for row in participant_rows
     }
 
     s_src = _safe_json_list(existing["sources"])
