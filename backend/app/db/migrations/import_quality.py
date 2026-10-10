@@ -18,3 +18,20 @@ def _migration_128_python_tags(conn):
             "UPDATE taxonomy SET tags_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (json.dumps(tags, ensure_ascii=False), row[0]),
         )
+
+
+def _migration_129_answer_review(conn):
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(question_bank)")}
+    if "answer_review_status" not in columns:
+        conn.execute("ALTER TABLE question_bank ADD COLUMN answer_review_status TEXT")
+    if "answer_review_issues" not in columns:
+        conn.execute("ALTER TABLE question_bank ADD COLUMN answer_review_issues TEXT")
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS invalidate_question_answer_review
+        AFTER UPDATE OF ai_answer, question ON question_bank
+        WHEN NEW.ai_answer IS NOT OLD.ai_answer OR NEW.question IS NOT OLD.question
+        BEGIN
+            UPDATE question_bank SET answer_review_status = NULL,
+                answer_review_issues = NULL WHERE id = NEW.id;
+        END
+    """)

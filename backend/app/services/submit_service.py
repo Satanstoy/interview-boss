@@ -99,12 +99,14 @@ async def background_generate_answer(
         answer = await _call_llm_with_retry(
             prompt, user_id=user_id, llm_scope=llm_scope
         )
-        answer, _ = await refine_answer(
+        if not answer or not answer.strip():
+            raise ValueError("模型返回空答案")
+        answer, review_issues = await refine_answer(
             prompt,
             answer,
             search_sources,
             user_id=user_id,
-            max_rounds=2,
+            max_rounds=2 if any(marker in question_text for marker in ("系统设计", "架构设计", "设计方案")) else 1,
             llm_scope=llm_scope,
         )
 
@@ -121,6 +123,10 @@ async def background_generate_answer(
                         "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (answer, sources_json(search_sources), question_id),
                     )
+                    conn.execute(
+                        "UPDATE question_bank SET answer_review_status = ?, answer_review_issues = ? WHERE id = ?",
+                        ("needs_review" if review_issues else "passed", json.dumps(review_issues, ensure_ascii=False), question_id),
+                    )
                     conn.commit()
                 except Exception:
                     conn.rollback()
@@ -131,6 +137,8 @@ async def background_generate_answer(
         return {
             "answer": answer,
             "search_sources": search_sources,
+            "answer_review_status": "needs_review" if review_issues else "passed",
+            "answer_review_issues": review_issues,
         }
     except Exception as e:
         logger.error(f"自动解答生成失败: [ID:{question_id}]: {e}")

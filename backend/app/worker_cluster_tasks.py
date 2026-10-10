@@ -360,7 +360,7 @@ async def _schedule_cluster_answer_jobs(
             return job_ids
 
     try:
-        return await asyncio.to_thread(_create)
+        job_ids = await asyncio.to_thread(_create)
     except Exception:
         # Answer enrichment is secondary to the durable clustering result.
         # The answer job dispatcher can be retried independently; never roll
@@ -371,6 +371,13 @@ async def _schedule_cluster_answer_jobs(
             owner_id,
         )
         return []
+
+    try:
+        from app.worker_scheduled import dispatch_answer_jobs
+        await dispatch_answer_jobs(job_ids)
+    except Exception:
+        logger.exception("答案即时派发失败，定时派发将补偿: parent_job_id=%s", parent_job_id)
+    return job_ids
 
 
 async def _cluster_preflight_ready(job_id: int) -> bool:

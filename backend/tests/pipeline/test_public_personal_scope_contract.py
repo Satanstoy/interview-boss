@@ -36,6 +36,31 @@ def _link_public_resolution(conn, detail_id):
         pipeline_version="upload-pipeline-v1",
     )
 
+
+def test_cluster_answers_are_dispatched_immediately_and_leave_other_jobs_pending(test_db):
+    from types import SimpleNamespace
+    from app.worker_cluster_tasks import _schedule_cluster_answer_jobs
+    test_db.execute("INSERT INTO jobs (id, job_type, status) VALUES (7900, 'cluster_batch', 'running'), (7901, 'generate_answer', 'pending')")
+    test_db.execute("INSERT INTO question_bank (id, question, status) VALUES (7902, 'Python tuple 和 list 的区别', 'approved')")
+    test_db.commit()
+    with patch('app.worker_scheduled.enqueue_generate_answer_job', new_callable=AsyncMock, return_value=SimpleNamespace(job_id='immediate-answer')) as enqueue:
+        ids = asyncio.run(_schedule_cluster_answer_jobs(7900, [7902], owner_id=None, actor_id=1))
+    assert len(ids) == 1
+    enqueue.assert_awaited_once_with(ids[0])
+    assert test_db.execute('SELECT status FROM jobs WHERE id = ?', (ids[0],)).fetchone()[0] == 'queued'
+    assert test_db.execute('SELECT status FROM jobs WHERE id = 7901').fetchone()[0] == 'pending'
+
+
+def test_cluster_answer_enqueue_failure_keeps_durable_job_for_recovery(test_db):
+    from app.worker_cluster_tasks import _schedule_cluster_answer_jobs
+    test_db.execute("INSERT INTO jobs (id, job_type, status) VALUES (7910, 'cluster_batch', 'running')")
+    test_db.execute("INSERT INTO question_bank (id, question, status) VALUES (7912, 'Python 对象身份', 'approved')")
+    test_db.commit()
+    with patch('app.worker_scheduled.enqueue_generate_answer_job', new_callable=AsyncMock, side_effect=RuntimeError('Redis unavailable')) as enqueue:
+        ids = asyncio.run(_schedule_cluster_answer_jobs(7910, [7912], owner_id=None, actor_id=1))
+    enqueue.assert_awaited_once_with(ids[0])
+    assert test_db.execute('SELECT status FROM jobs WHERE id = ?', (ids[0],)).fetchone()[0] == 'pending'
+
 def test_enqueue_questions_uses_interview_id_and_is_idempotent(test_db):
     # The workspace .env points at a proxy endpoint that resolves to the
     # RFC-2544 fake-IP range.  This test does not exercise outbound calls; keep

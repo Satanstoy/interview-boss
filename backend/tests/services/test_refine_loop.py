@@ -140,7 +140,7 @@ async def test_refine_revises_once_when_issues_and_then_passes():
         )
     assert result.startswith(revised)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert issues[0]["problem"] == "事实不准确"
+    assert issues == []
     assert mock_llm.call_count == 3
 
 
@@ -156,13 +156,14 @@ async def test_refine_stops_at_max_rounds_even_if_issues_remain():
             revised_a,
             _critic_response("ISSUES", [{"problem": "p2", "evidence": "资料 2"}]),
             revised_b,
+            _critic_response("ISSUES", [{"problem": "p3", "evidence": "资料 3"}]),
         ]
         result, _ = await refine_answer(
             "prompt", _DRAFT, _SOURCES, user_id=1, max_rounds=2
         )
     assert result.startswith(revised_b)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert mock_llm.call_count == 4
+    assert mock_llm.call_count == 5
 
 
 async def test_refine_returns_draft_when_critic_json_invalid():
@@ -176,7 +177,7 @@ async def test_refine_returns_draft_when_critic_json_invalid():
         )
     assert result.startswith(_DRAFT)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert issues == []
+    assert issues[0]["code"] == "review_unavailable"
     assert mock_llm.call_count == 1
 
 
@@ -191,7 +192,7 @@ async def test_refine_returns_draft_when_llm_raises():
         )
     assert result.startswith(_DRAFT)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert issues == []
+    assert issues[0]["code"] == "review_unavailable"
 
 
 async def test_refine_no_sources_skips_critic():
@@ -199,12 +200,29 @@ async def test_refine_no_sources_skips_critic():
     with patch(
         "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
     ) as mock_llm:
-        result, _ = await refine_answer("prompt", _DRAFT, [], user_id=1, max_rounds=2)
+        result, issues = await refine_answer("prompt", _DRAFT, [], user_id=1, max_rounds=2)
     assert result == _DRAFT
+    assert issues[0]["code"] == "review_unavailable"
     mock_llm.assert_not_called()
 
 
-async def test_refine_treats_unknown_verdict_as_pass():
+async def test_one_revision_is_verified_before_issues_are_cleared():
+    with patch('app.services.answer_enrichment._call_llm_with_retry', new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [_critic_response('ISSUES', [{'problem':'错误','evidence':'资料'}]), '修订后的答案', _critic_response('PASS')]
+        answer, issues = await refine_answer('prompt', _DRAFT, _SOURCES, max_rounds=1)
+    assert answer.startswith('修订后的答案')
+    assert issues == []
+    assert mock_llm.call_count == 3
+
+
+async def test_blank_draft_is_not_a_passed_answer():
+    with patch('app.services.answer_enrichment._critic_answer', new_callable=AsyncMock, return_value={'verdict':'PASS', 'issues':[]}) as critic:
+        answer, issues = await refine_answer('prompt', '   ', _SOURCES)
+    assert issues[0]['code'] == 'review_unavailable'
+    critic.assert_not_called()
+
+
+async def test_refine_treats_unknown_verdict_as_unavailable():
     """critic 返回未知 verdict（如 OK）→ 按 PASS 处理，不触发 revise"""
     with patch(
         "app.services.answer_enrichment._call_llm_with_retry", new_callable=AsyncMock
@@ -217,7 +235,7 @@ async def test_refine_treats_unknown_verdict_as_pass():
         )
     assert result.startswith(_DRAFT)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert issues == []
+    assert issues[0]["code"] == "review_unavailable"
     assert mock_llm.call_count == 1
 
 
@@ -238,7 +256,7 @@ async def test_refine_forces_revision_when_draft_too_long():
         )
     assert result.startswith(revised)
     assert "[Redis 官方文档](https://redis.io/docs)" in result
-    assert any("超出" in i.get("problem", "") for i in issues)
+    assert issues == []
     assert mock_llm.call_count == 3
 
 

@@ -102,7 +102,7 @@ def _stage_counts(conn, import_id: str) -> dict:
     resolved = sum(1 for row in resolution_rows if row["status"] in ("matched", "created"))
 
     answer_rows = conn.execute(
-        "SELECT unit_key, status FROM upload_stage_results "
+        "SELECT unit_key, status, result_json FROM upload_stage_results "
         "WHERE import_id = ? AND stage = 'answer'",
         (import_id,),
     ).fetchall()
@@ -142,6 +142,16 @@ def _stage_counts(conn, import_id: str) -> dict:
         if row["status"] == "failed"
     }
     answered = len(answered_units)
+    answer_needs_review = set()
+    for answer_row in answer_rows:
+        if answer_row["status"] != "succeeded":
+            continue
+        try:
+            review_result = _json.loads(answer_row["result_json"] or "{}")
+            if review_result.get("answer_review_status") == "needs_review":
+                answer_needs_review.add(answer_row["unit_key"])
+        except (ValueError, TypeError, AttributeError):
+            pass
     failed = len(failed_units | failed_resolution_units)
 
     answer_question_ids = answered_units | failed_units
@@ -162,6 +172,7 @@ def _stage_counts(conn, import_id: str) -> dict:
         "total": extracted if has_extract_count else None,
         "completed": completed,
         "answered": answered,
+        "answer_needs_review": len(answer_needs_review),
         "failed": failed,
         "extracted": extracted,
         "retained": retained,
@@ -340,6 +351,7 @@ def _snapshot(row, counts=None, conn=None, actor_is_admin=False) -> dict:
             "needs_review": int(count_values.get("needs_review", 0)),
             "resolved": int(count_values.get("resolved", 0)),
             "answered": int(count_values.get("answered", 0)),
+            "answer_needs_review": int(count_values.get("answer_needs_review", 0)),
             "failed": int(count_values.get("failed", 0)),
             "total": total_questions,
         },

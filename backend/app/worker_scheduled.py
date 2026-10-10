@@ -26,6 +26,42 @@ from app.worker_enqueue import (
 logger = logging.getLogger("interview-boss")
 
 
+async def dispatch_answer_jobs(job_ids: list[int]):
+    """Hand newly committed answers to ARQ now; retain the outbox on failure."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        ANSWER_GENERATION_JOB_TYPE, claim_dispatch_batch,
+        mark_job_dispatched, mark_dispatch_failed,
+    )
+
+    def _reserve():
+        with get_db_connection() as conn:
+            rows = claim_dispatch_batch(conn, ANSWER_GENERATION_JOB_TYPE,
+                                        limit=len(job_ids), job_ids=job_ids)
+            conn.commit()
+            return rows
+
+    for row in await asyncio.to_thread(_reserve):
+        job_id = row["id"]
+        try:
+            arq_job = await enqueue_generate_answer_job(job_id)
+            arq_id = getattr(arq_job, "job_id", None)
+            if not arq_id:
+                raise RuntimeError("ARQ 未返回 job_id")
+            def _mark():
+                with get_db_connection() as conn:
+                    mark_job_dispatched(conn, job_id, str(arq_id))
+                    conn.commit()
+            await asyncio.to_thread(_mark)
+        except Exception as exc:
+            logger.warning("答案即时派发失败，保留补偿任务 job=%s: %s", job_id, exc)
+            def _reset(error=str(exc)):
+                with get_db_connection() as conn:
+                    mark_dispatch_failed(conn, job_id, error)
+                    conn.commit()
+            await asyncio.to_thread(_reset)
+
+
 async def scheduled_eval_expiry_task(ctx):
     """Expire queued/running Eval Runs whose durable lease stopped advancing."""
     from app.db.connection import get_db_connection

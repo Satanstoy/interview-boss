@@ -99,6 +99,12 @@ const statusClass = {
   completed: 'bg-emerald-500/10 text-emerald-600',
 }
 
+const stageLabel = {
+  credential_preflight: '检查模型配置', extract: '识别原文', complete: '补全难度',
+  classify: '分类与标签', persist: '题目入库', resolve: '匹配已有题目',
+  cluster: '题目聚类', answer: '题目已入库，答案生成中', review: '审核', publish: '发布',
+}
+
 const actionLabel = {
   open_result: '查看结果',
   retry_failed_steps: '重试失败步骤',
@@ -547,7 +553,7 @@ onUnmounted(() => {
             </div>
 
             <p v-if="task.stage" class="mt-1 text-xs text-muted-foreground">
-              当前阶段：{{ task.stage }}
+              当前阶段：{{ stageLabel[task.stage] || task.stage }}
             </p>
             <div v-if="task.progress" class="mt-2 space-y-1">
               <p v-if="task.progress.total != null" class="text-xs text-muted-foreground">
@@ -569,7 +575,7 @@ onUnmounted(() => {
                 />
               </div>
               <p v-if="task.counts" class="text-xs text-muted-foreground">
-                答案成功 {{ task.counts.answered || 0 }} · 失败 {{ task.counts.failed || 0 }}
+                答案已生成 {{ task.counts.answered || 0 }} · 待复核 {{ task.counts.answer_needs_review || 0 }} · 失败 {{ task.counts.failed || 0 }}
               </p>
             </div>
             <p v-if="task.error" class="mt-1 text-xs text-destructive">
@@ -656,11 +662,11 @@ onUnmounted(() => {
           <div class="flex justify-between"><strong>{{ actionLabel[activeDetail.action] }}</strong><button type="button" aria-label="关闭任务详情" @click="activeDetail = null">关闭详情</button></div>
           <template v-if="activeDetail.action === 'view_summary'">
             <p>已识别题目 {{ detailTask.counts?.extracted ?? '待确认' }} · 保留 {{ detailTask.counts?.retained ?? '待确认' }} · 排除 {{ detailTask.counts?.excluded ?? '待确认' }}</p>
-            <p>答案成功 {{ detailTask.counts?.answered ?? 0 }} · 失败 {{ detailTask.counts?.failed ?? 0 }}</p>
+            <p>答案已生成 {{ detailTask.counts?.answered ?? 0 }} · 待复核 {{ detailTask.counts?.answer_needs_review ?? 0 }} · 失败 {{ detailTask.counts?.failed ?? 0 }}</p>
           </template>
           <template v-else-if="activeDetail.action === 'view_progress'">
             <p>处理进度：{{ statusLabel[detailTask.status] || detailTask.status }}</p>
-            <p>当前阶段：{{ detailTask.stage || '等待下一阶段' }} · {{ detailTask.progress?.completed ?? 0 }}/{{ detailTask.progress?.total ?? '待确认' }}</p>
+            <p>当前阶段：{{ stageLabel[detailTask.stage] || detailTask.stage || '等待下一阶段' }} · {{ detailTask.progress?.completed ?? 0 }}/{{ detailTask.progress?.total ?? '待确认' }}</p>
           </template>
           <p v-else-if="activeDetail.action === 'view_review_status'">审核状态：{{ reviewLabel[detailTask.review_status] || '尚未提交审核' }}</p>
           <template v-else-if="activeDetail.action === 'view_budget'">

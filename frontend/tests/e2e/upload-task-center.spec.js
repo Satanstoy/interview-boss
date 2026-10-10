@@ -976,7 +976,7 @@ test('SSE 非终态 EOF 后重连并用新快照收敛', async ({ page }) => {
           revision: 7,
           status: 'completed',
           progress: { unit: 'questions', completed: 10, total: 10 },
-          counts: { total: 10, answered: 8, failed: 2 },
+          counts: { total: 10, answered: 8, answer_needs_review: 2, failed: 2 },
           allowed_actions: ['open_result'],
         }
     return route.fulfill({
@@ -992,7 +992,7 @@ test('SSE 非终态 EOF 后重连并用新快照收敛', async ({ page }) => {
   await expect.poll(() => streamCalls, { timeout: 10_000 }).toBe(2)
   await expect(center.getByText('已完成', { exact: true })).toBeVisible()
   await expect(center.getByText('10/10 题已处理')).toBeVisible()
-  await expect(center.getByText('答案成功 8 · 失败 2')).toBeVisible()
+  await expect(center.getByText('答案已生成 8 · 待复核 2 · 失败 2')).toBeVisible()
 })
 
 test('SSE 先收到 revision 8 再收到 7 时不回退，心跳不改题目计数', async ({ page }) => {
@@ -1029,7 +1029,7 @@ test('SSE 先收到 revision 8 再收到 7 时不回退，心跳不改题目计�
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const center = page.getByRole('region', { name: '上传任务中心' })
   await expect(center.getByText('8/10 题已处理')).toBeVisible()
-  await expect(center.getByText('答案成功 8 · 失败 0')).toBeVisible()
+  await expect(center.getByText('答案已生成 8 · 待复核 0 · 失败 0')).toBeVisible()
   await expect(center.getByText('7/10 题已处理')).toHaveCount(0)
 })
 
@@ -1067,7 +1067,7 @@ test('题目进度显示服务端真实分子分母和答案计数', async ({ pa
   const task = {
     ...TASK,
     progress: { unit: 'questions', completed: 10, total: 10 },
-    counts: { total: 10, answered: 8, failed: 2 },
+    counts: { total: 10, answered: 8, answer_needs_review: 2, failed: 2 },
   }
   await mockApi(page, { task })
 
@@ -1075,7 +1075,7 @@ test('题目进度显示服务端真实分子分母和答案计数', async ({ pa
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const center = page.getByRole('region', { name: '上传任务中心' })
   await expect(center.getByText(/10\/10 题已处理/)).toBeVisible()
-  await expect(center.getByText(/答案成功 8 · 失败 2/)).toBeVisible()
+  await expect(center.getByText(/答案已生成 8 · 待复核 2 · 失败 2/)).toBeVisible()
 })
 
 test('已完成历史任务原稿过期时明确提示且不显示恢复动作', async ({ page }) => {

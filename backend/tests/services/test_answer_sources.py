@@ -27,6 +27,13 @@ def test_migration_is_idempotent(test_db):
     assert "answer_sources" in columns
 
 
+def test_replacing_answer_invalidates_previous_review(test_db):
+    test_db.execute("INSERT INTO question_bank (id, question, ai_answer, answer_review_status, answer_review_issues) VALUES (999, '题目', '已审校答案', 'passed', '[]')")
+    test_db.execute("UPDATE question_bank SET ai_answer = '未经审校的新答案' WHERE id = 999")
+    row = test_db.execute("SELECT answer_review_status, answer_review_issues FROM question_bank WHERE id = 999").fetchone()
+    assert tuple(row) == (None, None)
+
+
 def _executing_run_db(mock_run_db, mock_question):
     """模拟真实 run_db 语义：第一次调用返回 mock_question，后续调用执行传入的函数"""
 
@@ -223,7 +230,7 @@ async def test_background_generate_answer_writes_answer_sources():
                         "RAG系统设计",
                         "大模型应用开发",
                     )
-                    mock_conn.execute.side_effect = [context_result, MagicMock()]
+                    mock_conn.execute.side_effect = [context_result, MagicMock(), MagicMock(), MagicMock()]
                     mock_get_conn.return_value = mock_conn
                     with patch(
                         "app.services.answer_enrichment.refine_answer",
@@ -232,9 +239,12 @@ async def test_background_generate_answer_writes_answer_sources():
                         mock_refine.return_value = ("答案内容", [])
                         await background_generate_answer(10, "什么是微服务？", user_id=1)
 
-    sql, params = mock_conn.execute.call_args[0]
+    sql, params = mock_conn.execute.call_args_list[-2][0]
     assert "answer_sources" in sql
     assert json.loads(params[1]) == sources
+    review_sql, review_params = mock_conn.execute.call_args[0]
+    assert "answer_review_status" in review_sql
+    assert "passed" in review_params
     assert mock_prep.await_args.kwargs["job_position"] == "大模型应用开发"
     assert mock_prep.await_args.kwargs["cat1"] == "Agent与LLM应用"
     assert mock_prep.await_args.kwargs["cat2"] == "RAG系统设计"
@@ -593,6 +603,8 @@ async def test_question_detail_returns_answer_sources(test_db):
         "ai_answer": "答",
         "user_answer": "",
         "original_question_sources": "[]",
+        "answer_review_status": "needs_review",
+        "answer_review_issues": '[{"problem":"待核对"}]',
         "answer_sources": json.dumps(
             [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
         ),
@@ -604,6 +616,8 @@ async def test_question_detail_returns_answer_sources(test_db):
     assert result["answer_sources"] == [
         {"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}
     ]
+    assert result["answer_review_status"] == "needs_review"
+    assert result["answer_review_issues"] == [{"problem": "待核对"}]
 
 
 def test_compact_merge_inherits_answer_sources_from_merged(test_db):
@@ -627,6 +641,8 @@ def test_compact_merge_inherits_answer_sources_from_merged(test_db):
             [{"title": "Redis 官方文档", "url": "https://redis.io", "snippet": "x"}]
         ),
     }
+    test_db.execute("INSERT INTO question_bank (id, question, status, frequency) VALUES (2, 'Redis 是什么', 'approved', 1)")
+    test_db.commit()
     _do_merge_to_existing(
         1,
         entry,

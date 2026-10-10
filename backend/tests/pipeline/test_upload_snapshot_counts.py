@@ -28,6 +28,8 @@ def test_list_detail_and_idempotency_lookup_include_answer_counts(app_db_isolati
         "'v1', 'succeeded')"
     )
     conn.commit()
+    conn.execute("UPDATE upload_stage_results SET result_json = ? WHERE import_id = 'imp-counts' AND stage = 'answer'", ('{"answer_review_status":"needs_review"}',))
+    conn.commit()
     user = {"id": 101, "is_admin": False}
 
     detail = asyncio.run(get_upload_import("imp-counts", user=user))
@@ -37,3 +39,6 @@ def test_list_detail_and_idempotency_lookup_include_answer_counts(app_db_isolati
     assert detail["counts"]["answered"] == 1
     assert by_key["counts"]["answered"] == 1
     assert listing["items"][0]["counts"]["answered"] == 1
+    assert detail["counts"]["answer_needs_review"] == 1
+    assert by_key["counts"]["answer_needs_review"] == 1
+    assert listing["items"][0]["counts"]["answer_needs_review"] == 1

@@ -488,9 +488,12 @@ def claim_dispatch_batch(
     job_type: str = SUBMIT_IMPORT_JOB_TYPE,
     limit: int = 10,
     lease_seconds: int = DISPATCH_LEASE_SECONDS,
+    job_ids: list[int] | None = None,
 ) -> list[dict]:
     """Reserve due pending jobs before attempting ARQ enqueue."""
     recover_expired_jobs(conn, job_type)
+    if job_ids is not None and not job_ids:
+        return []
     preflight_gate = ""
     params: tuple[Any, ...] = (job_type, limit)
     if job_type == SUBMIT_IMPORT_JOB_TYPE:
@@ -580,11 +583,15 @@ def claim_dispatch_batch(
             )
           ))
         """
+    id_filter = ""
+    if job_ids is not None:
+        id_filter = f"AND j.id IN ({','.join('?' for _ in job_ids)}) "
+        params = (job_type, *job_ids, limit)
     rows = conn.execute(
         "SELECT j.id, j.job_type, j.attempts, j.available_at "
         "FROM jobs AS j WHERE j.job_type = ? AND j.status = 'pending' "
         "AND j.available_at <= CURRENT_TIMESTAMP "
-        f"{preflight_gate} "
+        f"{preflight_gate} {id_filter} "
         "ORDER BY j.created_at, j.id LIMIT ?",
         params,
     ).fetchall()

@@ -13,7 +13,7 @@ import sqlite3
 from app.core.config import DB_PATH as DB_PATH
 from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
 from app.db.migrations.question_promotions import _migration_126_question_promotions
-from app.db.migrations.import_quality import _migration_128_python_tags
+from app.db.migrations.import_quality import _migration_128_python_tags, _migration_129_answer_review
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
 DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92, 115}
@@ -386,6 +386,7 @@ _MIGRATIONS = [
     (126, "question_promotions", _migration_126_question_promotions),
     (127, "reconcile_branch_identities", _migration_127_reconcile_branch_identities),
     (128, "python_tags", _migration_128_python_tags),
+    (129, "answer_review", _migration_129_answer_review),
 ]
 
 
