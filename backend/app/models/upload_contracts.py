@@ -5,7 +5,7 @@
 1. **根任务快照**（``UploadSnapshot``）：任务中心与 SSE 的唯一对外协议；未知字段一律拒绝，
    防止私人原文、Key 或内部字段被顺手序列化出去。
 2. **审核投影请求**（``ReviewProjectionRequest``）：管理员审核的严格 allow-list；
-   company/round/source_url 默认不公开，只有显式确认值才公开，null 表示删除公开字段。
+   面经 company/round 默认保留；来源 URL、JD 公司与薪资需显式确认，null 表示删除公开字段。
 
 字段名与主 spec 的 contracts.md §3.1 / §4.2 对齐。
 """
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Literal, Mapping
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -135,10 +134,13 @@ def _normalize_text(value: Any) -> str | None:
 def _validate_source_url(value: str | None) -> str | None:
     if value is None:
         return None
-    parts = urlsplit(value)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise ReviewFieldError("source_url 只允许经过校验的 http(s) 链接", field_name="source_url")
-    return value
+    from fastapi import HTTPException
+    from app.core.validation import validate_source_url
+
+    try:
+        return validate_source_url(value)
+    except HTTPException as exc:
+        raise ReviewFieldError(str(exc.detail), field_name="source_url") from exc
 
 
 class UploadErrorDTO(BaseModel):

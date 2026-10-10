@@ -27,21 +27,22 @@ def test_review_detail_exposes_revision(client, actors, contribution):
     assert response.json()['revision'] == 7
 
 
-def test_preview_redacts_and_edits_without_writing(client, test_db, actors, contribution):
+@pytest.mark.parametrize("delete_metadata", [False, True])
+def test_preview_preserves_or_explicitly_deletes_metadata_without_writing(client, test_db, actors, contribution, delete_metadata):
     rid, ids = contribution
     before = tuple(test_db.iterdump())
     response = client.post(f'/api/admin/public-contributions/{rid}/preview', headers=actors(8802), json={
         'expected_revision': 7, 'excluded_item_ids': [ids[1]],
-        'review_fields': {'items': [{'item_id': ids[0], 'question': 'PUBLIC_EDIT', 'tags': ['http']}]} })
+        'review_fields': {'source': {'company': None, 'round': None} if delete_metadata else {}, 'items': [{'item_id': ids[0], 'question': 'PUBLIC_EDIT', 'tags': ['http']}]} })
     assert response.status_code == 200, response.text
     result = response.json()
     assert result['revision'] == 7
-    assert result['projection']['source']['company'] is None
-    assert result['projection']['source']['round'] is None
+    assert result['projection']['source']['company'] == (None if delete_metadata else 'PRIVATE_COMPANY')
+    assert result['projection']['source']['round'] == (None if delete_metadata else 'PRIVATE_ROUND')
     assert result['projection']['source']['source_url'] is None
     assert [row['question'] for row in result['projection']['items']] == ['PUBLIC_EDIT']
     assert result['projection']['items'][0]['tags'] == 'http'
-    assert 'PRIVATE_COMPANY' not in response.text
+    assert ('PRIVATE_COMPANY' in response.text) is not delete_metadata
     assert 'source_snapshot_unchanged' not in result['projection']
     assert tuple(test_db.iterdump()) == before
 

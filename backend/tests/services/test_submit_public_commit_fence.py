@@ -48,8 +48,8 @@ async def test_public_persistence_rejects_invalid_execution_without_results(
         "is_admin": True,
         "job_position": "后端开发",
         "saved_url": "https://test.invalid/fence",
-        "extracted_data": {"具体题目清单": ["FENCE_QUESTION"]},
-        "tagged_rows": [["url", "", "", "FENCE_QUESTION", "后端", "数据库基础", "事务", "L2"]],
+        "extracted_data": {"公司": "蔚来", "面试轮次": "一面", "具体题目清单": ["FENCE_QUESTION"]},
+        "tagged_rows": [["url", "蔚来", "一面", "FENCE_QUESTION", "后端", "数据库基础", "事务", "L2"]],
     }
     if invalid == "generation":
         state["_lease_generation"] = 1
@@ -84,6 +84,17 @@ async def test_public_persistence_rejects_invalid_execution_without_results(
             ).fetchone()["reviewed_by"]
             == 201
         )
+        interview = conn.execute("SELECT company,round,url FROM interview").fetchone()
+        detail = conn.execute("SELECT company,round,url FROM questions_detail").fetchone()
+        for row in (interview, detail):
+            assert row["company"] == "蔚来"
+            assert row["round"] == "一面"
+            assert row["url"] == ""
+        projection = json.loads(conn.execute(
+            "SELECT review_projection_json FROM public_contribution_requests"
+        ).fetchone()[0])
+        assert projection["source"]["company"] == "蔚来"
+        assert projection["source"]["round"] == "一面"
         return
     with pytest.raises((JobFenceError, ValueError, PermissionError)):
         await persist_public_node(state)

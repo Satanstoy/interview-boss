@@ -300,8 +300,8 @@ def create_admin_public_import_approval(
         raise ValueError("管理员公共导入的审核题目与公共明细必须一一对应")
     reviewed_at = _now_iso()
     source_projection = {
-        "company": None,
-        "round": None,
+        "company": raw_source.get("company"),
+        "round": raw_source.get("round"),
         "focus": raw_source.get("focus"),
         "difficulty": raw_source.get("difficulty"),
         "season": raw_source.get("season"),

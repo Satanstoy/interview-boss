@@ -135,7 +135,8 @@ def build_review_projection(
 
     规则（contracts §3.1）：
 
-    - 可识别来源字段 company/round/source_url/salary 默认不公开，只有显式确认才公开；
+    - 面经 company/round 默认继承，显式 null/空串仍删除；
+      source_url/salary 和 JD company 默认不公开，只有显式确认才公开；
       null/空串表示删除公开字段，**不得**回落原始 snapshot；
     - 题干/分类未修改时继承该项快照；排除项按 item_id；
     - 未知 item_id / 未知字段直接拒绝。
@@ -156,7 +157,10 @@ def build_review_projection(
         source_base = {}
     source: dict = {}
     for field in sorted(allowed):
-        if field in SENSITIVE_SOURCE_FIELDS:
+        requires_confirmation = field in SENSITIVE_SOURCE_FIELDS and not (
+            source_type == "interview" and field in ("company", "round")
+        )
+        if requires_confirmation:
             value = getattr(source_model, field) if field in provided else None
         else:
             value = (

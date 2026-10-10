@@ -2,7 +2,7 @@
 
 契约（contracts.md §3.1、§3.3）：
 
-- 公司/轮次/来源 URL 默认不公开；管理员显式确认才公开，null 表示删除公开字段，
+- 面经公司/轮次默认保留；来源 URL 需显式确认，null 表示删除公开字段，
   **不得**回落到原始 snapshot；
 - 审核预览与物化共用同一构造函数；
 - 物化只接受 reviewed_projection，禁止内部重新读取 source 原值补敏感字段；
@@ -86,11 +86,11 @@ def test_public_fields_equal_review_projection_not_original_snapshot():
         }
     )
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
 
     # 原快照不得被修改
-    assert projection["source_snapshot_unchanged"] == _snapshot()
+    assert projection["source_snapshot_unchanged"] == _nested_snapshot()
     # null = 删除公开字段，不回落原始值
     assert projection["source"]["company"] is None
     assert projection["source"]["source_url"] is None
@@ -110,7 +110,7 @@ def test_preview_and_materialization_share_one_constructor():
         }
     )
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     conn = _db()
     public_interview_id, detail_ids = materialize_public_interview_from_projection(
@@ -119,23 +119,23 @@ def test_preview_and_materialization_share_one_constructor():
     row = conn.execute("SELECT * FROM interview WHERE id = ?", (public_interview_id,)).fetchone()
     # 物化字段与投影一致
     assert row["company"] == "某公司"
-    # 未显式确认的可识别来源字段一律不公开（不继承 snapshot、不回读 source）
-    assert (row["round"] or "") == "", "round 未确认公开时必须为空"
+    # 面经轮次默认继承，来源链接仍需显式确认。
+    assert row["round"] == "一面"
     assert (row["url"] or "") == "", "source_url 未确认公开时必须为空"
     conn.close()
 
 
 def test_materialization_never_fills_from_source_snapshot():
-    request = _review_request({"expected_revision": 1, "review_fields": {"source": {}}})
+    request = _review_request({"expected_revision": 1, "review_fields": {"source": {"company": None, "round": None, "source_url": None}}})
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     conn = _db()
     public_interview_id, detail_ids = materialize_public_interview_from_projection(
         conn, projection, source_id=1, requester_id=101
     )
     row = conn.execute("SELECT * FROM interview WHERE id = ?", (public_interview_id,)).fetchone()
-    # 未确认的来源字段全部不得公开
+    # 显式删除的字段不能从快照回填
     assert not row["company"]
     assert not row["round"]
     assert not row["url"]
@@ -154,7 +154,7 @@ def test_blank_review_value_normalizes_to_deletion():
         }
     )
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     assert projection["source"]["company"] is None
     assert projection["source"]["focus"] == "数据库"
@@ -169,14 +169,14 @@ def test_unknown_item_id_from_other_request_is_rejected():
     )
     with pytest.raises(ValueError):
         build_review_projection(
-            snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+            snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
         )
 
 
 def test_unreviewed_item_inherits_snapshot_but_still_excludes_sensitive_source():
     request = _review_request({"expected_revision": 1, "review_fields": {}})
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     item = projection["items"][0]
     assert item["question"] == "说明数据库索引的工作原理"
@@ -187,14 +187,14 @@ def test_unreviewed_item_inherits_snapshot_but_still_excludes_sensitive_source()
 def test_projection_has_hash_and_reviewer():
     request = _review_request({"expected_revision": 1, "review_fields": {}})
     projection = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     assert projection["schema_version"] == 1
     assert projection["reviewer_id"] == 201
     assert projection["hash"]
     # 同输入 hash 稳定
     again = build_review_projection(
-        snapshot=_snapshot(), items=_items(), request=request, reviewer_id=201
+        snapshot=_nested_snapshot(), items=_items(), request=request, reviewer_id=201
     )
     assert again["hash"] == projection["hash"]
 
@@ -227,9 +227,9 @@ def test_projection_inherits_non_sensitive_defaults_from_nested_source(R11_bug=N
     assert projection["source"]["focus"] == "数据库"
     assert projection["source"]["season"] == "2026春招"
     assert projection["source"]["difficulty"] == "中等"
-    # 敏感字段未显式确认默认不公开
-    assert projection["source"]["company"] is None
-    assert projection["source"]["round"] is None
+    # 面经公司/轮次默认保留；来源链接仍需显式确认。
+    assert projection["source"]["company"] == "PRIVATE公司"
+    assert projection["source"]["round"] == "一面"
     assert projection["source"]["source_url"] is None
 
 

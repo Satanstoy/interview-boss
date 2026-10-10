@@ -31,16 +31,13 @@ async def persist_public_node(state: SubmitState) -> dict:
             f"{i + 1}. {q}" for i, q in enumerate(data.get("具体题目清单", []))
         )
         source_ordinals = data.get("题目 ordinal") or None
-        # Direct administrator publication is still an explicit reviewed
-        # projection. Until a field is separately confirmed, identifiable
-        # source metadata must not leak through the public interview/detail.
+        # Interview company/round are ordinary source metadata. Keep them
+        # through direct publication; source URLs still require confirmation.
         public_data = dict(data)
         public_rows = tagged_rows
         source_snapshot = None
         if audited_admin_import:
-            public_data["公司"] = ""
-            public_data["面试轮次"] = ""
-            public_rows = [["", "", "", *row[3:]] for row in tagged_rows]
+            public_rows = [["", *row[1:]] for row in tagged_rows]
             source_snapshot = {
                 "source": {
                     "company": data.get("公司"),

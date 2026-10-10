@@ -37,7 +37,7 @@
                 <h3 class="font-semibold">审核详情</h3>
                 <Button variant="ghost" size="sm" @click="closeReview" :disabled="reviewBusy">返回列表</Button>
               </div>
-              <p class="text-xs text-muted-foreground">公司、轮次、来源和薪资默认不公开。填写公开字段后，请预览实际发布内容。</p>
+              <p class="text-xs text-muted-foreground">{{ reviewItem.source_type === 'jd' ? 'JD 公司、来源和薪资需填写确认。' : '面经默认保留公司和轮次，可修改或清空；来源链接需填写确认。' }}请预览实际发布内容。</p>
               <div v-for="field in sourceFields" :key="field.key">
                 <label :for="`review-source-${field.key}`" class="block text-sm mb-1">{{ field.label }}</label>
                 <input :id="`review-source-${field.key}`" v-model="draft.source[field.key]" :disabled="reviewBusy || reviewItem.legacy" class="w-full rounded border border-border bg-background px-3 py-2 text-sm" />
@@ -241,8 +241,11 @@ async function openReview(item) {
     const fields = item.legacy ? [] : item.source_type === 'jd'
       ? ['company', 'job_title', 'tech_stack', 'bonus', 'position', 'salary', 'source_url']
       : ['company', 'round', 'focus', 'difficulty', 'season', 'source_url']
+    const confirmationFields = item.source_type === 'jd'
+      ? ['company', 'salary', 'source_url']
+      : ['source_url']
     draft.value = {
-      source: Object.fromEntries(fields.map(key => [key, ['company', 'round', 'source_url', 'salary'].includes(key) ? '' : source[key] ?? ''])),
+      source: Object.fromEntries(fields.map(key => [key, confirmationFields.includes(key) ? '' : source[key] ?? ''])),
       items: (item.legacy ? [{ id: item.id, snapshot: detail.projection }] : item.source_type === 'jd' ? [] : detail.items || []).map(row => ({
         item_id: row.id, question: row.snapshot?.question || '', cat1: row.snapshot?.cat1 || '', cat2: row.snapshot?.cat2 || '',
         tags: Array.isArray(row.snapshot?.tags) ? row.snapshot.tags.join(', ') : row.snapshot?.tags || '', difficulty: row.snapshot?.difficulty || '', excluded: false,

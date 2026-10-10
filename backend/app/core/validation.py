@@ -6,6 +6,7 @@ question_sources 出现大量无效来源（历史 33 行 internal:// 脏数据�
 """
 
 import re
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
@@ -19,7 +20,23 @@ def validate_source_url(url: str) -> str:
         HTTPException(400): 非空且非 http(s) 协议时拒绝。
     """
     url = (url or "").strip()
-    if url and not _HTTP_URL_RE.match(url):
+    valid = True
+    if url:
+        try:
+            parts = urlsplit(url)
+            valid = bool(
+                _HTTP_URL_RE.match(url)
+                and parts.hostname
+                and not parts.username
+                and not parts.password
+                and not re.search(r"[\s\x00-\x1f\x7f\"'<>\\]", url)
+                and "](" not in url
+            )
+            # Force validation of malformed ports and bracketed hosts.
+            parts.port
+        except ValueError:
+            valid = False
+    if not valid:
         raise HTTPException(
             status_code=400,
             detail="来源链接必须是有效的 http(s) 链接，请检查后重试（没有链接可以留空）",

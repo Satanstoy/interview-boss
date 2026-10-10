@@ -36,7 +36,8 @@ for (const sourceType of ['interview', 'jd']) {
     await page.getByRole('button', { name: '通过', exact: true }).click()
     await expect(page.getByText('审核详情', { exact: true })).toBeVisible()
     expect(calls.some(call => call.path.endsWith('/approve'))).toBe(false)
-    await expect(page.getByLabel('公开公司')).toHaveValue('')
+    await expect(page.getByLabel('公开公司')).toHaveValue(sourceType === 'interview' ? 'PRIVATE_COMPANY' : '')
+    if (sourceType === 'interview') await expect(page.getByLabel('公开轮次')).toHaveValue('PRIVATE_ROUND')
     await page.getByLabel('公开公司').fill('PUBLIC_COMPANY')
     if (sourceType === 'interview') {
       await page.getByLabel('题干 1').fill('PUBLIC_EDIT')
@@ -64,6 +65,9 @@ for (const sourceType of ['interview', 'jd']) {
     expect(submitted.expected_revision).toBe(7)
     expect(submitted.review_fields.source.company).toBe('FINAL_PUBLIC_COMPANY')
     expect(submitted.review_fields.source.source_url).toBeNull()
-    if (sourceType === 'interview') expect(submitted.excluded_item_ids).toEqual([92])
+    if (sourceType === 'interview') {
+      expect(submitted.review_fields.source.round).toBe('PRIVATE_ROUND')
+      expect(submitted.excluded_item_ids).toEqual([92])
+    }
   })
 }

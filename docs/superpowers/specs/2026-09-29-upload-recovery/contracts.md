@@ -179,7 +179,7 @@ notify ARQ best effort
 }
 ```
 
-字段缺省：题干/分类继承该项快照；可识别来源字段company/round/source_url默认不公开，只有管理员显式确认字段值才公开。null表示删除公开字段，不能回落到原始值；空字符串规范化为null。source_url若非空仅允许经过来源URL校验的http(s)。禁止修改requester_id、owner_id、原始snapshot或往审核对象添加任意DB列。
+字段缺省：题干/分类继承该项快照；面经company/round继承source快照并默认公开；source_url及JD company/salary仍需管理员显式确认字段值才公开。null表示删除公开字段，不能回落到原始值；空字符串规范化为null。source_url若非空仅允许经过来源URL校验的http(s)。禁止修改requester_id、owner_id、原始snapshot或往审核对象添加任意DB列。
 
 面经source允许company/round/focus/difficulty/season/source_url；items允许question/cat1/cat2/tags/difficulty，ID必须属于申请。岗位从源冻结，不允许在approve中偷偷换岗位。JDsource只允许job_title/tech_stack/bonus/position及明确确认的company/salary/source_url，不公开raw source正文/联系人；与ADR的结构化公开原则一致。
 
@@ -295,3 +295,5 @@ location接口按同一稳定排序计算rank/page；如果岗位筛选排除目
 10. 回滚时保留已创建的新表和字段；已接受的v2任务只能由理解其schema的兼容worker继续执行，或明确挂起等待再次部署，不能交给旧worker。禁止DROP新表或恢复旧数据库覆盖切换后用户数据。运维保留能理解新schema的worker镜像直至清空v2活跃队列。
 
 发布观测至少包含：根任务各状态数量、最老pending年龄、无job队列桶数量、lease回收/旧fence拒绝数、恢复重复抑制数、401按scope、LLM物理调用/unknown数、resolution覆盖率。日志关联import_id/job_id/attempt_no/request_id，不打印原文或Key。
+
+2026-10-10 用户确认：面经公司和面试轮次属于需要保留的业务元信息，管理员公共直导与审核通过均默认继承；显式 null/空串仍删除。此规则不追溯覆盖既有审核投影。
