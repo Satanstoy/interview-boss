@@ -46,8 +46,9 @@ def test_dry_run_reports_counts_and_creates_nothing():
 
     report = plan_backfill(conn)
     assert report["chains_scanned"] == 1
-    assert report["imports_created"] == 1
-    assert report["jobs_linked"] == 3
+    assert report["imports_created"] == 0
+    assert report["jobs_linked"] == 0
+    assert report["ambiguous"][0]["reason"] == "active_legacy_chain"
     assert report["manifest_hash"]
     # dry-run 不写库
     assert conn.execute("SELECT COUNT(*) FROM upload_imports").fetchone()[0] == 0
@@ -60,7 +61,7 @@ def test_dry_run_reports_counts_and_creates_nothing():
 
 def test_apply_twice_adds_nothing():
     conn = _db()
-    _legacy_job(conn, job_id=10, status="failed")
+    _legacy_job(conn, job_id=10, status="completed", result=json.dumps({"interview_id": 1}))
     _legacy_job(conn, job_id=11, parent=10, status="failed")
     conn.commit()
 

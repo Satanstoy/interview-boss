@@ -175,6 +175,7 @@ def run_credential_preflight(
     probe=None,
     user_config_loader=None,
     global_config_loader=None,
+    lease_generation: int | None = None,
 ) -> PreflightOutcome:
     """执行一次预检：解析 scope 凭据 → 探测 → 落阶段结果（幂等）。
 
@@ -183,6 +184,13 @@ def run_credential_preflight(
     """
 
     import json
+    from app.services.job_lifecycle import JobFenceError, assert_job_fence
+
+    def begin_business_settlement():
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        if lease_generation is not None:
+            assert_job_fence(conn, job_id, lease_generation)
 
     from app.services.upload_credentials import (
         UploadCredentialError,
@@ -220,6 +228,7 @@ def run_credential_preflight(
         )
     except UploadCredentialError as exc:
         error_code = exc.code
+        begin_business_settlement()
         _mark_blocked(
             conn,
             root_import_id,
@@ -234,16 +243,13 @@ def run_credential_preflight(
     # AC-004：预检的物理调用独立记账（不存 Key/认证头，绑定指纹）；同一
     # root+stage 每次预检一个 call_key，配额由账本层原子预留。
     from app.services.upload_credentials import (
-        CallLedgerConflict,
         complete_llm_call,
         reserve_llm_call,
     )
 
-    call_key = (
-        f"preflight:{root_import_id or job_id}:{credential_scope}:"
-        f"{int(_monotonic() * 1000)}"
-    )
+    call_key = f"preflight:{root_import_id or job_id}:{credential_scope}:{uuid4().hex}"
     payer_type = "user" if credential_scope == "user" else "system"
+    begin_business_settlement()
     try:
         reserve_llm_call(
             conn,
@@ -258,98 +264,101 @@ def run_credential_preflight(
             model=credential.model,
             config_fingerprint=credential.config_fingerprint,
         )
-    except CallLedgerConflict:
-        # 同 call_key 已登记（幂等重跑），沿用既有行
-        pass
-    except Exception as exc:
-        logger.warning("预检记账预留失败（不阻断探测，配额层兜底）: %s", exc)
+    except UploadCredentialError as exc:
+        conn.rollback()
+        begin_business_settlement()
+        _mark_blocked(conn, root_import_id, job_id, exc.code, str(exc), unit_key=preflight_unit)
+        return PreflightOutcome(status="blocked", error_code=exc.code, message=str(exc))
+    except Exception:
+        conn.rollback()
+        raise
+    # Publish the reservation before provider I/O; never hold SQLite's writer
+    # lock while waiting for a remote ping. Settlement begins a new transaction.
+    conn.commit()
 
+    from app.services.upload_llm_accounting import _is_unknown_provider_outcome
+    from app.services.upload_retry_budget import normalize_upload_error_code, safe_upload_error_message
+
+    provider_error = None
     try:
         result = probe_fn(credential)
-        if isinstance(result, dict) and result.get("status") == "ok":
-            latency = int(result.get("latency_ms") or 0)
-            save_stage_result(
-                conn,
-                import_id=root_import_id,
-                stage=PREFLIGHT_STAGE,
-                unit_key=preflight_unit,
-                input_version=1,
-                pipeline_version=PREFLIGHT_PIPELINE_VERSION,
-                status="succeeded",
-                result_json=_json_dumps(
-                    {
-                        "provider": result.get("provider", credential.provider),
-                        "model": result.get("model") or credential.model,
-                        "api_format": result.get("api_format") or credential.api_format,
-                        "credential_scope": credential_scope,
-                        "config_fingerprint": credential.config_fingerprint,
-                        "latency_ms": latency,
-                    }
-                ),
-                job_id=job_id,
-            )
-            try:
-                complete_llm_call(
-                    conn,
-                    call_key=call_key,
-                    status="succeeded",
-                    input_tokens=int(result.get("input_tokens") or 0),
-                    output_tokens=int(result.get("output_tokens") or 0),
-                )
-            except Exception as exc:
-                logger.warning("预检记账完成失败（不阻断）: %s", exc)
-            conn.execute(
-                "UPDATE jobs SET status = 'completed', progress_current = 1, "
-                "progress_total = 1, completed_at = CURRENT_TIMESTAMP, "
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (job_id,),
-            )
-            if root_import_id and upload_attempt_id is not None:
-                # 只有本 attempt 的全部 policy scopes 通过后，才在同一事务
-                # 创建首个业务 job 并解除 needs_action。
-                create_initial_submit_job_if_ready(
-                    conn,
-                    root_import_id=root_import_id,
-                    attempt_id=int(upload_attempt_id),
-                )
-                # contracts §5：修复阻塞 scope 后从同一 root 恢复。初始阶段尚未
-                # 全通过时仍保留 needs_action；公共阶段（私人阶段已结束）只需该
-                # 阶段 scope 通过即可放行待派发的聚类工作。
-                release_root_after_preflight_success(
-                    conn,
-                    root_import_id=root_import_id,
-                    attempt_id=int(upload_attempt_id),
-                )
-            return PreflightOutcome(
-                status="ok",
-                provider=credential.provider,
-                model=credential.model,
-                latency_ms=latency,
-            )
-        raise RuntimeError("探测未返回有效状态")
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            raise RuntimeError("探测未返回有效状态")
     except Exception as exc:
-        from app.services.upload_retry_budget import (
-            normalize_upload_error_code,
-            safe_upload_error_message,
-        )
+        provider_error = exc
+        result = {}
 
-        error_code = normalize_upload_error_code(exc)
+    error_code = normalize_upload_error_code(provider_error) if provider_error else None
+    cause = (provider_error.__cause__ or provider_error) if provider_error else None
+    ledger_status = (
+        "unknown" if cause and _is_unknown_provider_outcome(cause)
+        else "failed" if provider_error else "succeeded"
+    )
+    complete_llm_call(
+        conn, call_key=call_key, status=ledger_status, error_code=error_code,
+        input_tokens=None if provider_error else int(result.get("input_tokens") or 0),
+        output_tokens=None if provider_error else int(result.get("output_tokens") or 0),
+    )
+    conn.commit()
+    try:
+        begin_business_settlement()
+    except JobFenceError:
+        conn.rollback()
+        raise
+    if provider_error:
         safe_message = safe_upload_error_message(error_code)
-        try:
-            complete_llm_call(
-                conn, call_key=call_key, status="failed", error_code=error_code
-            )
-        except Exception as ledger_exc:
-            logger.warning("预检失败记账完成失败（不阻断）: %s", ledger_exc)
-        _mark_blocked(
-            conn,
-            root_import_id,
-            job_id,
-            error_code,
-            safe_message,
-            unit_key=preflight_unit,
-        )
+        _mark_blocked(conn, root_import_id, job_id, error_code, safe_message, unit_key=preflight_unit)
         return PreflightOutcome(status="blocked", error_code=error_code, message=safe_message)
+
+    latency = int(result.get("latency_ms") or 0)
+    save_stage_result(
+        conn,
+        import_id=root_import_id,
+        stage=PREFLIGHT_STAGE,
+        unit_key=preflight_unit,
+        input_version=1,
+        pipeline_version=PREFLIGHT_PIPELINE_VERSION,
+        status="succeeded",
+        result_json=_json_dumps(
+            {
+                "provider": result.get("provider", credential.provider),
+                "model": result.get("model") or credential.model,
+                "api_format": result.get("api_format") or credential.api_format,
+                "credential_scope": credential_scope,
+                "config_fingerprint": credential.config_fingerprint,
+                "latency_ms": latency,
+            }
+        ),
+        job_id=job_id,
+    )
+    conn.execute(
+        "UPDATE jobs SET status = 'completed', progress_current = 1, "
+        "progress_total = 1, completed_at = CURRENT_TIMESTAMP, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (job_id,),
+    )
+    if root_import_id and upload_attempt_id is not None:
+        # 只有本 attempt 的全部 policy scopes 通过后，才在同一事务
+        # 创建首个业务 job 并解除 needs_action。
+        create_initial_submit_job_if_ready(
+            conn,
+            root_import_id=root_import_id,
+            attempt_id=int(upload_attempt_id),
+        )
+        # contracts §5：修复阻塞 scope 后从同一 root 恢复。初始阶段尚未
+        # 全通过时仍保留 needs_action；公共阶段（私人阶段已结束）只需该
+        # 阶段 scope 通过即可放行待派发的聚类工作。
+        release_root_after_preflight_success(
+            conn,
+            root_import_id=root_import_id,
+            attempt_id=int(upload_attempt_id),
+        )
+    return PreflightOutcome(
+        status="ok",
+        provider=credential.provider,
+        model=credential.model,
+        latency_ms=latency,
+    )
 
 
 def release_root_after_preflight_success(

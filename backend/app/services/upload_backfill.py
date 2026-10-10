@@ -82,6 +82,24 @@ def plan_backfill(conn) -> dict:
         ).fetchone()[0]
 
         root_job = conn.execute("SELECT * FROM jobs WHERE id = ?", (root_id,)).fetchone()
+        if root_job is None:
+            ambiguous.append({"reason": "missing_parent", "root_job_id": root_id, "job_ids": member_ids})
+            continue
+        members = conn.execute(
+            "SELECT id, created_by, status FROM jobs WHERE id IN (%s)"
+            % ",".join("?" * len(member_ids)), member_ids,
+        ).fetchall()
+        if any(row["created_by"] != root_job["created_by"] for row in members):
+            ambiguous.append({"reason": "cross_owner_chain", "root_job_id": root_id, "job_ids": member_ids})
+            continue
+        active = [row["id"] for row in members if row["status"] in ("pending", "queued", "running")]
+        if active:
+            ambiguous.append({"reason": "multiple_active_descendants" if len(active) > 1 else "active_legacy_chain",
+                              "root_job_id": root_id, "job_ids": active})
+            continue
+        if root_job["status"] != "completed":
+            ambiguous.append({"reason": "legacy_mapping_ambiguous", "root_job_id": root_id})
+            continue
         interview_id = None
         if root_job["result"]:
             try:
