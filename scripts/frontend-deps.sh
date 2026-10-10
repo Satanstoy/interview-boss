@@ -56,7 +56,7 @@ cache_free_mb=$(free_mb "$cache_parent")
 
 [[ "$MAX_VERSIONS" =~ ^[1-9][0-9]*$ ]] || fail "FRONTEND_DEPS_MAX_VERSIONS 必须是正整数: $MAX_VERSIONS"
 
-dependency_key=$(sha256sum "$FRONTEND_DIR/package.json" "$FRONTEND_DIR/package-lock.json" | sha256sum | cut -c1-24)
+dependency_key=$(cd "$FRONTEND_DIR" && sha256sum package.json package-lock.json | sha256sum | cut -c1-24)
 install_root="$CACHE_DIR/$dependency_key"
 node_modules_dir="$install_root/node_modules"
 marker="$install_root/.interview-boss-dependency-key"
@@ -113,13 +113,25 @@ else
   ln -s "$node_modules_dir" "$worktree_node_modules"
 fi
 
-# 依赖缓存按 lockfile 生成版本目录。只保留当前版本，避免每次依赖升级/切换
+# 保留其他工作树引用的缓存；未使用版本按 MAX_VERSIONS 收敛，避免依赖升级/切换
 # 分支都在 /data 上累积一整份 node_modules；Playwright 浏览器缓存位于独立
 # PLAYWRIGHT_BROWSERS_PATH，不由这里清理，因此不会触发浏览器重复下载。
 kept_versions=1
+cache_entry_in_use() {
+  local entry="$1" record worktree dependency_target
+  while IFS= read -r -d '' record; do
+    [[ "$record" == worktree\ * ]] || continue
+    worktree="${record#worktree }"
+    [ -L "$worktree/frontend/node_modules" ] || continue
+    dependency_target=$(readlink -f "$worktree/frontend/node_modules")
+    [ "$dependency_target" = "$entry/node_modules" ] && return 0
+  done < <(git -C "$PROJECT_DIR" worktree list --porcelain -z 2>/dev/null || true)
+  return 1
+}
 while IFS= read -r entry; do
   cache_entry="${entry#* }"
   [ "$cache_entry" = "$install_root" ] && continue
+  cache_entry_in_use "$cache_entry" && continue
   if [ "$kept_versions" -lt "$MAX_VERSIONS" ]; then
     kept_versions=$((kept_versions + 1))
     continue

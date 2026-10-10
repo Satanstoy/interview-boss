@@ -1,0 +1,11 @@
+# Verified non-secret UUID identifiers and deterministic test markers.
+# Exact commit/path/rule/line exemptions; production rules remain enabled.
+daf86718b37a85809641afa8777183bd1450a189:docs/verification/upload-recovery/2026-10-05-real-stack/ac022-db-trace.json:generic-api-key:1
+daf86718b37a85809641afa8777183bd1450a189:docs/verification/upload-recovery/2026-10-05-real-stack/ac022-browser-result.json:generic-api-key:3
+002ae5c0090ed8b1ed67588c7bed03b6fbb56778:backend/e2e/ac013_error_trace.py:generic-api-key:128
+002ae5c0090ed8b1ed67588c7bed03b6fbb56778:docs/verification/upload-recovery/2026-10-05-real-stack/ac013-browser-result.json:generic-api-key:3
+002ae5c0090ed8b1ed67588c7bed03b6fbb56778:frontend/tests/e2e/upload-ac013-real-stack.spec.js:generic-api-key:136
+002ae5c0090ed8b1ed67588c7bed03b6fbb56778:frontend/tests/e2e/upload-ac013-real-stack.spec.js:generic-api-key:158
+953f2bb47f42bd733566b51176ba3d5e86c7a241:docs/verification/upload-recovery/2026-10-04-real-stack/ac022-browser-result.json:generic-api-key:3
+953f2bb47f42bd733566b51176ba3d5e86c7a241:docs/verification/upload-recovery/2026-10-04-real-stack/ac022-db-trace.json:generic-api-key:1
+6afe1aabbce054b78975bee77a5ac0c255f46435:backend/tests/integration/test_upload_recovery_stack.py:generic-api-key:414
