@@ -6,7 +6,7 @@
 
 **上一轮四个主要实现缺口已落实；不能把本次结果表述为全部 spec / 全部 AC 子场景已完成验收。** 本轮又修复账号/草稿并发、规范题留存和单题合并问题。模型质量、生产迁移、完整故障组合等仍缺验收证据。仓库全局行数门禁还有既有超限，见下文。
 
-规格以 accepted [ADR-0048](../../adr/0048-public-personal-question-bank-boundaries.md)、[9-29 恢复契约](../../superpowers/specs/2026-09-29-upload-recovery/contracts.md)、[10-04 闭环验收](../../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md) 为依据。原四项缺口与真实栈证据见 [10-09 修复报告](2026-10-09-remaining-spec-fixes.md)，逐项历史证据见 [10-09 再核对](2026-10-09-question-upload-spec-recheck.md)。分支名仍沿用旧 UI 工作分支；不将未跟踪的 9-23 UI spec、旧审计目录、backups 和 AC007 临时证据混入提交。
+规格以 accepted [ADR-0048](../adr/0048-public-personal-question-bank-boundaries.md)、[9-29 恢复契约](../superpowers/specs/2026-09-29-upload-recovery/contracts.md)、[10-04 闭环验收](../superpowers/specs/2026-10-04-upload-alignment-closure/acceptance.md) 为依据。原四项缺口与真实栈证据见 [10-09 修复报告](2026-10-09-remaining-spec-fixes.md)，逐项历史证据见 [10-09 再核对](2026-10-09-question-upload-spec-recheck.md)。分支名仍沿用旧 UI 工作分支；不将未跟踪的 9-23 UI spec、旧审计目录、backups 和 AC007 临时证据混入提交。
 
 ## 审查与修复
 
