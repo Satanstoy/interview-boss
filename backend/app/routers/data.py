@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
 from app.core.validation import validate_source_url
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.db.connection import (
     get_db_connection,
     run_db,
@@ -44,6 +45,20 @@ def _safe_table_name(name: str) -> str:
     if name not in _ALLOWED_TABLES:
         raise ValueError(f"不被允许的表名: {name}")
     return name
+
+
+def _source_mutation_row(cursor, table_name, record_id):
+    """Resolve detail ownership through its durable interview, never by URL."""
+    if table_name == "questions_detail":
+        return cursor.execute(
+            "SELECT qd.id,qd.url,iv.owner_id,iv.status,iv.job_position,qd.deleted_at "
+            "FROM questions_detail qd JOIN interview iv ON iv.id=qd.interview_id "
+            "WHERE qd.id=?", (record_id,),
+        ).fetchone()
+    return cursor.execute(
+        f"SELECT id,url,owner_id,status,job_position,deleted_at FROM {table_name} WHERE id=?",
+        (record_id,),
+    ).fetchone()
 
 
 def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
@@ -501,8 +516,6 @@ async def get_data(
         with get_db_connection() as conn:
             if table_name in ("jd", "interview"):
                 # all 口径：公共 + 自己的（管理员也遵守）
-                from app.db.connection import get_user_job_position
-
                 where, params = _visibility_where_and_params(
                     conn, table_name, user, scope=scope, season=season,
                     position_id=position_id,
@@ -591,7 +604,7 @@ async def get_data(
 async def delete_data(
     file_type: str, record_id: int, user: dict = Depends(get_current_user)
 ):
-    """软删除记录：设置 deleted_at 而非物理删除。管理员可删任何记录，普通用户可删自己的个人记录。"""
+    """软删除本人私人记录；管理员还可删除公共记录。"""
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
@@ -600,31 +613,16 @@ async def delete_data(
     def _soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-            target_columns = (
-                "id, url, owner_id, status, job_position, deleted_at"
-                if table_name in {"jd", "interview"}
-                else "id, url, NULL AS owner_id, NULL AS status, '' AS job_position, deleted_at"
-            )
-            target_row = cursor.execute(
-                f"SELECT {target_columns} FROM {safe_name} WHERE id = ?",
-                (record_id,),
-            ).fetchone()
+            target_row = _source_mutation_row(cursor, table_name, record_id)
             if not target_row:
                 raise HTTPException(
                     status_code=404, detail="未找到该记录"
                 )
 
-            # 权限检查：admin 可删任何，普通用户只能删自己的
-            is_admin = user.get("is_admin", 0)
-            if (
-                not is_admin
-                and target_row["owner_id"] is not None
-                and target_row["owner_id"] != user["id"]
-            ):
-                raise HTTPException(status_code=403, detail="无权删除他人的记录")
-            if not is_admin and target_row["owner_id"] is None:
-                raise HTTPException(status_code=403, detail="无权删除公共记录")
+            assert_question_writable(target_row["owner_id"], user, not_found="未找到该记录",
+                                     public_forbidden="无权删除公共记录")
 
             url = target_row["url"]
 
@@ -682,18 +680,24 @@ async def batch_delete_data(
     def _batch_soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
                 (
                     f"SELECT id, url, owner_id, status, job_position, deleted_at "
-                    f"FROM {safe_name} WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                    f"FROM {safe_name} WHERE id IN ({placeholders})"
                     if table_name == "interview"
-                    else f"SELECT id, url, owner_id FROM {safe_name} "
-                    f"WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                    else f"SELECT id, url, owner_id, deleted_at FROM {safe_name} "
+                    f"WHERE id IN ({placeholders})"
                 ),
                 req.ids,
             ).fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到任何匹配记录")
+            for row in rows:
+                assert_question_writable(row["owner_id"], user, not_found="未找到任何匹配记录")
+            rows = [row for row in rows if row["deleted_at"] is None]
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
@@ -752,13 +756,13 @@ async def restore_data(
     def _restore():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-            target_row = cursor.execute(
-                f"SELECT id, url, owner_id FROM {safe_name} WHERE id = ? AND deleted_at IS NOT NULL",
-                (record_id,),
-            ).fetchone()
-            if not target_row:
+            target_row = _source_mutation_row(cursor, table_name, record_id)
+            if not target_row or target_row["deleted_at"] is None:
                 raise HTTPException(status_code=404, detail="未找到该已删除记录")
+
+            assert_question_writable(target_row["owner_id"], user, not_found="未找到该已删除记录")
 
             url = target_row["url"]
             owner_scope = target_row["owner_id"]
@@ -1004,8 +1008,16 @@ async def update_generic_data(
 
     def _update():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             previous_interview = None
+            if req.table_name in {"interview", "jd", "questions_detail"}:
+                source_row = _source_mutation_row(cursor, req.table_name, req.record_id)
+                if source_row is None:
+                    raise HTTPException(status_code=404, detail="未找到对应的记录，可能已被删除")
+                assert_question_writable(
+                    source_row["owner_id"], user, not_found="未找到对应的记录，可能已被删除"
+                )
             if req.table_name == "interview":
                 previous_interview = cursor.execute(
                     "SELECT id, owner_id, status, deleted_at, job_position FROM interview WHERE id = ?",

@@ -327,8 +327,13 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                     q_text = merged_questions[i] if i < len(merged_questions) else ""
                     # 检查该 ID 是否已被重建
                     existing = conn.execute(
-                        "SELECT id FROM question_bank WHERE id = ?", (mid,)
+                        "SELECT id,deleted_at FROM question_bank WHERE id = ?", (mid,)
                     ).fetchone()
+                    if existing and existing["deleted_at"] is not None:
+                        conn.execute(
+                            "UPDATE question_bank SET deleted_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                            (mid,),
+                        )
                     if not existing:
                         conn.execute(
                             "INSERT INTO question_bank "
@@ -345,6 +350,34 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                                 pre_snapshot.get("job_position", ""),
                                 participant_owners[str(mid)],
                             ),
+                        )
+
+                # Restore lineage and public variant ownership in the same
+                # transaction as the JSON snapshots and retained canonicals.
+                from app.services.question_bank_integrity import (
+                    claim_public_original_questions,
+                    sync_question_bank_projections,
+                )
+
+                restored_rows = conn.execute(
+                    f"SELECT id,owner_id,status,deleted_at,sources,original_questions,"
+                    f"original_question_sources FROM question_bank WHERE id IN ({placeholders})",
+                    affected_ids,
+                ).fetchall()
+                conn.execute(
+                    f"DELETE FROM question_variant_owners WHERE question_bank_id IN ({placeholders})",
+                    affected_ids,
+                )
+                for restored in restored_rows:
+                    sources = json.loads(restored["sources"] or "[]")
+                    originals = json.loads(restored["original_questions"] or "[]")
+                    original_sources = json.loads(restored["original_question_sources"] or "[]")
+                    sync_question_bank_projections(
+                        conn.cursor(), restored["id"], sources, originals, original_sources
+                    )
+                    if restored["deleted_at"] is None:
+                        claim_public_original_questions(
+                            conn, restored["id"], restored["owner_id"], restored["status"], originals
                         )
 
                 from app.services.cluster_review_lifecycle import mark_clusters_review_pending

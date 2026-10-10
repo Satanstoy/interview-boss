@@ -281,6 +281,9 @@ async def delete_master_question(
                 "WHERE id = ? AND deleted_at IS NULL",
                 (question_id,),
             )
+            from app.services.question_resolution import invalidate_resolutions_for_canonical
+
+            invalidate_resolutions_for_canonical(conn, canonical_id=question_id, reason="canonical_deleted")
             conn.commit()
 
     try:
@@ -332,6 +335,10 @@ async def batch_delete_master_bank(
                 f"WHERE id IN ({ph2}) AND deleted_at IS NULL",
                 found_ids,
             )
+            from app.services.question_resolution import invalidate_resolutions_for_canonical
+
+            for qid in found_ids:
+                invalidate_resolutions_for_canonical(conn, canonical_id=qid, reason="canonical_deleted")
             conn.commit()
             return len(found_ids)
 

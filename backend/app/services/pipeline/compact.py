@@ -10,7 +10,6 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
-from app.db.question_bank_sources import delete_all_for_qb
 from app.services.question_bank_integrity import sync_question_bank_projections
 from app.core.config import (
     CLUSTER_BATCH_SIZE,
@@ -270,14 +269,15 @@ def _do_merge_to_existing(
             oqs_entry.get("sources", []),
         )
 
-    try:
-        delete_all_for_qb(conn, entry["id"])
-    except Exception as e:
-        logger.warning(
-            f"[合并] 清理被合并题 normalized 数据失败 (id={entry['id']}): {e}"
-        )
-    conn.execute("DELETE FROM question_bank WHERE id = ?", (entry["id"],))
-    conn.execute("DELETE FROM question_position WHERE question_id = ?", (entry["id"],))
+    # Keep the canonical row for private/historical resolutions and practice
+    # references; merging must not cascade away their retained history.
+    from app.services.question_resolution import invalidate_resolutions_for_canonical
+
+    invalidate_resolutions_for_canonical(conn, canonical_id=entry["id"], reason="canonical_merged")
+    conn.execute(
+        "UPDATE question_bank SET deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (entry["id"],),
+    )
 
     conn.execute(
         "UPDATE question_bank SET frequency = ?, sources = ?, "

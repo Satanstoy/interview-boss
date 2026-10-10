@@ -184,7 +184,7 @@ def test_compaction_records_ownership_before_deleting_participant(client, test_d
     entry = dict(test_db.execute('SELECT * FROM question_bank WHERE id=?', (merged,)).fetchone())
     _do_merge_to_existing(survivor, entry, confidence=0.95)
     test_db.commit()
-    assert test_db.execute('SELECT id FROM question_bank WHERE id=?', (merged,)).fetchone() is None
+    assert test_db.execute('SELECT deleted_at FROM question_bank WHERE id=?', (merged,)).fetchone()[0] is not None
     row = test_db.execute('SELECT id,pre_snapshot FROM merge_history WHERE survivor_id=?', (survivor,)).fetchone()
     assert json.loads(row['pre_snapshot'])['participant_owners'] == {str(survivor): None, str(merged): None}
     assert client.get(f"/api/master-bank/merge-history/{row['id']}", headers=actors(8802)).status_code == 200

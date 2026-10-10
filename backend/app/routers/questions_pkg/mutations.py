@@ -220,6 +220,7 @@ async def merge_question(question_id: int, req: MergeOriginalQuestionRequest, ad
     requested_original_q = original_q
 
     def _merge():
+        original_q = requested_original_q
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("BEGIN")
