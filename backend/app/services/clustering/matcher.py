@@ -127,10 +127,9 @@ def _extract_raw_matches(result: Dict, unmatched_ids: set[str]) -> List[Dict]:
 def _validate_direct_matches_enabled() -> bool:
     """高置信直通匹配是否也进二次验证（根因 #1：直通里有偏宽误合并）。
 
-    默认关闭（保持现状行为与 LLM 成本）；验证层效果确认后可开启：
-    CLUSTER_VALIDATE_DIRECT=1
+    默认开启，避免高置信错误合并跳过验证；可显式设为 0 关闭。
     """
-    return os.environ.get("CLUSTER_VALIDATE_DIRECT", "").strip().lower() in ("1", "true", "yes")
+    return os.environ.get("CLUSTER_VALIDATE_DIRECT", "1").strip().lower() in ("1", "true", "yes")
 
 
 def _partition_matches_by_risk(
