@@ -11,16 +11,12 @@ from app.services.upload_llm_accounting import upload_llm_stage
 
 @upload_llm_stage("complete", unit_key="source")
 async def complete_node(state: SubmitState) -> dict:
-    """字段补全节点 -- 补全公司/轮次/难度等缺失字段"""
+    """补全推断性难度；公司和轮次只能来自原文，不根据题目猜测。"""
     from app.services.llm import raw_llm_call, _extract_json, get_llm_client_for_user, _should_use_response_format
 
     with NodeTimer() as timer:
         data = state.get("extracted_data", {})
         missing_fields = []
-        if data.get("公司") == "未提供":
-            missing_fields.append("公司")
-        if data.get("面试轮次") == "未提供":
-            missing_fields.append("面试轮次")
         if data.get("难易程度") == "未提供":
             missing_fields.append("难易程度")
 
@@ -45,7 +41,7 @@ async def complete_node(state: SubmitState) -> dict:
 需要补全的字段：{', '.join(missing_fields)}
 
 请返回一个JSON对象，只包含需要补全的字段。对于难易程度，请根据题目难度判断为"简单"、"中等"或"困难"。
-对于公司，请从内容中推断。对于面试轮次，请从内容中推断。"""
+禁止推断公司或面试轮次。"""
 
         try:
             credential_scope = state.get("credential_scope", "user")

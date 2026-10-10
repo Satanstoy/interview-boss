@@ -193,7 +193,7 @@ def test_completion_uses_model_name_from_the_credential_scope(monkeypatch):
                 "extracted_data": {
                     "公司": "未提供",
                     "面试轮次": "未提供",
-                    "难易程度": "中等",
+                    "难易程度": "未提供",
                     "具体题目清单": ["解释 TCP 三次握手"],
                 },
             }
@@ -203,6 +203,21 @@ def test_completion_uses_model_name_from_the_credential_scope(monkeypatch):
     assert selected["scope"] == "global"
     assert request["model"] == "global-model"
     assert request["llm_scope"] == "global"
+
+
+def test_completion_never_invents_missing_company_or_round(monkeypatch):
+    from app.agents.submit.classify import complete_node
+    import app.services.llm as llm
+    calls = []
+    async def raw_call(*args, **kwargs):
+        calls.append(kwargs)
+        return '{"公司":"猜测公司","面试轮次":"二面"}'
+    monkeypatch.setattr(llm, "raw_llm_call", raw_call)
+    data = {"公司":"未提供", "面试轮次":"未提供", "难易程度":"中等", "具体题目清单":["list 和 tuple 的区别"]}
+    asyncio.run(complete_node({"user_id":101, "extracted_data":data}))
+    assert calls == []
+    assert data["公司"] == "未提供"
+    assert data["面试轮次"] == "未提供"
 
 
 def test_match_outcomes_accepts_and_uses_explicit_llm_scope(monkeypatch):
@@ -730,7 +745,7 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
         "SELECT url, company, round, publish_status FROM interview WHERE id = ?",
         (result["saved_interview_id"],),
     ).fetchone()
-    assert tuple(published) == ("", "", "", "pending")
+    assert tuple(published) == ("", "示例公司", "一面", "pending")
     approval = conn.execute(
         "SELECT status, reviewed_by, review_projection_json FROM public_contribution_requests "
         "WHERE id = ?",
@@ -740,7 +755,8 @@ def test_admin_public_persist_keeps_root_ordinal_and_queue_identity(monkeypatch)
     assert approval["reviewed_by"] == 201
     projection = json.loads(approval["review_projection_json"])
     assert projection["source"]["source_url"] is None
-    assert projection["source"]["company"] is None
+    assert projection["source"]["company"] == "示例公司"
+    assert projection["source"]["round"] == "一面"
     checkpoint = conn.execute(
         "SELECT status FROM upload_stage_results WHERE import_id = 'admin-root' "
         "AND stage = 'resolve' AND unit_key = ?",

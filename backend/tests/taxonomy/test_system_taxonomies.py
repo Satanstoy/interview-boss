@@ -17,6 +17,25 @@ EXPECTED_NON_AGENT_POSITIONS = {
 }
 
 
+def test_agent_python_tags_are_available_in_system_and_fallback():
+    from app.core.system_taxonomies import SYSTEM_TAXONOMIES
+    from app.core.prompts import DEFAULT_TAXONOMY
+    required = {"Python基础", "数据类型", "对象身份与相等性"}
+    assert required <= set(SYSTEM_TAXONOMIES["agent开发/大模型应用开发/大模型开发"]["tags"])
+    assert required <= set(DEFAULT_TAXONOMY["tags"])
+
+
+def test_python_tag_upgrade_preserves_existing_categories_and_custom_tags(test_db):
+    from app.db.migrations.import_quality import _migration_128_python_tags
+    position = "agent开发/大模型应用开发/大模型开发"
+    test_db.execute("UPDATE taxonomy SET tags_json = ?, categories_json = ? WHERE source = 'system' AND position_name = ?", ('["自定义标签"]', '[{"cat1":"历史分类","children":["历史子类"]}]', position))
+    _migration_128_python_tags(test_db)
+    _migration_128_python_tags(test_db)
+    row = test_db.execute("SELECT tags_json, categories_json FROM taxonomy WHERE source = 'system' AND position_name = ?", (position,)).fetchone()
+    assert json.loads(row["tags_json"]) == ["自定义标签", "Python基础", "数据类型", "对象身份与相等性"]
+    assert json.loads(row["categories_json"])[0]["cat1"] == "历史分类"
+
+
 @pytest.fixture(autouse=True)
 def _isolated_app_db(app_db_isolation):
     """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
