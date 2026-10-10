@@ -1,0 +1,444 @@
+{
+  "code_revision": "402bb416293bb0de449f407451b317da6c35e59a",
+  "root": {
+    "id": "45f4f6b2-a0e5-4ddb-b643-22b7e294dcd7",
+    "status": "completed",
+    "interview_id": 5032,
+    "created_at": "2026-10-10 15:59:04",
+    "completed_at": "2026-10-10 16:11:42"
+  },
+  "api_counts": {
+    "extracted": 11,
+    "retained": 11,
+    "excluded": 0,
+    "needs_review": 0,
+    "resolved": 11,
+    "answered": 11,
+    "answer_needs_review": 10,
+    "failed": 0,
+    "total": 11
+  },
+  "interview": {
+    "id": 5032,
+    "company": "蔚来",
+    "round": "一面",
+    "publish_status": "published",
+    "season": "2027届秋招"
+  },
+  "questions": [
+    {
+      "detail_id": 7892,
+      "question": "Python list 与 tuple 有什么区别？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "Python基础, 数据类型",
+      "resolution_status": "created",
+      "canonical_id": 6509,
+      "canonical_question": "Python list 与 tuple 有什么区别？",
+      "answer_length": 1233,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [],
+      "first_review_problem": "候选答案共 1233 字，超出本题确定性上限 700 字"
+    },
+    {
+      "detail_id": 7893,
+      "question": "Python 中 == 与 is 有什么区别？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "Python基础, 数据类型, 对象身份与相等性",
+      "resolution_status": "created",
+      "canonical_id": 6510,
+      "canonical_question": "Python 中 == 与 is 有什么区别？",
+      "answer_length": 1045,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [],
+      "first_review_problem": "篇幅超出单一概念题的合理区间。全篇（含小标题与代码注释）约 780 字左右，远超『单一概念题通常 300–500 字』的上限，且第 4 条只对多子问、系统设计、架构类题目放宽到 600–1000 字，本题属于单一概念比较题，不适用该放宽条件。"
+    },
+    {
+      "detail_id": 7894,
+      "question": "Tool Calling 和 Skill 的区别、联系是什么？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "工具调用, 函数调用",
+      "resolution_status": "created",
+      "canonical_id": 6513,
+      "canonical_question": "Tool Calling 和 Skill 的区别、联系是什么？",
+      "answer_length": 1321,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 4,
+      "review_issue_codes": [],
+      "first_review_problem": "最后一节「什么时候容易混、怎么选」列了 4 条要点（混淆点一、混淆点二、选型直觉、容易翻车），超过质量标准允许的 3 条列表上限，条目偏堆砌。"
+    },
+    {
+      "detail_id": 7895,
+      "question": "MCP 的核心作用是什么，适用于什么场景？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "MCP协议",
+      "resolution_status": "created",
+      "canonical_id": 6514,
+      "canonical_question": "MCP 的核心作用是什么，适用于什么场景？",
+      "answer_length": 1527,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 3,
+      "review_issue_codes": [],
+      "first_review_problem": "「适合的场景」列表列了 4 条（多宿主复用、本地资源访问、跨组织能力共享、上下文注入），单个列表条目超过 3 条，口述时容易记不全、显得堆砌。"
+    },
+    {
+      "detail_id": 7896,
+      "question": "Agent 集成外部工具时，安全和权限控制如何做？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "安全防护, 工具调用",
+      "resolution_status": "created",
+      "canonical_id": 6515,
+      "canonical_question": "Agent 集成外部工具时，安全和权限控制如何做？",
+      "answer_length": 1696,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 3,
+      "review_issue_codes": [],
+      "first_review_problem": "多处具体机制被断言为既定事实，但所给参考资料并未覆盖，且答案没有标注‘需复核’"
+    },
+    {
+      "detail_id": 7897,
+      "question": "短期记忆与长期记忆如何设计？语义冲突如何处理？记忆长度如何设置？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "记忆管理, 上下文管理",
+      "resolution_status": "created",
+      "canonical_id": 6512,
+      "canonical_question": "短期记忆与长期记忆如何设计？语义冲突如何处理？记忆长度如何设置？",
+      "answer_length": 1469,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 4,
+      "review_issue_codes": [],
+      "first_review_problem": "多处列表超过 3 条，存在为分点而分点的堆砌感，削弱口述性：如“冲突由谁来判”4 条、“记忆长度怎么定”4 条、“哪里最容易翻车”4 条，且“写入策略/人工确认”在冲突一节与翻车一节重复出现。"
+    },
+    {
+      "detail_id": 7898,
+      "question": "如何避免查询改写错误或不断漂移？怎样评估改写质量？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "RAG设计, Prompt工程, 模型评估",
+      "resolution_status": "created",
+      "canonical_id": 6516,
+      "canonical_question": "如何避免查询改写错误或不断漂移？怎样评估改写质量？",
+      "answer_length": 1404,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [
+        "review_unavailable"
+      ],
+      "first_review_problem": "审校结果 JSON 无效"
+    },
+    {
+      "detail_id": 7899,
+      "question": "意图路由如何实现？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "Agent架构设计, 规划与分解",
+      "resolution_status": "created",
+      "canonical_id": 6518,
+      "canonical_question": "意图路由如何实现？",
+      "answer_length": 1802,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [],
+      "first_review_problem": "篇幅明显超出上限：全文约 1300–1400 字，而质量标准规定多子问、系统设计类工程题可用 600–1000 字；其中还有信息重复，如第一节『避免所有请求都塞给一个大模型硬扛』与第五节『过度依赖单一 LLM 分类』表达的是同一点，属无增量的填充。"
+    },
+    {
+      "detail_id": 7900,
+      "question": "介绍并重构实习项目的哪个部分？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "系统设计",
+      "resolution_status": "created",
+      "canonical_id": 6519,
+      "canonical_question": "介绍并重构实习项目的哪个部分？",
+      "answer_length": 1333,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [],
+      "first_review_problem": "结构不达标：本题为单一问题，应使用 3–4 个三级标题，候选答案用了 5 个二级标题（## 项目背景与我负责的模块 / ## 为什么这块值得重构 / ## 重构后我怎么分层 / ## 一次请求怎么跑完 / ## 效果和容易被追问的点），既超出 3–4 个的篇幅分节上限，标题层级也与题目本身的 ## 冲突，应合并为 3–4 个 ### 小节。"
+    },
+    {
+      "detail_id": 7901,
+      "question": "RAG 主要解决什么问题？检索正确但答案错误时如何排查？",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "RAG设计, 幻觉应对",
+      "resolution_status": "created",
+      "canonical_id": 6517,
+      "canonical_question": "RAG 主要解决什么问题？检索正确但答案错误时如何排查？",
+      "answer_length": 1127,
+      "answer_review_status": "passed",
+      "review_issue_count": 0,
+      "review_issue_codes": [],
+      "first_review_problem": null
+    },
+    {
+      "detail_id": 7902,
+      "question": "手写最长回文子串，并分析复杂度、说明优化思路。",
+      "company": "蔚来",
+      "round": "一面",
+      "tags": "算法手撕",
+      "resolution_status": "created",
+      "canonical_id": 6511,
+      "canonical_question": "手写最长回文子串，并分析复杂度、说明优化思路。",
+      "answer_length": 1625,
+      "answer_review_status": "needs_review",
+      "review_issue_count": 1,
+      "review_issue_codes": [],
+      "first_review_problem": "候选答案共 1625 字，超出本题确定性上限 700 字"
+    }
+  ],
+  "jobs": [
+    {
+      "id": 370,
+      "job_type": "credential_preflight",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:04",
+      "started_at": "2026-10-10 15:59:04",
+      "completed_at": "2026-10-10 15:59:08"
+    },
+    {
+      "id": 371,
+      "job_type": "submit_import",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:08",
+      "started_at": "2026-10-10 15:59:08",
+      "completed_at": "2026-10-10 15:59:30"
+    },
+    {
+      "id": 372,
+      "job_type": "cluster_batch",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:30",
+      "started_at": "2026-10-10 15:59:31",
+      "completed_at": "2026-10-10 15:59:43"
+    },
+    {
+      "id": 373,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 15:59:43",
+      "completed_at": "2026-10-10 16:05:00"
+    },
+    {
+      "id": 374,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 15:59:43",
+      "completed_at": "2026-10-10 16:02:15"
+    },
+    {
+      "id": 375,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 15:59:43",
+      "completed_at": "2026-10-10 16:02:15"
+    },
+    {
+      "id": 376,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 15:59:43",
+      "completed_at": "2026-10-10 16:01:42"
+    },
+    {
+      "id": 377,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:01:42",
+      "completed_at": "2026-10-10 16:03:51"
+    },
+    {
+      "id": 378,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:02:15",
+      "completed_at": "2026-10-10 16:05:30"
+    },
+    {
+      "id": 379,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:02:15",
+      "completed_at": "2026-10-10 16:04:28"
+    },
+    {
+      "id": 380,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:03:51",
+      "completed_at": "2026-10-10 16:05:05"
+    },
+    {
+      "id": 381,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:04:28",
+      "completed_at": "2026-10-10 16:11:42"
+    },
+    {
+      "id": 382,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:05:00",
+      "completed_at": "2026-10-10 16:08:38"
+    },
+    {
+      "id": 383,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "created_at": "2026-10-10 15:59:43",
+      "started_at": "2026-10-10 16:05:05",
+      "completed_at": "2026-10-10 16:06:29"
+    }
+  ],
+  "llm_calls": [
+    {
+      "stage": "answer",
+      "status": "succeeded",
+      "error_code": null,
+      "count": 42
+    },
+    {
+      "stage": "answer",
+      "status": "unknown",
+      "error_code": "APITimeoutError",
+      "count": 3
+    },
+    {
+      "stage": "classify",
+      "status": "succeeded",
+      "error_code": null,
+      "count": 1
+    },
+    {
+      "stage": "credential_preflight",
+      "status": "succeeded",
+      "error_code": null,
+      "count": 1
+    },
+    {
+      "stage": "extract",
+      "status": "succeeded",
+      "error_code": null,
+      "count": 2
+    },
+    {
+      "stage": "resolve",
+      "status": "succeeded",
+      "error_code": null,
+      "count": 11
+    }
+  ],
+  "comparison": {
+    "old_answer_generation_jobs": 9,
+    "new_answer_generation_jobs": 11,
+    "old_first_answer_dispatch_delay_seconds": 142.0,
+    "new_first_answer_dispatch_delay_seconds": 0.0,
+    "new_total_elapsed_seconds": 758.0,
+    "old_llm_calls": [
+      {
+        "stage": "answer",
+        "status": "succeeded",
+        "error_code": null,
+        "count": 45
+      },
+      {
+        "stage": "answer",
+        "status": "unknown",
+        "error_code": "APIConnectionError",
+        "count": 2
+      },
+      {
+        "stage": "answer",
+        "status": "unknown",
+        "error_code": "APITimeoutError",
+        "count": 3
+      },
+      {
+        "stage": "classify",
+        "status": "succeeded",
+        "error_code": null,
+        "count": 1
+      },
+      {
+        "stage": "credential_preflight",
+        "status": "succeeded",
+        "error_code": null,
+        "count": 1
+      },
+      {
+        "stage": "extract",
+        "status": "succeeded",
+        "error_code": null,
+        "count": 2
+      },
+      {
+        "stage": "resolve",
+        "status": "succeeded",
+        "error_code": null,
+        "count": 14
+      }
+    ]
+  },
+  "cleanup": {
+    "committed": true,
+    "root": "403bdfb2-0939-4083-aaea-1e6fd58c5624",
+    "deleted_and_preserved": {
+      "question_original_item_sources": 0,
+      "question_original_items": 2,
+      "question_variant_owners": 2,
+      "shared_5919": {
+        "retained": true,
+        "removed_case_variant": 1,
+        "frequency": 10
+      },
+      "shared_6047": {
+        "retained": true,
+        "removed_case_variant": 1,
+        "frequency": 1
+      },
+      "analysis_queue": 11,
+      "public_contribution_items": 11,
+      "public_contribution_events": 2,
+      "public_contribution_requests": 1,
+      "question_resolutions": 11,
+      "questions_detail": 11,
+      "interview_distribution_stat_exclusions": 0,
+      "interview": 1,
+      "question_bank": 9,
+      "upload_llm_calls": 68,
+      "upload_stage_results": 26,
+      "job_payloads": 12,
+      "jobs": 12,
+      "upload_attempts": 1,
+      "upload_imports": 1,
+      "admin_audit_log": 0,
+      "task_logs": 0,
+      "new_fk_violations": 0,
+      "remaining_old_root": 0
+    }
+  },
+  "manual_verification": {
+    "palindrome_exhaustive_cases": 255,
+    "palindrome_all_passed": true,
+    "tuple_hashability_condition_present": true,
+    "list_pop_return_value_error_remains": true
+  }
+}
