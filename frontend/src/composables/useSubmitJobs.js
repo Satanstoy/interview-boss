@@ -19,7 +19,7 @@ import {
   retrySubmitJob,
   retryUploadImport,
 } from '@/services/dataApi.js'
-import { getSSE } from '@/services/http.js'
+import { getSSE, getAuthGeneration, assertAuthGeneration } from '@/services/http.js'
 
 const STORAGE_KEY = 'interviewboss-submit-jobs'
 let _taskUserId = 'anonymous'
@@ -366,6 +366,7 @@ export function clearDraftKey(draftId) {
   if (!draftId) return
   try {
     localStorage.removeItem(_draftStorageKey(draftId))
+    localStorage.removeItem(`${_draftStorageKey(draftId)}:payload`)
   } catch { /* 忽略 */ }
 }
 
@@ -377,34 +378,95 @@ function announceUploadAccepted(result) {
   if (result?.import_id || result?.job_id) window.dispatchEvent(new Event('upload-task-accepted'))
 }
 
+async function draftFingerprint(formData) {
+  if (!globalThis.crypto?.subtle) return null
+  const entries = []
+  for (const [name, value] of formData.entries()) {
+    if (typeof value === 'string') entries.push([name, value])
+    else {
+      const digest = await crypto.subtle.digest('SHA-256', await value.arrayBuffer())
+      entries.push([name, value.name, value.type, Array.from(new Uint8Array(digest))])
+    }
+  }
+  entries.sort(([first], [second]) => first.localeCompare(second))
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(entries)))
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function readDraftFingerprint(draftId, key) {
+  if (!draftId) return null
+  try {
+    const stored = JSON.parse(localStorage.getItem(`${_draftStorageKey(draftId)}:payload`) || 'null')
+    return stored?.key === key ? stored.hash : null
+  } catch { return null }
+}
+
+function saveDraftFingerprint(draftId, key, hash) {
+  if (!draftId || !hash) return
+  try {
+    localStorage.setItem(`${_draftStorageKey(draftId)}:payload`, JSON.stringify({ key, hash }))
+  } catch { /* Without storage, the server must validate the repeated payload. */ }
+}
+
 export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
+  const generation = getAuthGeneration()
+  const userScope = _taskUserId
+  const assertContext = () => {
+    assertAuthGeneration(generation)
+    if (_taskUserId !== userScope) {
+      const error = new Error('登录身份已变化，请重新提交')
+      error.code = 'AUTH_CONTEXT_CHANGED'
+      throw error
+    }
+  }
   const key = getDraftKey(draftId) || createIdempotencyKey()
   rememberDraftKey(draftId, key)
+  const hash = await draftFingerprint(formData)
+  assertContext()
+  const previousHash = readDraftFingerprint(draftId, key)
+  let canRecover = Boolean(hash && previousHash === hash)
 
   // 1) 先按幂等键查已有任务（网络重发/响应丢失恢复）
   try {
     const existing = await fetchUploadImportByKey(key)
-    if (existing?.import_id) {
+    assertContext()
+    if (existing?.import_id && hash && previousHash === hash) {
       announceUploadAccepted(existing)
       return { ...existing, created: false, idempotency_key: key }
     }
-  } catch {
+  } catch (error) {
+    assertContext()
+    if (error.code === 'AUTH_CONTEXT_CHANGED') throw error
+    if (error.status === 404) canRecover = Boolean(hash)
     // 404 = 查无记录，继续提交
   }
 
+  // Keep the first attempted payload fingerprint across ambiguous responses.
+  // An edited or unproven draft must reach the server's hash/conflict check.
+  const currentHash = readDraftFingerprint(draftId, key)
+  if (currentHash && currentHash !== hash) canRecover = false
+  if (!currentHash && canRecover) saveDraftFingerprint(draftId, key, hash)
   try {
     const result = await createSubmitJobWithKey(formData, key)
+    assertContext()
+    saveDraftFingerprint(draftId, key, hash)
     announceUploadAccepted(result)
     return { ...result, idempotency_key: key }
   } catch (err) {
+    assertContext()
+    if (err.status === 409 || err.code === 'AUTH_CONTEXT_CHANGED') throw err
     // 2) 响应可能已到达服务端：再查一次 by-key，绝不重复创建
     try {
       const recovered = await fetchUploadImportByKey(key)
-      if (recovered?.import_id) {
+      assertContext()
+      if (recovered?.import_id && canRecover && hash && readDraftFingerprint(draftId, key) === hash) {
         announceUploadAccepted(recovered)
         return { ...recovered, created: false, idempotency_key: key }
       }
-    } catch { /* 保持原始错误 */ }
+    } catch (error) {
+      assertContext()
+      if (error.code === 'AUTH_CONTEXT_CHANGED') throw error
+    }
     throw err
   }
 }
