@@ -167,7 +167,7 @@ test('real task API/SSE retains last good state through faults and isolates acco
       status: await ownTask.getByRole('status').innerText(),
       progress: await ownTask.getByRole('progressbar').getAttribute('aria-valuenow'),
       progressText: await ownTask.getByText('0/1 题已处理').innerText(),
-      counts: await ownTask.getByText(/答案成功/).innerText(),
+      counts: await ownTask.getByText(/答案已生成/).innerText(),
     }
     await expect.poll(async () => {
       const state = await proxyEvidence(page)
@@ -179,7 +179,7 @@ test('real task API/SSE retains last good state through faults and isolates acco
     await expect(ownTask.getByRole('status')).toHaveText(beforeHeartbeat.status)
     await expect(ownTask.getByRole('progressbar')).toHaveAttribute('aria-valuenow', beforeHeartbeat.progress)
     await expect(ownTask.getByText('0/1 题已处理')).toHaveText(beforeHeartbeat.progressText)
-    await expect(ownTask.getByText(/答案成功/)).toHaveText(beforeHeartbeat.counts)
+    await expect(ownTask.getByText(/答案已生成/)).toHaveText(beforeHeartbeat.counts)
     await expect(ownTask.getByRole('status')).toHaveText('处理中')
     await expect(ownTask.getByText('0/1 题已处理')).toBeVisible()
 

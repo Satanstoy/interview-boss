@@ -63,7 +63,7 @@ test('AC-011 restores only two failed answers through the real browser, API, wor
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const task = page.locator('li').filter({ hasText: importId })
   await expect(task).toContainText('部分失败', { timeout: 360000 })
-  await expect(task).toContainText('答案成功 8 · 失败 2')
+  await expect(task).toContainText(/答案已生成 8 · 待复核 \d+ · 失败 2/)
   await expect(task.getByRole('button', { name: '重试失败步骤' })).toBeVisible()
   await expect(task.getByRole('button', { name: '查看结果' })).toBeVisible()
 
@@ -116,7 +116,7 @@ test('AC-011 restores only two failed answers through the real browser, API, wor
   await page.getByRole('button', { name: '上传任务中心' }).click()
   const completedTask = page.locator('li').filter({ hasText: importId })
   await expect(completedTask).toContainText('已完成')
-  await expect(completedTask).toContainText('答案成功 10 · 失败 0')
+  await expect(completedTask).toContainText(/答案已生成 10 · 待复核 \d+ · 失败 0/)
 
   // Result history stays openable after the terminal status has aged past 5 seconds.
   await page.waitForTimeout(6000)
