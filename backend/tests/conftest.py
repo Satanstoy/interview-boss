@@ -19,6 +19,14 @@ import pytest
 # explicitly to the plaintext fallback because they do not provision JWT keys.
 os.environ.setdefault("HARNESS_ALLOW_PLAINTEXT_ARTIFACTS", "1")
 
+# 真实原始实现（在任何 fixture 打补丁之前捕获）。teardown **必须**还原到它，
+# 不能还原「当时的当前值」：一旦某个模块残留了上一次 fixture 的测试闭包，
+# 那个闭包就会被当成 original 保存并在下次 teardown 再装回去，泄漏自我延续，
+# 后续测试会拿到已关闭的连接（Cannot operate on a closed database）。
+import app.db.connection as _db_connection_module  # noqa: E402
+
+_TRUE_GET_DB_CONNECTION = _db_connection_module.get_db_connection
+
 
 # ── 代理清理（防止 socks5h 代理导致 httpx 初始化失败）────────────
 
@@ -55,6 +63,40 @@ def pytest_collection_modifyitems(config, items):
 
 
 # ── DB 隔离（核心）─────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _guard_against_production_db(monkeypatch):
+    """防护：测试期间不得打开 backend/data 下的任何 SQLite 文件。
+
+    只允许内存库或临时目录。任何试图连接生产库路径的代码立即失败，
+    避免“测试悄悄写生产库”或掩盖未注入测试连接的实现。
+    """
+
+    import sqlite3 as _sqlite3
+
+    from app.core.config import DATA_DIR
+
+    protected = os.path.realpath(DATA_DIR)
+    original_connect = _sqlite3.connect
+
+    def _guarded_connect(database, *args, **kwargs):
+        if isinstance(database, (str, bytes, os.PathLike)):
+            raw = os.fspath(database)
+            in_memory = raw in (":memory:", "") or raw.startswith("file::memory:")
+            in_memory = in_memory or raw.startswith("file:?mode=memory")
+            if not in_memory:
+                target = raw[5:].split("?", 1)[0] if raw.startswith("file:") else raw
+                if target and not target.startswith(":"):
+                    resolved = os.path.realpath(os.path.abspath(target))
+                    if resolved == protected or resolved.startswith(protected + os.sep):
+                        raise AssertionError(
+                            f"测试不得连接生产数据库: {target!r}（仅允许 :memory: 或临时目录）"
+                        )
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(_sqlite3, "connect", _guarded_connect)
+    yield
 
 
 @pytest.fixture
@@ -160,6 +202,59 @@ def mock_redis():
 # ── Test Client ──────────────────────────────────────────────
 
 
+def _sweep_modules_imported_while_patched(db_module, test_get_db_connection, sync_run_db):
+    """测试期间新导入的模块会拷贝被替换的函数引用，teardown 时兜底修回。"""
+
+    for mod_name, mod in list(sys.modules.items()):
+        if not mod_name.startswith("app.") or mod is None:
+            continue
+        if getattr(mod, "get_db_connection", None) is test_get_db_connection:
+            mod.get_db_connection = _TRUE_GET_DB_CONNECTION
+        if getattr(mod, "run_db", None) is sync_run_db:
+            mod.run_db = db_module.run_db
+
+
+@pytest.fixture
+def app_db_isolation(test_db):
+    """给不使用 TestClient 的测试注入 test_db。
+
+    路由/服务用 `from app.db.connection import get_db_connection` 导入函数引用，
+    只改 app.db.connection 不够，必须逐个已导入的 app.* 模块替换；否则这些测试
+    会静默连上 backend/data 的生产库（防护 fixture 会把它们变成显式失败）。
+    """
+
+    import app.db.connection as db_module
+
+    async def _sync_run_db(func):
+        return func()
+
+    restores = []
+    patched_conn_modules = []
+
+    def _test_get_db_connection():
+        return test_db
+
+    for mod_name, mod in list(sys.modules.items()):
+        if not mod_name.startswith("app.") or mod is None:
+            continue
+        if hasattr(mod, "run_db") and mod.run_db is not _sync_run_db:
+            restores.append((mod, "run_db", mod.run_db))
+            mod.run_db = _sync_run_db
+        if hasattr(mod, "get_db_connection"):
+            patched_conn_modules.append(mod)
+            mod.get_db_connection = _test_get_db_connection
+
+    token = db_module._db_conn_var.set(test_db)
+    yield test_db
+    db_module._db_conn_var.reset(token)
+    for mod, attr, original in restores:
+        setattr(mod, attr, original)
+    # get_db_connection 一律还原到真实实现（不是「当时的当前值」，见文件顶部注释）
+    for mod in patched_conn_modules:
+        mod.get_db_connection = _TRUE_GET_DB_CONNECTION
+    _sweep_modules_imported_while_patched(db_module, _test_get_db_connection, _sync_run_db)
+
+
 @pytest.fixture
 def client(test_db):
     """FastAPI TestClient，已替换 DB 依赖"""
@@ -232,6 +327,10 @@ def client(test_db):
 
     # 恢复原始函数引用
     for _, (mod, attr, orig) in _patches.items():
-        setattr(mod, attr, orig)
-    for mod, orig in _module_patches:
-        mod.get_db_connection = orig
+        if attr == "get_db_connection":
+            mod.get_db_connection = _TRUE_GET_DB_CONNECTION
+        else:
+            setattr(mod, attr, orig)
+    for mod, _orig in _module_patches:
+        mod.get_db_connection = _TRUE_GET_DB_CONNECTION
+    _sweep_modules_imported_while_patched(db_module, _test_get_db_connection, _sync_run_db)

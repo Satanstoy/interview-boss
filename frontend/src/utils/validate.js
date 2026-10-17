@@ -88,6 +88,14 @@ export function validateUrl(url) {
   if (!url || !url.trim()) return { valid: true, value: '' } // URL 通常可选
   const s = sanitizeText(url, 2048)
   if (!URL_RE.test(s)) return { valid: false, error: '请输入有效的 URL（以 http:// 或 https:// 开头）', value: '' }
+  try {
+    const parsed = new URL(s)
+    if (!/^https?:\/\/[^/]/i.test(s) || !parsed.hostname || parsed.username || parsed.password || s.includes('](') || s.includes('\\')) {
+      return { valid: false, error: '请粘贴完整的原始链接，不要包含 Markdown 格式或账号密码', value: '' }
+    }
+  } catch {
+    return { valid: false, error: '请输入有效的 URL', value: '' }
+  }
   return { valid: true, value: s }
 }
 

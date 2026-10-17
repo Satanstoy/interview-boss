@@ -6,9 +6,7 @@ from app.agents.shared.quality import evaluate_extraction_quality
 from app.agents.shared.events import emit_progress, build_extraction_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")
-
-# 提取黑名单（LLM误提取的非面试题）
-_EXTRACT_BLACKLIST = ["自我介绍", "反问", "想问我", "职业规划", "加班", "薪资", "为什么离职", "优缺点"]
+from app.services.upload_llm_accounting import upload_llm_stage
 
 
 async def recognize_node(state: SubmitState) -> dict:
@@ -24,8 +22,9 @@ async def recognize_node(state: SubmitState) -> dict:
     return {"doc_type": ""}
 
 
+@upload_llm_stage("extract", unit_key="document", checkpoint_result=True)
 async def extract_node(state: SubmitState) -> dict:
-    """LLM 提取结构化数据节点"""
+    """LLM 提取结构化数据节点（F08：支持从阶段检查点复用已成功结果）。"""
     from app.services.llm import _call_llm_with_retry_messages, _extract_json, get_llm_client_for_user, _should_use_response_format
     from app.core.prompts import SYSTEM_PROMPT, JD_PROMPT, INTERVIEW_PROMPT
     from app.services.utils import encode_image
@@ -34,48 +33,131 @@ async def extract_node(state: SubmitState) -> dict:
         doc_type = state.get("doc_type", "")
         user_id = state["user_id"]
 
-        # 选择 prompt
-        if doc_type == "jd":
-            system_prompt = JD_PROMPT
-        elif doc_type == "interview":
-            system_prompt = INTERVIEW_PROMPT
+        # F08：恢复时 worker 注入已成功的 extract 检查点 → 不重跑 LLM
+        resume = state.get("_resume_extracted")
+        if isinstance(resume, dict) and resume.get("data"):
+            data = resume["data"]
+            doc_type = resume.get("doc_type") or doc_type
+            url = resume.get("url") or state.get("url", "")
+            emit_progress(
+                state,
+                "extract",
+                f"复用已保存的提取结果（{len(data.get('具体题目清单', []))} 道题）",
+            )
         else:
-            system_prompt = SYSTEM_PROMPT
+            # 选择 prompt
+            if doc_type == "jd":
+                system_prompt = JD_PROMPT
+            elif doc_type == "interview":
+                system_prompt = INTERVIEW_PROMPT
+            else:
+                system_prompt = SYSTEM_PROMPT
 
-        # 构建 messages
-        user_content = [{"type": "text", "text": "请分析以下联合内容，保持信息连贯性，并综合整理后严格按照 JSON Schema 返回："}]
-        raw_text = state.get("raw_text", "")
-        if raw_text.strip():
-            user_content.append({"type": "text", "text": f"\n【文本内容】:\n{raw_text}\n"})
-        for img in state.get("image_data", []):
-            base64_img = encode_image(img["content"])
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{img['mime']};base64,{base64_img}"}
-            })
+            # 构建 messages
+            user_content = [{"type": "text", "text": "请分析以下联合内容，保持信息连贯性，并综合整理后严格按照 JSON Schema 返回："}]
+            raw_text = state.get("raw_text", "")
+            if raw_text.strip():
+                user_content.append({"type": "text", "text": f"\n【文本内容】:\n{raw_text}\n"})
+            for img in state.get("image_data", []):
+                base64_img = encode_image(img["content"])
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img['mime']};base64,{base64_img}"}
+                })
 
-        _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id)
-        llm_kwargs = dict(
-            model=state.get("_eval_model") or _m,
-            temperature=float(state.get("_eval_temperature", 0.1)),
-        )
-        if _should_use_response_format(_bu):
-            llm_kwargs["response_format"] = {"type": "json_object"}
-        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
+            credential_scope = state.get("credential_scope", "user")
+            _c, _m, _t, _bu, _provider = get_llm_client_for_user(
+                user_id, llm_scope=credential_scope
+            )
+            llm_kwargs = dict(
+                model=state.get("_eval_model") or _m,
+                temperature=float(state.get("_eval_temperature", 0.1)),
+                # R01：global 公共导入必须用系统凭据（worker 注入的
+                # credential_scope），禁止静默回退到提交者本人 Key。
+                llm_scope=credential_scope,
+            )
+            if _should_use_response_format(_bu):
+                llm_kwargs["response_format"] = {"type": "json_object"}
+            messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
-        response_text = await _call_llm_with_retry_messages(messages, user_id=user_id, **llm_kwargs)
-        parsed = _extract_json(response_text)
+            from app.services.extraction_integrity import (
+                ExtractionSchemaError,
+                normalize_extracted_questions,
+            )
+            from app.services.upload_llm_accounting import upload_retry_budget_scope
 
-        # 解析结果
-        if not doc_type:
-            doc_type = (parsed.get("type") or "").lower()
-        data = parsed.get("data", {})
+            def parse_output(raw_output):
+                try:
+                    parsed = _extract_json(raw_output)
+                except Exception as exc:
+                    raise ExtractionSchemaError("模型输出不是合法 JSON") from exc
+                if not isinstance(parsed, dict):
+                    raise ExtractionSchemaError("模型输出必须是 JSON 对象")
 
-        # 过滤黑名单
-        if doc_type == "interview":
-            q_list = data.get("具体题目清单", [])
-            q_list = [q for q in q_list if q.strip() and not any(b in q for b in _EXTRACT_BLACKLIST)]
-            data["具体题目清单"] = q_list
+                parsed_type = str(parsed.get("type") or doc_type or "").lower()
+                parsed_data = parsed.get("data", {})
+                if not isinstance(parsed_data, dict):
+                    raise ExtractionSchemaError("模型输出的 data 必须是 JSON 对象")
+
+                if parsed_type == "interview":
+                    raw_list = parsed_data.get("具体题目清单", [])
+                    normalized = normalize_extracted_questions(raw_list)
+                    parsed_data["具体题目清单"] = [
+                        item["question"] for item in normalized["questions"]
+                    ]
+                    parsed_data["题目 ordinal"] = [
+                        item["ordinal"] for item in normalized["questions"]
+                    ]
+                    parsed_data["题目标记"] = {
+                        str(item["ordinal"]): item["review_reason"]
+                        for item in normalized["questions"]
+                        if item["needs_review"]
+                    }
+                    parsed_data["提取计数"] = {
+                        "extracted": normalized["counts"]["extracted"],
+                        "retained": normalized["counts"]["retained"],
+                        "excluded": normalized["counts"]["excluded"],
+                        "needs_review": normalized["counts"]["needs_review"],
+                    }
+                return parsed_type, parsed_data
+
+            async def call_and_parse_with_repairs(retry_budget):
+                response_text = await _call_llm_with_retry_messages(
+                    messages, user_id=user_id, **llm_kwargs
+                )
+                try:
+                    return parse_output(response_text)
+                except ExtractionSchemaError as schema_error:
+                    # Repairs are upload-only and capped at two. Every request,
+                    # including Tenacity retries, shares this same budget.
+                    if retry_budget is None:
+                        raise
+                    for _repair_no in range(2):
+                        if retry_budget.exhausted:
+                            raise schema_error
+                        repair_messages = [
+                            *messages,
+                            {"role": "assistant", "content": response_text},
+                            {
+                                "role": "user",
+                                "content": (
+                                    "上一条输出未通过 JSON 结构校验："
+                                    f"{schema_error}。请只返回修正后的 JSON 对象，"
+                                    "保持原有数据和全部题目，不要丢题或添加解释文字。"
+                                ),
+                            },
+                        ]
+                        response_text = await _call_llm_with_retry_messages(
+                            repair_messages, user_id=user_id, **llm_kwargs
+                        )
+                        try:
+                            return parse_output(response_text)
+                        except ExtractionSchemaError as repair_error:
+                            schema_error = repair_error
+                    raise schema_error
+
+            with upload_retry_budget_scope() as retry_budget:
+                doc_type, data = await call_and_parse_with_repairs(retry_budget)
 
     # 质量评估
     quality = evaluate_extraction_quality(data)

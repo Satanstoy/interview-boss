@@ -6,19 +6,17 @@ from app.agents.shared.quality import evaluate_tagging_quality
 from app.agents.shared.events import emit_progress, build_tagging_data, NodeTimer
 
 logger = logging.getLogger("interview-boss")
+from app.services.upload_llm_accounting import upload_llm_stage
 
 
+@upload_llm_stage("complete", unit_key="source")
 async def complete_node(state: SubmitState) -> dict:
-    """字段补全节点 -- 补全公司/轮次/难度等缺失字段"""
+    """补全推断性难度；公司和轮次只能来自原文，不根据题目猜测。"""
     from app.services.llm import raw_llm_call, _extract_json, get_llm_client_for_user, _should_use_response_format
 
     with NodeTimer() as timer:
         data = state.get("extracted_data", {})
         missing_fields = []
-        if data.get("公司") == "未提供":
-            missing_fields.append("公司")
-        if data.get("面试轮次") == "未提供":
-            missing_fields.append("面试轮次")
         if data.get("难易程度") == "未提供":
             missing_fields.append("难易程度")
 
@@ -43,17 +41,22 @@ async def complete_node(state: SubmitState) -> dict:
 需要补全的字段：{', '.join(missing_fields)}
 
 请返回一个JSON对象，只包含需要补全的字段。对于难易程度，请根据题目难度判断为"简单"、"中等"或"困难"。
-对于公司，请从内容中推断。对于面试轮次，请从内容中推断。"""
+禁止推断公司或面试轮次。"""
 
         try:
-            _rc, _rm, _rt, _rbu, _rprovider = get_llm_client_for_user(state["user_id"])
+            credential_scope = state.get("credential_scope", "user")
+            _rc, _rm, _rt, _rbu, _rprovider = get_llm_client_for_user(
+                state["user_id"], llm_scope=credential_scope
+            )
             retry_kwargs = dict(
-                model=_rm,
+                model=state.get("_eval_model") or _rm,
                 messages=[
                     {"role": "system", "content": "你是一个信息补全助手。根据已有信息推断缺失字段，返回JSON。"},
                     {"role": "user", "content": retry_prompt}
                 ],
                 temperature=0.2,
+                # R01：global 公共导入补全也用系统凭据
+                llm_scope=credential_scope,
             )
             if _should_use_response_format(_rbu):
                 retry_kwargs["response_format"] = {"type": "json_object"}
@@ -78,36 +81,46 @@ async def complete_node(state: SubmitState) -> dict:
     }
 
 
+@upload_llm_stage("classify", unit_key="question-batch", checkpoint_result=True)
 async def classify_node(state: SubmitState) -> dict:
-    """分类标注节点 -- 调用现有 tag_questions_batch + 质量检查"""
+    """分类标注节点 -- 调用现有 tag_questions_batch + 质量检查（F08：支持复用检查点）"""
     from app.services.submit_service import tag_questions_batch
     from app.db.connection import run_db, get_taxonomy_for_position
 
     with NodeTimer() as timer:
         data = state.get("extracted_data", {})
-        q_list = data.get("具体题目清单", [])
+        taxonomy_config = state.get("taxonomy_config") or {}
 
-        # 分类体系是岗位级系统主数据。即使状态中携带了旧版个人
-        # taxonomy_config，也必须重新从系统 taxonomy 读取，避免个人分类
-        # 进入公共/个人上传、聚类和审核流程。
-        position = state.get("job_position")
-        taxonomy_config = await run_db(
-            lambda: get_taxonomy_for_position(position=position)
-        )
-        if not taxonomy_config.get("configured", True):
-            raise ValueError(f"岗位“{position or '未指定'}”尚未配置系统分类，无法进行题目标注")
+        # F08：恢复时 worker 注入已成功的 classify 检查点 → 不重跑打标
+        resumed = state.get("_resume_tagged_rows")
+        if resumed:
+            tagged_rows = list(resumed)
+            emit_progress(state, "tag", f"复用已保存的标注结果（{len(tagged_rows)} 道题）")
+        else:
+            q_list = data.get("具体题目清单", [])
 
-        tagging_kwargs = {
-            "url": state.get("saved_url", ""),
-            "company": data.get("公司", "未提供"),
-            "round_": data.get("面试轮次", "未提供"),
-            "questions": q_list,
-            "taxonomy_config": taxonomy_config,
-            "user_id": state["user_id"],
-        }
-        if state.get("_eval_model"):
-            tagging_kwargs["model"] = state["_eval_model"]
-        tagged_rows = await tag_questions_batch(**tagging_kwargs)
+            # 分类体系是岗位级系统主数据。即使状态中携带了旧版个人
+            # taxonomy_config，也必须重新从系统 taxonomy 读取，避免个人分类
+            # 进入公共/个人上传、聚类和审核流程。
+            position = state.get("job_position")
+            taxonomy_config = await run_db(
+                lambda: get_taxonomy_for_position(position=position)
+            )
+            if not taxonomy_config.get("configured", True):
+                raise ValueError(f"岗位“{position or '未指定'}”尚未配置系统分类，无法进行题目标注")
+
+            tagging_kwargs = {
+                "url": state.get("saved_url", ""),
+                "company": data.get("公司", "未提供"),
+                "round_": data.get("面试轮次", "未提供"),
+                "questions": q_list,
+                "taxonomy_config": taxonomy_config,
+                "user_id": state["user_id"],
+                "llm_scope": state.get("credential_scope", "user"),
+            }
+            if state.get("_eval_model"):
+                tagging_kwargs["model"] = state["_eval_model"]
+            tagged_rows = await tag_questions_batch(**tagging_kwargs)
 
     # 从 taxonomy 提取合法分类用于质量检查
     valid_cat1 = None
@@ -127,6 +140,8 @@ async def classify_node(state: SubmitState) -> dict:
 
     quality = evaluate_tagging_quality(tagged_rows, valid_cat1=valid_cat1, valid_cat2_by_cat1=valid_cat2_by_cat1)
     retry_count = state.get("tagging_retries", 0)
+    # 恢复路径不重新加载 taxonomy；无旧配置时按不限制分类的质量评估处理。
+    taxonomy_config = taxonomy_config or {}
 
     emit_progress(state, "tag", f"标注完成，共 {len(tagged_rows)} 道题",
                   build_tagging_data(tagged_rows, quality, timer.elapsed, retry_count))

@@ -19,13 +19,20 @@ const adminTabs = [
   { id: 'model', label: '模型配置' },
   { id: 'search', label: '联网搜索' },
 ]
-const adminTab = ref('taxonomy')
 const qualitySubTab = ref('list')
 
 const props = defineProps({
   taxonomy: { type: Object, default: () => ({ categories: [] }) },
   isBuilding: { type: Boolean, default: false },
   isAdmin: { type: Boolean, default: false },
+  initialTab: { type: String, default: 'taxonomy' },
+})
+
+const validAdminTabs = new Set(adminTabs.map((tab) => tab.id))
+const normalizeAdminTab = (tab) => validAdminTabs.has(tab) ? tab : 'taxonomy'
+const adminTab = ref(normalizeAdminTab(props.initialTab))
+watch(() => props.initialTab, (tab) => {
+  adminTab.value = normalizeAdminTab(tab)
 })
 
 const emit = defineEmits(['build-master-bank', 'taxonomy-updated'])
@@ -144,7 +151,6 @@ const onRebuild = () => {
     <!-- Header -->
     <div>
       <h3 class="text-lg font-semibold text-foreground">管理员设置</h3>
-      <p class="text-sm text-muted-foreground mt-1">管理系统级配置（仅管理员可见）</p>
     </div>
 
     <!-- Tab 切换：分类管理 / 聚合质量 -->

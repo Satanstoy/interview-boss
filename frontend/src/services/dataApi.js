@@ -4,7 +4,21 @@ const API = '/api'
 
 // ── Data fetching ──
 export const fetchJdData = (page = 1, pageSize = 100) => get(`${API}/data/jd?page=${page}&page_size=${pageSize}`)
-export const fetchInterviewData = (page = 1, pageSize = 100) => get(`${API}/data/interview?page=${page}&page_size=${pageSize}`)
+export const fetchInterviewData = (params = {}) => {
+  // 服务端分页（AC-002）：接受 page/page_size/sort/season/position_id/scope，
+  // 与 location 接口同筛选协议（R09：岗位 ID 一致、不再本地切 100 条）。
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, v]) => v !== undefined && v !== '')
+  )
+  const query = new URLSearchParams({
+    page: params.page || 1,
+    page_size: params.page_size || 20,
+    sort: params.sort || 'created_at_desc',
+    scope: params.scope || 'all',
+    ...cleanParams,
+  })
+  return get(`${API}/data/interview?${query}`, { noCache: true })
+}
 export const fetchMasterBank = (params = {}) => {
   // Filter out undefined values to prevent URLSearchParams from converting them to "undefined" string
   const cleanParams = Object.fromEntries(
@@ -28,6 +42,30 @@ export const submitDataSSE = (formData, onEvent) => uploadSSE(`${API}/submit-str
 export const createSubmitJob = (formData) => upload(`${API}/submit-jobs`, formData, { timeout: 120_000, noRetry: true })
 export const fetchActiveSubmitJobs = () => get(`${API}/submit-jobs/active`, { noCache: true })
 export const retrySubmitJob = (jobId) => post(`${API}/submit-jobs/${jobId}/retry`, {})
+
+// ── 上传恢复 v2（contracts §4.1） ─────────────────────────────
+export const createSubmitJobWithKey = (formData, idempotencyKey) =>
+  upload(`${API}/submit-jobs`, formData, {
+    timeout: 120_000,
+    noRetry: true,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
+export const fetchUploadImports = (params = {}) =>
+  get(`${API}/upload-imports?${new URLSearchParams(params)}`, { noCache: true })
+export const fetchUploadImport = (importId) =>
+  get(`${API}/upload-imports/${encodeURIComponent(importId)}`, { noCache: true })
+export const fetchUploadImportByKey = (idempotencyKey) =>
+  get(`${API}/upload-imports/by-key/${encodeURIComponent(idempotencyKey)}`, { noCache: true })
+export const retryUploadImport = (importId) =>
+  post(`${API}/upload-imports/${encodeURIComponent(importId)}/retry`, {})
+export const fetchPersonalAnalysisFailures = (params = {}) =>
+  get(`${API}/personal-analysis-queue/failed?${new URLSearchParams(params)}`, { noCache: true })
+export const refreshPersonalAnalysisFailures = (loadedCount = 20, cursor = null) =>
+  post(`${API}/personal-analysis-queue/failed/refresh`, { loaded_count: loadedCount, cursor })
+export const retryPersonalAnalysisFailure = (queueId) =>
+  post(`${API}/personal-analysis-queue/${encodeURIComponent(queueId)}/retry`, {})
+export const fetchInterviewLocation = (interviewId, params = {}) =>
+  get(`${API}/data/interview/${encodeURIComponent(interviewId)}/location?${new URLSearchParams(params)}`, { noCache: true })
 
 // ── Data mutations ──
 export const deleteRecord = (type, id, options = {}) => del(`${API}/data/${type}/${id}`, options)

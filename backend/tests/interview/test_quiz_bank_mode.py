@@ -1,13 +1,13 @@
-"""
-自动化测试 — 针对 BUG-001: bank_mode 未定义导致抽测 API 500
-使用 pytest + unittest.mock，所有外部依赖均已 mock
-"""
-import pytest
-import sqlite3
-import os
-import sys
-from unittest.mock import patch
+"""BUG-001: bank_mode 未定义导致 GET /api/master-bank/random 返回 500。
 
+原 `auth_client` fixture 自己造内存库、只 patch `app.db.connection`：其它模块
+（`routers/questions` 等）在 import 时已拷贝了 `get_db_connection` 引用，拿到的
+是真实实现。这组用例长期"通过"其实是 conftest 的陈旧闭包泄漏让那些模块碰巧
+指向了上一个测试的内存库——泄漏修掉后立即暴露（2026-10-01）。
+现改用标准 `client` + `test_db` fixture（conftest 会 patch 所有 app.* 模块）。
+"""
+
+import pytest
 
 TEST_USER = {
     "id": 1,
@@ -17,80 +17,31 @@ TEST_USER = {
 }
 
 
-def _make_test_db():
-    """创建独立的跨线程 SQLite 测试库"""
-    # 使用明显的测试值，不包含真实密码
-    os.environ.setdefault("ADMIN_PASSWORD", "TEST_PASSWORD_PLACEHOLDER")
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS jd (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT, company TEXT,
-            season TEXT DEFAULT '', owner_id INTEGER, status TEXT DEFAULT 'approved',
-            url_signature TEXT DEFAULT '', updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            job_position TEXT DEFAULT '', deleted_at TIMESTAMP, tech_stack TEXT,
-            source TEXT DEFAULT '', position TEXT DEFAULT '', salary TEXT DEFAULT '',
-            job_title TEXT DEFAULT ''
-        )
-    ''')
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS questions_detail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, interview_id INTEGER, question TEXT,
-            cat1 TEXT, cat2 TEXT, tags TEXT, difficulty TEXT, answer TEXT, url TEXT,
-            source TEXT DEFAULT '', owner_id INTEGER, status TEXT DEFAULT 'approved',
-            deleted_at TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            company TEXT DEFAULT '', round TEXT DEFAULT '', job_position TEXT DEFAULT ''
-        )
-    ''')
-    from app.db.migrations import run_migrations
-    run_migrations(conn)
-    conn.execute(
-        "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, ai_answer, owner_id, status, job_position) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("什么是RESTful API？", "后端", "网络", "API", "简单", "参考答案", None, "approved",
-         "agent开发/大模型应用开发/大模型开发"),
-    )
-    conn.commit()
-    return conn
-
-
 @pytest.fixture
-def auth_client():
-    """自包含的 TestClient：mock 所有 DB 依赖"""
-    import app.db.connection as db_module
+def auth_client(client, test_db):
+    from app.asgi import app
     from app.core.auth import get_current_user
 
-    conn = _make_test_db()
+    test_db.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, tags, difficulty, ai_answer, "
+        "owner_id, status, job_position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "什么是RESTful API？",
+            "后端",
+            "网络",
+            "API",
+            "简单",
+            "参考答案",
+            None,
+            "approved",
+            "agent开发/大模型应用开发/大模型开发",
+        ),
+    )
+    test_db.commit()
 
-    async def _sync_run_db(func):
-        return func()
-
-    original_run = db_module.run_db
-    original_get = db_module.get_db_connection
-    db_module.run_db = _sync_run_db
-    db_module.get_db_connection = lambda: conn
-
-    if 'app.asgi' not in sys.modules:
-        orig_init = db_module.init_db
-        db_module.init_db = lambda: None
-        from app.asgi import app
-        db_module.init_db = orig_init
-    else:
-        from app.asgi import app
-
-    # 同时 mock 掉 practice 模块中导入的 get_db_connection
-    with patch('app.routers.practice.get_db_connection', return_value=conn):
-        app.dependency_overrides[get_current_user] = lambda: TEST_USER
-        from fastapi.testclient import TestClient
-        c = TestClient(app)
-        yield c
-        app.dependency_overrides.clear()
-        c.close()
-
-    db_module.run_db = original_run
-    db_module.get_db_connection = original_get
-    conn.close()
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    yield client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 class TestBug001QuizBankModeUndefined:

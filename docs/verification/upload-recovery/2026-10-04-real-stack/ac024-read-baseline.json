@@ -1,0 +1,13 @@
+{
+  "submit_import_jobs": 3,
+  "generate_answer_jobs": 1,
+  "upload_imports": 1,
+  "upload_attempts": 1,
+  "public_contribution_requests": 1,
+  "jd": 3,
+  "interview": 2,
+  "question_bank": 1,
+  "questions_detail": 1,
+  "question_resolutions": 2,
+  "analysis_queue": 1
+}

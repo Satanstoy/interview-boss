@@ -1,0 +1,21 @@
+finding_id	status	ac	implemented	remaining	primary_evidence	review_ids
+F01	passed	AC-001	location接口+前端query消费（切岗/跳页/高亮）	无	backend/app/routers/data.py:1047;frontend/src/layouts/AuthenticatedLayout.vue:638	R04,R09
+F02	passed	AC-002	后端分页total+前端以total循环取满所有页	无（服务端分页已真实消费）	frontend/src/composables/useMasterBankData.js:82	R09
+F03	passed	AC-003	服务端四格policy贯穿worker（share审核意图落库+管理员公共导入审计）	无	backend/app/worker.py:566;backend/app/services/upload_policy.py	R02
+F04	passed	AC-004	真实凭据预检job+provider探测+scope贯穿（失败阻塞/修复恢复）	无	backend/app/services/credential_preflight.py;backend/app/services/upload_credentials.py	R01
+F05	passed	AC-005	persist节点写import_id/source_ordinal+resolution（matched/created/failed）	无	backend/app/services/upload_resolution_link.py	R05
+F06	passed	AC-006	匹配三态接入link；匹配失败持久化failed不造新题	无	backend/app/services/upload_resolution_link.py:32	R05
+F07	passed	AC-007	入队回填root+对账扫真实队列+补单发可执行cluster_batch	无	backend/app/services/pipeline/queue.py:44;backend/app/services/upload_queue.py	R06
+F08	passed	AC-008	成功阶段检查点持久化完整结果（extract数据+tagged_rows）；恢复后新 attempt 读取检查点短路复用（不重跑LLM、不重复落明细）	无	backend/app/worker.py:656,971;backend/app/agents/submit/{extract,classify,persist_personal}.py	R03
+F09	passed	AC-009	thread_id改用build_thread_id(import,attempt,job)；worker 用 claim_job_with_generation 领取	无	backend/app/agents/submit/graph.py:164;backend/app/worker.py:586	R03
+F10	passed	AC-010	新任务中心EOF重连+旧订阅owner隔离+快照SSE统一	无	frontend/src/components/business/UploadTaskCenter.vue;backend/app/routers/upload_imports.py:262	R08
+F11	passed	AC-011	worker持久化聚合根状态/revision/result+快照含result/allowed_actions	无	backend/app/services/upload_lifecycle.py:finalize_attempt_and_aggregate_root	R04
+F12	passed	AC-012	worker claim 用 claim_job_with_generation；根状态聚合强制 lease_generation 并 assert_job_fence（旧代次写入拒绝、不留痕）	无	backend/app/services/job_lifecycle.py:290;backend/app/services/upload_lifecycle.py:269;backend/app/worker.py:586	R06
+F13	passed	AC-013	GET/SSE快照统一snapshot_from_parts（含allowed_actions/progress/counts/result）	无	backend/app/routers/upload_imports.py:28;backend/app/models/upload_contracts.py	R04,R08
+F14	passed	AC-014	面经/JD按source_type分派物化+source层级继承+岗位冻结	无	backend/app/services/public_contributions.py:640	R11
+F15	passed	AC-015	retry接口+恢复派发cluster_batch+按resolution发布	无	backend/app/services/public_contributions.py:818	R10
+F16	passed	AC-016	v2物化同URL公共面经复用+追加明细挂载	无	backend/app/services/public_contributions.py:466	R10
+F17	passed	AC-017	restore重建可派发job绑定root+attempt；旧retry解析root	无	backend/app/services/upload_lifecycle.py:202;backend/app/routers/submit.py	R03
+F18	passed	AC-018	旧job接口owner专属+运维白名单（marker全响应检查）	无	backend/app/routers/bank_build.py:19;backend/tests/security/test_upload_task_privacy.py	R07
+F19	passed	AC-019	extract节点schema拒绝/ordinal归一/黑名单保留标记	无	backend/app/agents/submit/extract.py:74;backend/app/services/extraction_integrity.py	R05
+F20	passed	AC-020	approve/withdraw路由已接BEGIN IMMEDIATE+revision CAS（本轮复测：services/pipeline 40+passed）	无	backend/app/services/public_contributions.py:545,697;backend/tests/security+services	-

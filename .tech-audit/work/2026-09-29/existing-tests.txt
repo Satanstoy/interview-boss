@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0
+rootdir: /opt/interview-boss
+configfile: pyproject.toml
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 7 items
+
+backend/tests/services/test_public_contributions_materialize.py ..       [ 28%]
+backend/tests/infra/test_db_retention.py .....                           [100%]
+
+============================== 7 passed in 7.20s ===============================

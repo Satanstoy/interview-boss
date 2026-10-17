@@ -11,6 +11,12 @@ from unittest.mock import patch
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 def _auth(app, user_id=1):
     from app.core.auth import get_current_user
     app.dependency_overrides[get_current_user] = lambda: {

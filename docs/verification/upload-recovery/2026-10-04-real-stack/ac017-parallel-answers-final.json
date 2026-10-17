@@ -1,0 +1,64 @@
+{
+  "root": {
+    "current_attempt_no": 3,
+    "status": "partial_failed"
+  },
+  "attempts": [
+    {
+      "attempt_no": 1,
+      "status": "failed"
+    },
+    {
+      "attempt_no": 2,
+      "status": "failed"
+    },
+    {
+      "attempt_no": 3,
+      "status": "failed"
+    }
+  ],
+  "answer_jobs": {
+    "AC017_PARALLEL_ANSWER_A: explain optimistic locking.": {
+      "job_id": 4,
+      "status": "completed",
+      "work_key": "answer:1:v1",
+      "answer": "AC017_PARALLEL_ANSWER_A_RESULT: isolated answer for its own question.",
+      "attempt_id": 3
+    },
+    "AC017_PARALLEL_ANSWER_B: explain queue idempotency.": {
+      "job_id": 5,
+      "status": "completed",
+      "work_key": "answer:2:v1",
+      "answer": "AC017_PARALLEL_ANSWER_B_RESULT: isolated answer for its own question.",
+      "attempt_id": 3
+    }
+  },
+  "unique_work_keys": [
+    "answer:1:v1",
+    "answer:2:v1"
+  ],
+  "historical_retried_work_keys": [
+    {
+      "work_key": "extract:document:v1",
+      "count": 2
+    }
+  ],
+  "duplicate_active_work_keys": [],
+  "success_checkpoint_hash": "0b6e8dee5d24758a7c7e154c8309f5df0982a4c27e64d59c43d1b78f04cd2f68",
+  "provider_parallel_answers": {
+    "active": 0,
+    "max_active": 2,
+    "markers": {
+      "AC017_PARALLEL_ANSWER_A": 1,
+      "AC017_PARALLEL_ANSWER_B": 1
+    }
+  },
+  "provider_marker_statuses": {
+    "AC017_PARALLEL_ANSWER_A": {
+      "200": 1
+    },
+    "AC017_PARALLEL_ANSWER_B": {
+      "200": 1
+    }
+  }
+}

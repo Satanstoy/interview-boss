@@ -1,0 +1,317 @@
+{
+  "distinct_preflight_workers": [
+    "91b19912cdd1:10",
+    "9ff31069baa1:10"
+  ],
+  "owners_roots_and_results": [
+    {
+      "attempt": {
+        "attempt_no": 1,
+        "id": 11,
+        "requested_by": 14,
+        "status": "completed"
+      },
+      "detail": {
+        "answer": null,
+        "company": "AC009_USER_A 公司",
+        "id": 27,
+        "import_id": "9247c8ab-f815-4560-9920-32f5d5cffa3e",
+        "interview_id": 135,
+        "interview_owner_id": 14,
+        "question": "AC009_USER_A 专属问题：解释事务隔离。",
+        "round": "A 用户一面",
+        "source_ordinal": 101,
+        "url": "internal://3Lp7oHB9RziDS21w2GsvTQ"
+      },
+      "interview": {
+        "company": "AC009_USER_A 公司",
+        "id": 135,
+        "owner_id": 14,
+        "publish_status": "published",
+        "questions_list": "1. AC009_USER_A 专属问题：解释事务隔离。",
+        "round": "A 用户一面",
+        "status": "approved",
+        "url": "internal://3Lp7oHB9RziDS21w2GsvTQ"
+      },
+      "jobs": [
+        {
+          "created_by": 14,
+          "id": 61,
+          "job_type": "credential_preflight",
+          "started_at": "2026-10-08 17:15:19",
+          "status": "completed",
+          "upload_attempt_id": 11,
+          "work_key": "preflight:credential:v1:user",
+          "worker_id": "9ff31069baa1:10"
+        },
+        {
+          "created_by": 14,
+          "id": 63,
+          "job_type": "submit_import",
+          "started_at": "2026-10-08 17:15:20",
+          "status": "completed",
+          "upload_attempt_id": 11,
+          "work_key": "extract:document:v1",
+          "worker_id": null
+        },
+        {
+          "created_by": 14,
+          "id": 66,
+          "job_type": "cluster_batch",
+          "started_at": "2026-10-08 17:15:23",
+          "status": "completed",
+          "upload_attempt_id": 11,
+          "work_key": "cluster:9247c8ab-f815-4560-9920-32f5d5cffa3e:user:14:agent开发/大模型应用开发/大模型开发:v1",
+          "worker_id": null
+        },
+        {
+          "created_by": 14,
+          "id": 68,
+          "job_type": "generate_answer",
+          "started_at": "2026-10-08 17:15:26",
+          "status": "completed",
+          "upload_attempt_id": 11,
+          "work_key": "answer:25:v1",
+          "worker_id": null
+        }
+      ],
+      "owner": {
+        "id": 14,
+        "username": "ac009_a_1791479708536168"
+      },
+      "resolution": {
+        "ai_answer": "AC009_USER_A_ANSWER：按照隔离级别解释可见性边界，并指出并发事务的校验步骤。",
+        "canonical_id": 25,
+        "canonical_owner_id": 14,
+        "canonical_question": "AC009_USER_A 专属问题：解释事务隔离。",
+        "canonical_scope": "private",
+        "detail_id": 27,
+        "id": 38,
+        "occurrence_owner_id": 14,
+        "occurrence_scope": "private",
+        "sources": "[{\"url\": \"internal://3Lp7oHB9RziDS21w2GsvTQ\", \"company\": \"AC009_USER_A 公司\", \"round\": \"A 用户一面\"}]",
+        "status": "created"
+      },
+      "root": {
+        "created_at": "2026-10-04 12:00:00",
+        "current_attempt_no": 1,
+        "id": "9247c8ab-f815-4560-9920-32f5d5cffa3e",
+        "interview_id": 135,
+        "payload_json": "{\"raw_text\": \"AC009_USER_A_REAL_STACK\\r\\n公司：AC009_USER_A 公司\\r\\n面试轮次：隔离验收\\r\\n题目：AC009_USER_A 专属问题：解释事务隔离。\", \"image_data\": [], \"url\": \"\", \"season\": \"2027届暑期实习\", \"content_type_hint\": \"\", \"target\": \"private\", \"target_intent\": \"private\", \"user_id\": 14, \"is_admin\": false, \"job_position\": \"agent开发/大模型应用开发/大模型开发\", \"entry\": \"api\"}",
+        "requester_id": 14,
+        "status": "completed"
+      },
+      "stages": [
+        {
+          "job_id": 68,
+          "stage": "answer",
+          "status": "succeeded",
+          "unit_key": "answer:25"
+        },
+        {
+          "job_id": 63,
+          "stage": "classify",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": 63,
+          "stage": "classify",
+          "status": "succeeded",
+          "unit_key": "question-batch"
+        },
+        {
+          "job_id": 61,
+          "stage": "credential_preflight",
+          "status": "succeeded",
+          "unit_key": "credential:v1:scope:user:attempt:11:job:61:run:1"
+        },
+        {
+          "job_id": 63,
+          "stage": "extract",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": 63,
+          "stage": "persist",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": null,
+          "stage": "resolve",
+          "status": "succeeded",
+          "unit_key": "detail:27"
+        },
+        {
+          "job_id": 63,
+          "stage": "resolve",
+          "status": "succeeded",
+          "unit_key": "document"
+        }
+      ]
+    },
+    {
+      "attempt": {
+        "attempt_no": 1,
+        "id": 12,
+        "requested_by": 13,
+        "status": "completed"
+      },
+      "detail": {
+        "answer": null,
+        "company": "AC009_USER_B 公司",
+        "id": 26,
+        "import_id": "ac3a3dfd-1fd2-478f-9e33-5dcc518cb5d7",
+        "interview_id": 134,
+        "interview_owner_id": 13,
+        "question": "AC009_USER_B 专属问题：解释消息幂等。",
+        "round": "B 用户二面",
+        "source_ordinal": 202,
+        "url": "internal://v984-pqW8FXEvmWvf-JkRQ"
+      },
+      "interview": {
+        "company": "AC009_USER_B 公司",
+        "id": 134,
+        "owner_id": 13,
+        "publish_status": "published",
+        "questions_list": "1. AC009_USER_B 专属问题：解释消息幂等。",
+        "round": "B 用户二面",
+        "status": "approved",
+        "url": "internal://v984-pqW8FXEvmWvf-JkRQ"
+      },
+      "jobs": [
+        {
+          "created_by": 13,
+          "id": 62,
+          "job_type": "credential_preflight",
+          "started_at": "2026-10-08 17:15:19",
+          "status": "completed",
+          "upload_attempt_id": 12,
+          "work_key": "preflight:credential:v1:user",
+          "worker_id": "91b19912cdd1:10"
+        },
+        {
+          "created_by": 13,
+          "id": 64,
+          "job_type": "submit_import",
+          "started_at": "2026-10-08 17:15:21",
+          "status": "completed",
+          "upload_attempt_id": 12,
+          "work_key": "extract:document:v1",
+          "worker_id": null
+        },
+        {
+          "created_by": 13,
+          "id": 65,
+          "job_type": "cluster_batch",
+          "started_at": "2026-10-08 17:15:22",
+          "status": "completed",
+          "upload_attempt_id": 12,
+          "work_key": "cluster:ac3a3dfd-1fd2-478f-9e33-5dcc518cb5d7:user:13:agent开发/大模型应用开发/大模型开发:v1",
+          "worker_id": null
+        },
+        {
+          "created_by": 13,
+          "id": 67,
+          "job_type": "generate_answer",
+          "started_at": "2026-10-08 17:15:26",
+          "status": "completed",
+          "upload_attempt_id": 12,
+          "work_key": "answer:24:v1",
+          "worker_id": null
+        }
+      ],
+      "owner": {
+        "id": 13,
+        "username": "ac009_b_1791479708536168"
+      },
+      "resolution": {
+        "ai_answer": "AC009_USER_B_ANSWER：使用幂等键约束重复消息，并说明如何验证重试结果。",
+        "canonical_id": 24,
+        "canonical_owner_id": 13,
+        "canonical_question": "AC009_USER_B 专属问题：解释消息幂等。",
+        "canonical_scope": "private",
+        "detail_id": 26,
+        "id": 37,
+        "occurrence_owner_id": 13,
+        "occurrence_scope": "private",
+        "sources": "[{\"url\": \"internal://v984-pqW8FXEvmWvf-JkRQ\", \"company\": \"AC009_USER_B 公司\", \"round\": \"B 用户二面\"}]",
+        "status": "created"
+      },
+      "root": {
+        "created_at": "2026-10-04 12:00:00",
+        "current_attempt_no": 1,
+        "id": "ac3a3dfd-1fd2-478f-9e33-5dcc518cb5d7",
+        "interview_id": 134,
+        "payload_json": "{\"raw_text\": \"AC009_USER_B_REAL_STACK\\r\\n公司：AC009_USER_B 公司\\r\\n面试轮次：隔离验收\\r\\n题目：AC009_USER_B 专属问题：解释消息幂等。\", \"image_data\": [], \"url\": \"\", \"season\": \"2027届暑期实习\", \"content_type_hint\": \"\", \"target\": \"private\", \"target_intent\": \"private\", \"user_id\": 13, \"is_admin\": false, \"job_position\": \"agent开发/大模型应用开发/大模型开发\", \"entry\": \"api\"}",
+        "requester_id": 13,
+        "status": "completed"
+      },
+      "stages": [
+        {
+          "job_id": 67,
+          "stage": "answer",
+          "status": "succeeded",
+          "unit_key": "answer:24"
+        },
+        {
+          "job_id": 64,
+          "stage": "classify",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": 64,
+          "stage": "classify",
+          "status": "succeeded",
+          "unit_key": "question-batch"
+        },
+        {
+          "job_id": 62,
+          "stage": "credential_preflight",
+          "status": "succeeded",
+          "unit_key": "credential:v1:scope:user:attempt:12:job:62:run:1"
+        },
+        {
+          "job_id": 64,
+          "stage": "extract",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": 64,
+          "stage": "persist",
+          "status": "succeeded",
+          "unit_key": "document"
+        },
+        {
+          "job_id": null,
+          "stage": "resolve",
+          "status": "succeeded",
+          "unit_key": "detail:26"
+        },
+        {
+          "job_id": 64,
+          "stage": "resolve",
+          "status": "succeeded",
+          "unit_key": "document"
+        }
+      ]
+    }
+  ],
+  "provider_overlap": {
+    "failures": 0,
+    "markers": [
+      "AC009_USER_A_REAL_STACK",
+      "AC009_USER_B_REAL_STACK"
+    ],
+    "passes": 2
+  },
+  "same_second": true,
+  "submit_start_seconds": [
+    "2026-10-08 17:15:20",
+    "2026-10-08 17:15:21"
+  ]
+}

@@ -217,14 +217,18 @@ async def test_embedding_config(req: dict, admin: dict = Depends(get_admin_user)
         try:
             from openai import OpenAI
             import httpx
-            from app.core.outbound_url import assert_safe_outbound_url_sync
+            from app.core.outbound_url import build_pinned_http_transport
 
-            assert_safe_outbound_url_sync(base_url)
+            transport = build_pinned_http_transport(base_url)
             client = OpenAI(
                 api_key=api_key,
                 base_url=base_url,
                 timeout=30,
-                http_client=httpx.Client(follow_redirects=False),
+                http_client=httpx.Client(
+                    transport=transport,
+                    follow_redirects=False,
+                    trust_env=False,
+                ),
             )
             resp = client.embeddings.create(model=api_model, input="测试")
             return {"ok": True, "dimension": len(resp.data[0].embedding)}

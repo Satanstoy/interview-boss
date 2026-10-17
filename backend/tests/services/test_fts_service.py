@@ -12,23 +12,36 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _reset_idf_cache_per_test():
+    """修复跨目录顺序污染：``fts_service._idf_cache`` 是模块级缓存，先前
+    任意服务/聚合测试触发过 ``_compute_idf_cache`` 后会残留陈旧词频；
+    本文件每个用例都重置，保证判定与“单独跑此文件”一致。"""
+    import app.services.fts_service as fts
+
+    saved = fts._idf_cache
+    fts._idf_cache = None
+    yield
+    fts._idf_cache = saved
+
+
 class TestSearchQuestionsFts:
     """search_questions_fts 核心测试"""
 
     def _seed_questions(self, conn):
         """插入测试题目数据"""
         questions = [
-            (1, "Redis 的五种数据结构有哪些？", "中间件", "缓存", "redis,nosql", "approved", "后端开发"),
-            (2, "如何实现分布式锁？", "中间件", "分布式", "redis,zookeeper", "approved", "后端开发"),
-            (3, "MySQL 索引优化有哪些方法？", "数据库", "索引", "mysql,btree", "approved", "后端开发"),
-            (4, "React Hooks 的使用方法？", "前端", "框架", "react,hooks", "approved", "前端开发"),
-            (5, "TCP 三次握手过程？", "网络", "tcp", "tcp,network", "approved", "后端开发"),
-            (6, "已删除的题目", "中间件", "缓存", "redis", "deleted", "后端开发"),
+            (1, "Redis 的五种数据结构有哪些？", "中间件", "缓存", "redis,nosql", "approved", "后端开发", None),
+            (2, "如何实现分布式锁？", "中间件", "分布式", "redis,zookeeper", "approved", "后端开发", None),
+            (3, "MySQL 索引优化有哪些方法？", "数据库", "索引", "mysql,btree", "approved", "后端开发", None),
+            (4, "React Hooks 的使用方法？", "前端", "框架", "react,hooks", "approved", "前端开发", None),
+            (5, "TCP 三次握手过程？", "网络", "tcp", "tcp,network", "approved", "后端开发", None),
+            (6, "已删除的题目", "中间件", "缓存", "redis", "approved", "后端开发", "2026-05-09 12:00:00"),
         ]
         for q in questions:
             conn.execute(
-                "INSERT INTO question_bank (id, question, cat1, cat2, tags, status, job_position) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO question_bank (id, question, cat1, cat2, tags, status, job_position, deleted_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 q
             )
         conn.commit()
@@ -36,7 +49,7 @@ class TestSearchQuestionsFts:
         # 同步到 FTS5 索引
         from app.services.fts_service import sync_fts_entry
         for q in questions:
-            if q[5] == "approved":  # 只同步未删除的
+            if q[5] == "approved" and (len(q) < 8 or q[7] is None):  # 只同步未删除的
                 sync_fts_entry(q[0])
 
     def test_empty_keywords_returns_empty(self, test_db):

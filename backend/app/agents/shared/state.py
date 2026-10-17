@@ -16,6 +16,18 @@ class SubmitState(TypedDict, total=False):
     user_id: int                            # 当前用户 ID
     is_admin: bool                          # 是否管理员
     job_position: str                       # 当前岗位
+    # v2 执行上下文（R02/R03/R05）：LangGraph 只透传已声明的输入键
+    import_id: str                          # 根任务 ID（upload_imports.id）
+    attempt_id: int | None                  # 当前恢复批次 ID
+    _input_version: int                    # accepted root input version
+    _lease_generation: int                  # worker fence for durable checkpoint writes
+    thread_id: str                          # 当前执行的 LangGraph checkpoint 隔离键
+    work_key: str                           # 本次执行的 work_key
+    job_id: int                             # 当前 jobs 行 ID
+    credential_scope: str                   # 服务端策略 scope（user/global）
+    # F08：恢复执行时注入的已成功阶段检查点（节点短路复用，不重跑 LLM）
+    _resume_extracted: dict | None
+    _resume_tagged_rows: list | None
 
     # === 节点输出 ===
     doc_type: str                           # "JD" | "Interview" 由识别节点填入
@@ -23,6 +35,7 @@ class SubmitState(TypedDict, total=False):
     completion_attempted: bool              # 是否尝试了字段补全
     tagged_rows: list[list[str]]            # 分类结果 [url, company, round, q, cat1, cat2, tags, diff_tag]
     match_result: dict                      # 聚类匹配结果 {matched: [...], unmatched: [...]}
+    match_failed: int                       # 匹配失败题数（供上传根任务状态聚合）
     saved_interview_id: int                 # 写入 DB 后的 interview ID
     public_contribution_request_id: int     # 公共化申请 ID（如有）
     answer_tasks: list[tuple[int, str]]     # 需要生成答案的 (question_id, question_text) 列表

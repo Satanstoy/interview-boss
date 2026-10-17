@@ -1,0 +1,261 @@
+{
+  "old_job": {
+    "id": 1,
+    "job_type": "submit_import",
+    "status": "failed",
+    "created_by": 2,
+    "parent_job_id": null,
+    "root_import_id": null
+  },
+  "retry_job": {
+    "id": 2,
+    "job_type": "submit_import",
+    "status": "completed",
+    "created_by": 2,
+    "parent_job_id": 1,
+    "root_import_id": null,
+    "result": {
+      "doc_type": "JD",
+      "target": "personal",
+      "saved_data": {
+        "公司": "AC024_PRIVATE_COMPANY_SENTINEL",
+        "岗位名称": "AC024 Legacy JD platform engineer",
+        "薪资范围": "AC024_PRIVATE_SALARY_SENTINEL",
+        "核心技术要求": [
+          "AC024_PUBLIC_TECH_GO"
+        ],
+        "加分项": "AC024_PUBLIC_BONUS_SQL",
+        "联系人": "AC024_PRIVATE_CONTACT_SENTINEL"
+      },
+      "interview_id": null,
+      "question_count": 0,
+      "node_timings": {
+        "extract": 1.134780445951037,
+        "jd_persist": 0.010247412021271884
+      },
+      "answer_job_count": 0
+    }
+  },
+  "legacy_retry_payload": {
+    "content_type_hint": "jd",
+    "user_id": 2,
+    "request_public_review": true,
+    "target_intent": "share"
+  },
+  "contribution": {
+    "id": 1,
+    "source_type": "jd",
+    "source_id": 2,
+    "requester_id": 2,
+    "status": "published",
+    "public_jd_id": 3,
+    "snapshot": {
+      "source": {
+        "id": 2,
+        "url": "https://ac024.example/retried/private-source",
+        "company": "AC024_PRIVATE_COMPANY_SENTINEL",
+        "season": "AC024 legacy season",
+        "owner_id": 2,
+        "status": "approved",
+        "url_signature": "generic:ac024.example/retried/private-source",
+        "updated_at": "2026-10-09 05:30:17",
+        "job_position": "agent开发/大模型应用开发/大模型开发",
+        "deleted_at": null,
+        "tech_stack": "1. AC024_PUBLIC_TECH_GO",
+        "source": "",
+        "position": "",
+        "salary": "AC024_PRIVATE_SALARY_SENTINEL",
+        "job_title": "AC024 Legacy JD platform engineer",
+        "bonus": "AC024_PUBLIC_BONUS_SQL"
+      },
+      "items": []
+    },
+    "review_projection": {
+      "schema_version": 1,
+      "source_type": "jd",
+      "source": {
+        "bonus": "AC024_PUBLIC_BONUS_SQL",
+        "company": "AC024_PUBLIC_REVIEW_COMPANY",
+        "job_title": "AC024 public platform engineer",
+        "position": "agent开发/大模型应用开发/大模型开发",
+        "salary": null,
+        "source_url": "https://ac024.example/reviewed/public-jd",
+        "tech_stack": "AC024_PUBLIC_TECH_GO"
+      },
+      "items": [
+        {
+          "item_id": 1,
+          "ordinal": 0,
+          "source_ordinal": 1,
+          "question": null,
+          "cat1": null,
+          "cat2": null,
+          "tags": null,
+          "difficulty": null
+        }
+      ],
+      "excluded_item_ids": [],
+      "reviewer_id": 1,
+      "reviewed_at": "2026-10-09T05:30:19Z",
+      "source_snapshot_unchanged": {
+        "source": {
+          "id": 2,
+          "url": "https://ac024.example/retried/private-source",
+          "company": "AC024_PRIVATE_COMPANY_SENTINEL",
+          "season": "AC024 legacy season",
+          "owner_id": 2,
+          "status": "approved",
+          "url_signature": "generic:ac024.example/retried/private-source",
+          "updated_at": "2026-10-09 05:30:17",
+          "job_position": "agent开发/大模型应用开发/大模型开发",
+          "deleted_at": null,
+          "tech_stack": "1. AC024_PUBLIC_TECH_GO",
+          "source": "",
+          "position": "",
+          "salary": "AC024_PRIVATE_SALARY_SENTINEL",
+          "job_title": "AC024 Legacy JD platform engineer",
+          "bonus": "AC024_PUBLIC_BONUS_SQL"
+        },
+        "items": []
+      },
+      "hash": "7a06b322d4f11fec79436ba6b616c3ba79d93749dcee99b260b3165c19a83e2a"
+    }
+  },
+  "private_jd": {
+    "id": 2,
+    "url": "https://ac024.example/retried/private-source",
+    "company": "AC024_PRIVATE_COMPANY_SENTINEL",
+    "job_title": "AC024 Legacy JD platform engineer",
+    "owner_id": 2,
+    "status": "approved"
+  },
+  "public_jd": {
+    "id": 3,
+    "url": "https://ac024.example/reviewed/public-jd",
+    "company": "AC024_PUBLIC_REVIEW_COMPANY",
+    "job_title": "AC024 public platform engineer",
+    "tech_stack": "AC024_PUBLIC_TECH_GO",
+    "bonus": "AC024_PUBLIC_BONUS_SQL",
+    "owner_id": null,
+    "status": "approved"
+  },
+  "old_public_jd": {
+    "id": 1,
+    "owner_id": null,
+    "status": "approved",
+    "url": "https://ac024.example/legacy/approved-jd"
+  },
+  "old_public_interview": {
+    "id": 1,
+    "owner_id": null,
+    "status": "approved",
+    "publish_status": "published",
+    "url": "https://ac024.example/legacy/approved-interview"
+  },
+  "ordinary_interview": {
+    "import": {
+      "id": "3c4af259-cad7-4fcf-81b4-cf89bbb86904",
+      "requester_id": 2,
+      "source_type": "interview",
+      "target_intent": "private",
+      "status": "completed"
+    },
+    "jobs": [
+      {
+        "id": 3,
+        "job_type": "credential_preflight",
+        "status": "completed",
+        "created_by": 2,
+        "root_import_id": "3c4af259-cad7-4fcf-81b4-cf89bbb86904"
+      },
+      {
+        "id": 4,
+        "job_type": "submit_import",
+        "status": "completed",
+        "created_by": 2,
+        "root_import_id": "3c4af259-cad7-4fcf-81b4-cf89bbb86904"
+      },
+      {
+        "id": 5,
+        "job_type": "cluster_batch",
+        "status": "completed",
+        "created_by": 2,
+        "root_import_id": "3c4af259-cad7-4fcf-81b4-cf89bbb86904"
+      },
+      {
+        "id": 6,
+        "job_type": "generate_answer",
+        "status": "pending",
+        "created_by": 2,
+        "root_import_id": "3c4af259-cad7-4fcf-81b4-cf89bbb86904"
+      }
+    ],
+    "interview": {
+      "id": 2,
+      "url": "internal://VfitSRB_KFXtkQkG89Ivvg",
+      "company": "AC024_ORDINARY_INTERVIEW_COMPANY",
+      "owner_id": 2,
+      "status": "approved",
+      "publish_status": "published",
+      "questions_list": "1. AC024_ORDINARY_INTERVIEW_QUESTION_MARKER: explain transaction isolation."
+    },
+    "details": [
+      {
+        "id": 1,
+        "question": "AC024_ORDINARY_INTERVIEW_QUESTION_MARKER: explain transaction isolation.",
+        "owner_id": null,
+        "interview_id": 2
+      }
+    ],
+    "contribution_requests": [],
+    "result": {
+      "interview_id": 2,
+      "position_id": null,
+      "question_ids": [],
+      "contribution_request_id": null
+    }
+  },
+  "jd_schema_has_publish_status": false,
+  "question_and_interview_markers_absent": true,
+  "descendant_jobs": [
+    {
+      "id": 2,
+      "job_type": "submit_import",
+      "parent_job_id": 1
+    }
+  ],
+  "counts_unchanged_across_list_reads": {
+    "before": {
+      "submit_import_jobs": 3,
+      "generate_answer_jobs": 1,
+      "upload_imports": 1,
+      "upload_attempts": 1,
+      "public_contribution_requests": 1,
+      "jd": 3,
+      "interview": 2,
+      "question_bank": 1,
+      "questions_detail": 1,
+      "question_resolutions": 2,
+      "analysis_queue": 1
+    },
+    "after": {
+      "submit_import_jobs": 3,
+      "generate_answer_jobs": 1,
+      "upload_imports": 1,
+      "upload_attempts": 1,
+      "public_contribution_requests": 1,
+      "jd": 3,
+      "interview": 2,
+      "question_bank": 1,
+      "questions_detail": 1,
+      "question_resolutions": 2,
+      "analysis_queue": 1
+    }
+  },
+  "provider_marker_statuses": {
+    "200": 1
+  },
+  "ordinary_interview_provider_marker_statuses": {
+    "200": 1
+  }
+}

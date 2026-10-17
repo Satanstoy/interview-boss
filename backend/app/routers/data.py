@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from app.core.config import ALLOWED_UPDATE_COLUMNS
 from app.core.auth import get_current_user, get_admin_user
 from app.core.validation import validate_source_url
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.db.connection import (
     get_db_connection,
     run_db,
@@ -44,6 +45,20 @@ def _safe_table_name(name: str) -> str:
     if name not in _ALLOWED_TABLES:
         raise ValueError(f"不被允许的表名: {name}")
     return name
+
+
+def _source_mutation_row(cursor, table_name, record_id):
+    """Resolve detail ownership through its durable interview, never by URL."""
+    if table_name == "questions_detail":
+        return cursor.execute(
+            "SELECT qd.id,qd.url,iv.owner_id,iv.status,iv.job_position,qd.deleted_at "
+            "FROM questions_detail qd JOIN interview iv ON iv.id=qd.interview_id "
+            "WHERE qd.id=?", (record_id,),
+        ).fetchone()
+    return cursor.execute(
+        f"SELECT id,url,owner_id,status,job_position,deleted_at FROM {table_name} WHERE id=?",
+        (record_id,),
+    ).fetchone()
 
 
 def _cleanup_sources_for_url(cursor, url: str, owner_scope=None):
@@ -382,17 +397,117 @@ def _restore_sources_for_url(cursor, url: str, owner_scope=None):
         )
 
 
+LIST_SORTS = ("created_at_desc", "created_at_asc")
+
+
+def _resolve_position_filter(conn, position_value) -> str:
+    """岗位筛选契约（R09）：接受岗位 ID 或岗位名称，统一解析为名称。
+
+    前端按 ``users.current_position_id`` 传 ID（AuthenticatedLayout →
+    useMasterBankData.fetchInterviewPage），而 ``interview.job_position`` 是
+    TEXT 名称列；服务端必须在这里做 ID→名称转换，否则正常用户的面经库为空。
+    名称形式保持向后兼容（location 接口与旧客户端）。
+    """
+
+    raw = str(position_value).strip()
+    if not raw:
+        return raw
+    if raw.isdigit():
+        row = None
+        try:
+            row = conn.execute(
+                "SELECT name FROM job_positions WHERE id = ? AND "
+                "(is_deleted = 0 OR is_deleted IS NULL)",
+                (int(raw),),
+            ).fetchone()
+        except Exception:
+            row = None
+        if row is None:
+            try:
+                row = conn.execute(
+                    "SELECT name FROM job_positions WHERE id = ?", (int(raw),)
+                ).fetchone()
+            except Exception:
+                row = None
+        if row is not None:
+            return str(row["name"])
+    return raw
+
+
+def _visibility_where_and_params(
+    conn, table_name: str, user: dict, *, scope: str = "all", season: str | None = None,
+    position_id: str | None = None,
+):
+    """授权 + 筛选谓词（AC-002）：COUNT 与 items 必须共用同一份。"""
+
+    from app.db.connection import get_user_job_position
+
+    clauses = ["deleted_at IS NULL"]
+    params: list = []
+    if scope not in ("all", "public", "mine"):
+        raise HTTPException(status_code=400, detail="scope 仅支持 all/public/mine")
+    if scope == "mine":
+        clauses.append("owner_id = ?")
+        params.append(user["id"])
+    elif scope == "public":
+        clauses.append("owner_id IS NULL AND status = 'approved'")
+    else:
+        clauses.append("(owner_id = ? OR (owner_id IS NULL AND status = 'approved'))")
+        params.append(user["id"])
+
+    if season is not None:
+        clauses.append("season = ?")
+        params.append(season)
+
+    if table_name == "interview":
+        # 发布门槛（AC-015/README §5.3）：公共面经必须已 published；
+        # 私人面经不受影响（private 行不参与公共处理）。
+        clauses.append("(owner_id IS NOT NULL OR publish_status = 'published')")
+
+    if position_id is not None:
+        clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
+        params.append(_resolve_position_filter(conn, position_id))
+    else:
+        _, current_pos = get_user_job_position(user["id"])
+        clauses.append("(job_position = ? OR job_position = '' OR job_position IS NULL)")
+        params.append(current_pos)
+
+    return " AND ".join(clauses), params
+
+
+def _list_order_by(table_name: str, sort: str | None) -> str:
+    """稳定排序：同时间戳按 id；NULL 日期视为最旧。"""
+
+    if sort is not None and sort not in LIST_SORTS:
+        raise HTTPException(status_code=400, detail="sort 仅支持 created_at_desc/created_at_asc")
+    if sort == "created_at_asc":
+        return "ORDER BY CASE WHEN created_at IS NULL THEN 1 ELSE 0 END, created_at ASC, id ASC"
+    if sort == "created_at_desc" or (sort is None and table_name == "interview"):
+        return "ORDER BY CASE WHEN created_at IS NULL THEN 1 ELSE 0 END, created_at DESC, id DESC"
+    return "ORDER BY id ASC"
+
+
 @router.get("/api/data/{file_type}")
 async def get_data(
     file_type: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=500),
+    page_size: int | None = Query(None, ge=1),
+    sort: str | None = Query(None),
+    season: str | None = Query(None),
+    position_id: str | None = Query(None),
+    scope: str = Query("all"),
     user: dict = Depends(get_current_user),
 ):
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
-        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        return {"items": [], "total": 0, "page": page, "page_size": page_size or 20}
+
+    # AC-002：interview 默认 20、范围 1..100；其它共享表保持旧行为
+    if table_name == "interview":
+        page_size = min(100, max(1, int(page_size or 20)))
+    else:
+        page_size = min(500, max(1, int(page_size or 100)))
 
     offset = (page - 1) * page_size
 
@@ -401,26 +516,26 @@ async def get_data(
         with get_db_connection() as conn:
             if table_name in ("jd", "interview"):
                 # all 口径：公共 + 自己的（管理员也遵守）
-                from app.db.connection import get_user_job_position
-
-                _, current_pos = get_user_job_position(user["id"])
-                where = "(owner_id = ? OR (owner_id IS NULL AND status = 'approved')) AND deleted_at IS NULL AND (job_position = ? OR job_position = '' OR job_position IS NULL)"
-                params = (user["id"], current_pos)
+                where, params = _visibility_where_and_params(
+                    conn, table_name, user, scope=scope, season=season,
+                    position_id=position_id,
+                )
+                order_by = _list_order_by(table_name, sort)
                 total = conn.execute(
                     f"SELECT COUNT(*) FROM {safe_name} WHERE {where}", params
                 ).fetchone()[0]
                 if table_name == "jd":
                     rows = conn.execute(
-                        f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, owner_id FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?",
+                        f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, owner_id FROM {safe_name} WHERE {where} {order_by} LIMIT ? OFFSET ?",
                         (*params, page_size, offset),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        f"SELECT id, url, company, round, focus, questions_list, difficulty, season, owner_id, created_at FROM {safe_name} WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?",
+                        f"SELECT id, url, company, round, focus, questions_list, difficulty, season, owner_id, created_at FROM {safe_name} WHERE {where} {order_by} LIMIT ? OFFSET ?",
                         (*params, page_size, offset),
                     ).fetchall()
             else:  # questions_detail
-                join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL"
+                join_where = "(iv.owner_id = ? OR (iv.owner_id IS NULL AND iv.status = 'approved')) AND iv.deleted_at IS NULL AND qd.deleted_at IS NULL AND (iv.owner_id IS NOT NULL OR iv.publish_status = 'published')"
                 params = (user["id"],)
                 total = conn.execute(
                     f"SELECT COUNT(*) FROM {safe_name} qd JOIN interview iv ON qd.interview_id = iv.id WHERE {join_where}",
@@ -489,7 +604,7 @@ async def get_data(
 async def delete_data(
     file_type: str, record_id: int, user: dict = Depends(get_current_user)
 ):
-    """软删除记录：设置 deleted_at 而非物理删除。管理员可删任何记录，普通用户可删自己的个人记录。"""
+    """软删除本人私人记录；管理员还可删除公共记录。"""
     table_map = {"jd": "jd", "interview": "interview", "tagged": "questions_detail"}
     table_name = table_map.get(file_type.lower())
     if not table_name:
@@ -498,31 +613,16 @@ async def delete_data(
     def _soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-            target_columns = (
-                "id, url, owner_id, status, job_position, deleted_at"
-                if table_name in {"jd", "interview"}
-                else "id, url, NULL AS owner_id, NULL AS status, '' AS job_position, deleted_at"
-            )
-            target_row = cursor.execute(
-                f"SELECT {target_columns} FROM {safe_name} WHERE id = ?",
-                (record_id,),
-            ).fetchone()
+            target_row = _source_mutation_row(cursor, table_name, record_id)
             if not target_row:
                 raise HTTPException(
                     status_code=404, detail="未找到该记录"
                 )
 
-            # 权限检查：admin 可删任何，普通用户只能删自己的
-            is_admin = user.get("is_admin", 0)
-            if (
-                not is_admin
-                and target_row["owner_id"] is not None
-                and target_row["owner_id"] != user["id"]
-            ):
-                raise HTTPException(status_code=403, detail="无权删除他人的记录")
-            if not is_admin and target_row["owner_id"] is None:
-                raise HTTPException(status_code=403, detail="无权删除公共记录")
+            assert_question_writable(target_row["owner_id"], user, not_found="未找到该记录",
+                                     public_forbidden="无权删除公共记录")
 
             url = target_row["url"]
 
@@ -580,18 +680,24 @@ async def batch_delete_data(
     def _batch_soft_delete():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(req.ids))
             rows = cursor.execute(
                 (
                     f"SELECT id, url, owner_id, status, job_position, deleted_at "
-                    f"FROM {safe_name} WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                    f"FROM {safe_name} WHERE id IN ({placeholders})"
                     if table_name == "interview"
-                    else f"SELECT id, url, owner_id FROM {safe_name} "
-                    f"WHERE id IN ({placeholders}) AND deleted_at IS NULL"
+                    else f"SELECT id, url, owner_id, deleted_at FROM {safe_name} "
+                    f"WHERE id IN ({placeholders})"
                 ),
                 req.ids,
             ).fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="未找到任何匹配记录")
+            for row in rows:
+                assert_question_writable(row["owner_id"], user, not_found="未找到任何匹配记录")
+            rows = [row for row in rows if row["deleted_at"] is None]
             if not rows:
                 raise HTTPException(status_code=404, detail="未找到任何匹配记录")
 
@@ -650,13 +756,13 @@ async def restore_data(
     def _restore():
         safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-            target_row = cursor.execute(
-                f"SELECT id, url, owner_id FROM {safe_name} WHERE id = ? AND deleted_at IS NOT NULL",
-                (record_id,),
-            ).fetchone()
-            if not target_row:
+            target_row = _source_mutation_row(cursor, table_name, record_id)
+            if not target_row or target_row["deleted_at"] is None:
                 raise HTTPException(status_code=404, detail="未找到该已删除记录")
+
+            assert_question_writable(target_row["owner_id"], user, not_found="未找到该已删除记录")
 
             url = target_row["url"]
             owner_scope = target_row["owner_id"]
@@ -729,29 +835,55 @@ async def get_trash(
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
     offset = (page - 1) * page_size
+    viewer_id = int(user["id"])
 
     def _query():
-        safe_name = _safe_table_name(table_name)
         with get_db_connection() as conn:
-            where = "deleted_at IS NOT NULL"
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM {safe_name} WHERE {where}"
-            ).fetchone()[0]
             if table_name == "jd":
+                where = (
+                    "deleted_at IS NOT NULL AND (owner_id = ? OR "
+                    "(owner_id IS NULL AND status = 'approved'))"
+                )
+                params = (viewer_id,)
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM jd WHERE {where}", params
+                ).fetchone()[0]
                 rows = conn.execute(
-                    f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT id, url, company, job_title, salary, tech_stack, bonus, season, deleted_at "
+                    f"FROM jd WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
             elif table_name == "interview":
+                where = (
+                    "deleted_at IS NOT NULL AND (owner_id = ? OR "
+                    "(owner_id IS NULL AND status = 'approved' AND publish_status = 'published'))"
+                )
+                params = (viewer_id,)
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM interview WHERE {where}", params
+                ).fetchone()[0]
                 rows = conn.execute(
-                    f"SELECT id, url, company, round, focus, questions_list, difficulty, season, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT id, url, company, round, focus, questions_list, difficulty, season, deleted_at "
+                    f"FROM interview WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
             else:
+                from_clause = "questions_detail qd JOIN interview iv ON iv.id = qd.interview_id"
+                where = (
+                    "qd.deleted_at IS NOT NULL AND (iv.owner_id = ? OR "
+                    "(iv.owner_id IS NULL AND iv.status = 'approved' "
+                    "AND iv.publish_status = 'published'))"
+                )
+                params = (viewer_id,)
                 rows = conn.execute(
-                    f"SELECT id, url, company, round, question, cat1, cat2, tags, diff_tag, deleted_at FROM {safe_name} WHERE {where} ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
-                    (page_size, offset),
+                    f"SELECT qd.id, qd.url, qd.company, qd.round, qd.question, qd.cat1, qd.cat2, "
+                    f"qd.tags, qd.diff_tag, qd.deleted_at FROM {from_clause} WHERE {where} "
+                    "ORDER BY qd.deleted_at DESC LIMIT ? OFFSET ?",
+                    (*params, page_size, offset),
                 ).fetchall()
+                total = conn.execute(
+                    f"SELECT COUNT(*) FROM {from_clause} WHERE {where}", params
+                ).fetchone()[0]
             return total, rows
 
     total, rows = await run_db(_query)
@@ -876,8 +1008,16 @@ async def update_generic_data(
 
     def _update():
         with get_db_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             previous_interview = None
+            if req.table_name in {"interview", "jd", "questions_detail"}:
+                source_row = _source_mutation_row(cursor, req.table_name, req.record_id)
+                if source_row is None:
+                    raise HTTPException(status_code=404, detail="未找到对应的记录，可能已被删除")
+                assert_question_writable(
+                    source_row["owner_id"], user, not_found="未找到对应的记录，可能已被删除"
+                )
             if req.table_name == "interview":
                 previous_interview = cursor.execute(
                     "SELECT id, owner_id, status, deleted_at, job_position FROM interview WHERE id = ?",
@@ -933,3 +1073,72 @@ async def update_generic_data(
     except Exception:
         logger.exception("操作失败")
         raise HTTPException(status_code=500, detail="数据库更新失败，请查看服务端日志")
+
+
+@router.get("/api/data/interview/{record_id}/location")
+async def get_interview_location(
+    record_id: int,
+    sort: str | None = Query(None),
+    season: str | None = Query(None),
+    position_id: str | None = Query(None),
+    scope: str = Query("all"),
+    page_size: int = Query(20, ge=1),
+    user: dict = Depends(get_current_user),
+):
+    """AC-001：按与列表一致的排序/筛选定位面经所在页；无权目标一律 404。"""
+    effective_page_size = min(100, page_size)
+
+    def _query():
+        with get_db_connection() as conn:
+            where, params = _visibility_where_and_params(
+                conn, "interview", user, scope=scope, season=season, position_id=position_id
+            )
+            target = conn.execute(
+                f"SELECT id, created_at, job_position FROM interview WHERE id = ? AND {where}",
+                (record_id, *params),
+            ).fetchone()
+            if target is None:
+                return None
+            # Use the list's exact ordering, including NULL dates and ID ties.
+            order_by = _list_order_by("interview", sort)
+            rank = conn.execute(
+                f"SELECT rank FROM (SELECT id, ROW_NUMBER() OVER ({order_by}) - 1 AS rank "
+                f"FROM interview WHERE {where}) WHERE id = ?",
+                (*params, int(record_id)),
+            ).fetchone()[0]
+            # R09：position_id 必须是岗位 ID（前端 switchPositionById(Number(position))
+            # 需要数字），岗位名称另放 position_name 供展示。
+            position_name = target["job_position"] or ""
+            position_id_value = None
+            if position_name:
+                try:
+                    pos_row = conn.execute(
+                        "SELECT id FROM job_positions WHERE name = ? AND "
+                        "(is_deleted = 0 OR is_deleted IS NULL)",
+                        (position_name,),
+                    ).fetchone()
+                except Exception:
+                    pos_row = None
+                if pos_row is None:
+                    try:
+                        pos_row = conn.execute(
+                            "SELECT id FROM job_positions WHERE name = ?",
+                            (position_name,),
+                        ).fetchone()
+                    except Exception:
+                        pos_row = None
+                if pos_row is not None:
+                    position_id_value = int(pos_row["id"])
+            return {
+                "interview_id": int(record_id),
+                "rank": int(rank),
+                "page_size": effective_page_size,
+                "page": int(rank) // effective_page_size + 1,
+                "position_id": position_id_value,
+                "position_name": position_name,
+            }
+
+    result = await run_db(_query)
+    if result is None:
+        raise HTTPException(status_code=404, detail="记录不存在或无权访问")
+    return result

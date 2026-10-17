@@ -82,7 +82,7 @@ async def test_call_with_retry_mimo_downgrades(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (FakeClient(captured), "mimo-v2.5", 60,
+        lambda user_id, llm_scope="user": (FakeClient(captured), "mimo-v2.5", 60,
                          "https://token-plan-cn.xiaomimimo.com/v1", "openai"),
     )
     from app.services.llm import _call_llm_with_retry
@@ -99,7 +99,7 @@ async def test_call_with_retry_siliconflow_keeps_json_mode(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (FakeClient(captured), "BAAI/bge-m3", 60,
+        lambda user_id, llm_scope="user": (FakeClient(captured), "BAAI/bge-m3", 60,
                          "https://api.siliconflow.cn/v1", "openai"),
     )
     from app.services.llm import _call_llm_with_retry
@@ -115,7 +115,7 @@ async def test_raw_llm_call_mimo_downgrades(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (FakeClient(captured), "mimo-v2.5", 60,
+        lambda user_id, llm_scope="user": (FakeClient(captured), "mimo-v2.5", 60,
                          "https://token-plan-cn.xiaomimimo.com/v1", "openai"),
     )
     from app.services.llm import raw_llm_call
@@ -134,7 +134,7 @@ async def test_raw_llm_call_siliconflow_keeps(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (FakeClient(captured), "model", 60,
+        lambda user_id, llm_scope="user": (FakeClient(captured), "model", 60,
                          "https://api.siliconflow.cn/v1", "openai"),
     )
     from app.services.llm import raw_llm_call

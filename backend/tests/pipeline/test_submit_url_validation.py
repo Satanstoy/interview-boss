@@ -116,3 +116,41 @@ def test_submit_jobs_accepts_empty_url(client, mock_llm, mock_redis, _mock_backg
         assert resp.status_code != 400
     finally:
         app.dependency_overrides.pop(dependency, None)
+
+
+@pytest.mark.parametrize("url", [
+    "https://test.invalid/post](https://test.invalid/post",
+    "[原帖](https://test.invalid/post)",
+    "https://",
+    "https:///post",
+    "https://test.invalid/two words",
+    "https://user:secret@test.invalid/post",
+])
+def test_source_url_rejects_malformed_pasted_link(url):
+    from app.core.validation import validate_source_url
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        validate_source_url(url)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize("url", [
+    "https://test.invalid/path?x=1&y=2#anchor",
+    "https://test.invalid/article_(one)",
+    "https://test.invalid/中文面经",
+    "",
+])
+def test_source_url_preserves_valid_link(url):
+    from app.core.validation import validate_source_url
+
+    assert validate_source_url(url) == url
+
+
+@pytest.mark.parametrize("url", ["https://test.invalid/post](https://test.invalid/post", "https://user:secret@test.invalid/post"])
+def test_review_rejects_same_malformed_source_links(url):
+    from app.models.upload_contracts import ReviewSourceFields
+    from pydantic import ValidationError
+
+    with pytest.raises((ValidationError, ValueError)):
+        ReviewSourceFields(source_url=url)

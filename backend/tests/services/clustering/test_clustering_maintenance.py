@@ -128,7 +128,7 @@ def test_maintenance_exact_duplicate_merge_only_merges_exact_normalized_text(tes
     result = run_clustering_maintenance(test_db, execute=True, merge_exact_duplicates=True)
 
     assert result["applied"]["exact_merges"]
-    assert test_db.execute("SELECT id FROM question_bank WHERE id = 21").fetchone() is None
+    assert test_db.execute("SELECT deleted_at FROM question_bank WHERE id = 21").fetchone()[0] is not None
     assert test_db.execute("SELECT id FROM question_bank WHERE id = 30").fetchone() is not None
     assert test_db.execute("SELECT id FROM question_bank WHERE id = 31").fetchone() is not None
 

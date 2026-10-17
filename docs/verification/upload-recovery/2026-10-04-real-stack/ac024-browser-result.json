@@ -1,0 +1,82 @@
+{
+  "old_job_id": 1,
+  "retry_job_id": 2,
+  "retry_response": {
+    "status": 200,
+    "body": {
+      "job_id": 2,
+      "status": "queued",
+      "created": true,
+      "dispatch_error": null
+    }
+  },
+  "other_retry_status": 404,
+  "other_job_read_status": 404,
+  "private_request_read_status": 403,
+  "retry_job_status": "completed",
+  "private_jd_id": 2,
+  "contribution_request_id": 1,
+  "ordinary_interview": {
+    "import_id": "0a111910-33c1-4ea4-9f96-f7f5ee7e4d29",
+    "result": {
+      "interview_id": 2,
+      "position_id": null,
+      "question_ids": [],
+      "contribution_request_id": null
+    },
+    "interview": {
+      "id": 2,
+      "来源链接": "internal://65Weq8D7-1jxZitUkI7HTw",
+      "公司": "AC024_ORDINARY_INTERVIEW_COMPANY",
+      "面试轮次": "AC024 legacy compatibility round",
+      "考察重点": "AC024 ordinary interview path",
+      "具体题目清单": "1. AC024_ORDINARY_INTERVIEW_QUESTION_MARKER: explain transaction isolation.",
+      "难易程度": "中等",
+      "season": "2027届暑期实习",
+      "owner_id": 2,
+      "created_at": "2026-10-05 17:57:12"
+    },
+    "private_visible_for_owner": true,
+    "public_absent_for_other": true
+  },
+  "admin_pending_summary": {
+    "company": "AC024_PRIVATE_COMPANY_SENTINEL",
+    "round": "",
+    "job_title": "AC024 Legacy JD platform engineer",
+    "job_position": "agent开发/大模型应用开发/大模型开发",
+    "item_count": 0
+  },
+  "disallowed_projection_status": 422,
+  "approval": {
+    "status": 200,
+    "body": {
+      "status": "published",
+      "revision": 2,
+      "public_jd_id": 3,
+      "projection_hash": "7a06b322d4f11fec79436ba6b616c3ba79d93749dcee99b260b3165c19a83e2a"
+    }
+  },
+  "public_jd": {
+    "id": 3,
+    "来源链接": "https://ac024.example/reviewed/public-jd",
+    "公司": "AC024_PUBLIC_REVIEW_COMPANY",
+    "岗位名称": "AC024 public platform engineer",
+    "薪资范围": null,
+    "核心技术要求": "AC024_PUBLIC_TECH_GO",
+    "加分项": "AC024_PUBLIC_BONUS_SQL",
+    "season": "",
+    "owner_id": null
+  },
+  "public_jd_ids": [
+    1,
+    3
+  ],
+  "public_interview_ids": [
+    1
+  ],
+  "old_rows_visible": {
+    "jd": true,
+    "interview": true
+  },
+  "private_source_absent_for_other": true
+}

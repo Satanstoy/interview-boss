@@ -1,0 +1,7 @@
+severity	dim	location	title	fix	effort	confidence
+4	D9	backend/app/db/migrations/__init__.py:406	Shipped branch migration identities collide and silently skip schema upgrades	Add explicit legacy reconciliation migration and validate recorded names before writes	2h	verified
+3	D14	frontend/src/views/InterviewView.vue:46	Failed interview requests display empty-state and pagination can show stale data	Use independent interview loading/error states and retry panel; hide stale table	1h	verified
+3	D9	backend/app/routers/health.py:16	SELECT 1 health check cannot detect missing application schema	Migration identity validation now blocks startup for unknown collisions	30m	verified
+3	D14	frontend/src/composables/useMasterBankData.js:129	Season options truncated at server page cap and narrowed by active season	Fetch all 100-row pages without season filter and guard stale results	30m	verified
+3	D14	frontend/src/layouts/AuthenticatedLayout.vue:498	Source navigation only searches the currently loaded interview page	Resolve source across authorized pages then use server location endpoint	1h	verified
+3	D14	backend/app/routers/data.py:1090	Location rank differs from list sorting for NULL dates in ascending order	Share exact list ordering through ROW_NUMBER and test both directions	30m	verified

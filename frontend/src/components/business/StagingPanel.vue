@@ -11,11 +11,15 @@ import {
   RefreshCw,
   Sparkles,
   Upload,
+  X,
 } from '@lucide/vue'
 
-import { createSubmitJob } from '@/services/dataApi.js'
-import { useSubmitJobs, attachJob } from '@/composables/useSubmitJobs.js'
-import { useModelGuard } from '@/composables/useModelGuard.js'
+import {
+  submitUploadWithIdempotency,
+  useSubmitJobs,
+  attachJob,
+  clearDraftKey,
+} from '@/composables/useSubmitJobs.js'
 import { useConfirm } from '@/composables/useNotification.js'
 import { validateUrl, sanitizeAgainstInjection } from '@/utils/validate.js'
 
@@ -38,7 +42,6 @@ const { activeJobs, retryJob } = useSubmitJobs()
 const { confirm: showConfirm } = useConfirm()
 
 const TEXT_MAX_LENGTH = 50000
-const MAX_FILE_SIZE = 10 * 1024 * 1024
 const MAX_FILES = 20
 
 const rawText = ref('')
@@ -132,24 +135,15 @@ function handleFiles(files) {
   submitError.value = ''
 
   for (const file of files) {
-    if (!file.type.startsWith('image/')) {
-      // 拖入/粘贴非图片文件时给出反馈，避免用户以为功能没反应
-      toast.info(`已忽略非图片文件：${file.name}`)
-      continue
-    }
     if (images.value.length >= MAX_FILES) {
       submitError.value = `最多上传 ${MAX_FILES} 张图片`
       break
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      submitError.value = `图片 "${file.name}" 超过 10MB 限制`
-      continue
     }
 
     images.value.push({
       id: `${Date.now()}-${Math.random()}`,
       file,
-      preview: URL.createObjectURL(file),
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
     })
   }
 }
@@ -219,9 +213,6 @@ async function onSubmit() {
     }
   }
 
-  const { ensureModelReady } = useModelGuard()
-  if (!await ensureModelReady({ action: '提交解析' })) return
-
   isSubmitting.value = true
   try {
     const formData = new FormData()
@@ -236,14 +227,34 @@ async function onSubmit() {
 
     images.value.forEach(item => formData.append('files', item.file))
 
-    const result = await createSubmitJob(formData)
-    attachJob(result.job_id)
+    // R08：实际提交走幂等恢复（AC-021）：同草稿复用同一幂等键，响应丢失
+    // 先 by-key 查询绝不重复创建；needs_action 保留草稿供配置修复后重发。
+    const result = await submitUploadWithIdempotency(formData, {
+      draftId: `panel-${props.activeSeason || 'default'}`,
+    })
+
+    const importStatus = result.status || 'queued'
+    const terminalNeedsAction = importStatus === 'needs_action'
+    if (result.job_id) attachJob(result.job_id)
     emit('submitted', result)
-    resetForm()
-    submitSuccess.value = true
-    toast.success('任务已提交，正在后台处理中')
-    setTimeout(() => { submitSuccess.value = false }, 3000)
+
+    if (!terminalNeedsAction) {
+      // 正常受理（created/queued/running）才清空草稿与幂等键
+      resetForm()
+      clearDraftKey(`panel-${props.activeSeason || 'default'}`)
+    }
+    // needs_action：保留草稿（模型配置未就绪，修复后同一幂等键重发）
+    submitSuccess.value = !terminalNeedsAction
+    toast[terminalNeedsAction ? 'warning' : 'success'](
+      terminalNeedsAction
+        ? '需要先配置模型才能继续，内容已保留'
+        : '任务已提交，正在检查目标模型并后台处理',
+    )
+    if (submitSuccess.value) {
+      setTimeout(() => { submitSuccess.value = false }, 3000)
+    }
   } catch (error) {
+    // 提交失败也保留草稿与幂等键：允许修复后重试同一任务
     submitError.value = error.message || '提交失败'
     toast.error(submitError.value)
   } finally {
@@ -268,8 +279,6 @@ defineExpose({ onSubmit, isSubmitting })
           {{ activeJobCount }} 个任务处理中
         </Badge>
       </div>
-      <p class="mt-1 text-xs text-muted-foreground">粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。</p>
-
       <!-- 后台任务实时进度列表 -->
       <div v-if="visibleJobs.length > 0" class="mt-3 flex flex-col gap-2 border-t border-border pt-3">
         <div
@@ -389,7 +398,6 @@ defineExpose({ onSubmit, isSubmitting })
           <input
             ref="fileInput"
             type="file"
-            accept="image/*"
             multiple
             class="hidden"
             :disabled="isSubmitting"
@@ -421,7 +429,16 @@ defineExpose({ onSubmit, isSubmitting })
               :key="img.id"
               class="group/img relative aspect-square overflow-hidden rounded-md border bg-muted"
             >
-              <img :src="img.preview" :alt="`图片 ${index + 1}`" class="h-full w-full object-cover" />
+              <img
+                v-if="img.preview"
+                :src="img.preview"
+                :alt="`图片 ${index + 1}`"
+                class="h-full w-full object-cover"
+              />
+              <div v-else class="flex h-full flex-col items-center justify-center gap-2 p-2 text-muted-foreground">
+                <FileText class="h-8 w-8" />
+                <span class="text-center text-xs">服务端将校验此文件类型</span>
+              </div>
               <button
                 type="button"
                 class="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity hover:bg-black/80 sm:size-7 sm:opacity-0 sm:group-hover/img:opacity-100 sm:focus-visible:opacity-100"
@@ -553,6 +570,8 @@ defineExpose({ onSubmit, isSubmitting })
     >
       <div
         v-if="submitError"
+        data-testid="submit-error"
+        role="alert"
         class="flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive"
       >
         <AlertCircle class="h-4 w-4 shrink-0" />

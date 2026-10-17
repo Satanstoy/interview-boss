@@ -5,9 +5,8 @@
         <div class="mx-auto w-full max-w-5xl px-3 pb-12 pt-4 sm:px-4 sm:pt-6 md:px-6 md:pt-8">
           <section class="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
-              <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary">Study plans</p>
-              <h1 class="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">题单管理</h1>
-              <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">把高频题库整理成自己的复习路径。每道题都会沿用同一套熟练度和间隔复习记录。</p>
+              <h1 class="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">题单管理</h1>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">题目的熟练度和间隔复习记录会在题单间共享。</p>
             </div>
             <div class="flex items-center gap-2 text-xs text-muted-foreground">
               <Layers class="size-4 text-primary" />

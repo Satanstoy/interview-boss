@@ -122,7 +122,7 @@ def _purge_soft_deleted(url: str, owner_id=None):
 def _check_duplicate_url_sync(url: str, owner_id=None) -> bool:
     """检查 URL 是否已存在活跃记录。
 
-    owner_id=None（公共上传）：检查所有活跃记录（全局唯一）。
+    owner_id=None（公共上传）：只检查公共活跃记录。
     owner_id=int（个人上传）：只检查该用户自己的活跃记录。
     """
     if not url:
@@ -158,26 +158,28 @@ def _check_duplicate_url_sync(url: str, owner_id=None) -> bool:
                 if cursor.fetchone():
                     return True
         else:
-            # 公共上传：检查所有活跃记录（URL 全局唯一，不管 owner）
+            # 公共上传只在公共作用域内去重，不读取或暴露个人记录。
             cursor.execute(
-                "SELECT 1 FROM jd WHERE url = ? AND deleted_at IS NULL", (url,)
+                "SELECT 1 FROM jd WHERE url = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                (url,),
             )
             if cursor.fetchone():
                 return True
             cursor.execute(
-                "SELECT 1 FROM interview WHERE url = ? AND deleted_at IS NULL", (url,)
+                "SELECT 1 FROM interview WHERE url = ? AND owner_id IS NULL AND deleted_at IS NULL",
+                (url,),
             )
             if cursor.fetchone():
                 return True
             if sig:
                 cursor.execute(
-                    "SELECT 1 FROM jd WHERE url_signature = ? AND deleted_at IS NULL",
+                    "SELECT 1 FROM jd WHERE url_signature = ? AND owner_id IS NULL AND deleted_at IS NULL",
                     (sig,),
                 )
                 if cursor.fetchone():
                     return True
                 cursor.execute(
-                    "SELECT 1 FROM interview WHERE url_signature = ? AND deleted_at IS NULL",
+                    "SELECT 1 FROM interview WHERE url_signature = ? AND owner_id IS NULL AND deleted_at IS NULL",
                     (sig,),
                 )
                 if cursor.fetchone():
@@ -759,9 +761,120 @@ def submit_interview_txn(
     返回 (answer_tasks, interview_id, question_detail_ids)。
     """
     with get_db_connection() as conn:
+        try:
+            conn.cursor().execute("BEGIN")
+            result = submit_interview_in_conn(
+                conn,
+                saved_url,
+                data,
+                questions,
+                season,
+                owner_id,
+                status,
+                job_position,
+                tagged_rows,
+                matched,
+                unmatched_rows,
+                idx_to_row,
+                submitter_is_admin,
+                user_id,
+                qb_owner_id=qb_owner_id,
+                persist_unmatched=persist_unmatched,
+            )
+            conn.commit()
+            return result
+        except Exception as e:
+            conn.rollback()
+            if "UNIQUE" in str(e):
+                raise ValueError("该 URL 已存在，不可重复上传")
+            raise
+
+
+def submit_interview_in_conn(
+    conn,
+    saved_url,
+    data,
+    questions,
+    season,
+    owner_id,
+    status,
+    job_position,
+    tagged_rows=None,
+    matched=None,
+    unmatched_rows=None,
+    idx_to_row=None,
+    submitter_is_admin=False,
+    user_id=None,
+    qb_owner_id=None,
+    persist_unmatched=True,
+):
+    """在调用方事务内提交面经：insert_interview + insert_details + 增量更新。
+
+    **不 commit/rollback**：上传恢复链路要把它与检查点、下游 job 写在同一事务，
+    任一步失败由调用方整体回滚。重复 URL 的语义由 wrapper 保持。
+    """
+    cursor = conn.cursor()
+    _insert_interview_txn(
+        cursor,
+        saved_url,
+        data,
+        questions,
+        season,
+        owner_id,
+        status,
+        job_position,
+    )
+    interview_id = cursor.lastrowid
+    detail_ids = _insert_details_txn(
+        cursor, tagged_rows, job_position, interview_id=interview_id
+    )
+    answer_tasks = _apply_incremental_txn(
+        cursor,
+        matched,
+        unmatched_rows,
+        idx_to_row,
+        submitter_is_admin,
+        user_id,
+        job_position,
+        owner_id=qb_owner_id,
+        persist_unmatched=persist_unmatched,
+    )
+    return answer_tasks, interview_id, detail_ids
+
+
+def submit_interview_txn_tag_only(
+    saved_url,
+    data,
+    questions,
+    season,
+    owner_id,
+    status,
+    job_position,
+    tagged_rows,
+    *,
+    import_id: str | None = None,
+    job_id: int | None = None,
+    lease_generation: int | None = None,
+    input_version: int | None = None,
+    source_ordinals: list[int] | None = None,
+    enqueue: bool = False,
+    return_detail_ids: bool = False,
+    admin_public_import_actor_id: int | None = None,
+    admin_public_source_snapshot: dict | None = None,
+):
+    """提交新面经（仅打标签）：insert_interview + insert_details，不做聚类。
+
+    聚类由两阶段流水线的阶段2负责。
+    单事务，返回 interview_id。
+    """
+    with get_db_connection() as conn:
         cursor = conn.cursor()
         try:
-            cursor.execute("BEGIN")
+            cursor.execute("BEGIN IMMEDIATE")
+            from app.services.upload_lifecycle import assert_upload_business_commit
+
+            assert_upload_business_commit(conn, import_id=import_id, job_id=job_id,
+                                          generation=lease_generation, input_version=input_version)
             _insert_interview_txn(
                 cursor,
                 saved_url,
@@ -776,54 +889,49 @@ def submit_interview_txn(
             detail_ids = _insert_details_txn(
                 cursor, tagged_rows, job_position, interview_id=interview_id
             )
-            answer_tasks = _apply_incremental_txn(
-                cursor,
-                matched,
-                unmatched_rows,
-                idx_to_row,
-                submitter_is_admin,
-                user_id,
-                job_position,
-                owner_id=qb_owner_id,
-                persist_unmatched=persist_unmatched,
-            )
+            if import_id:
+                for index, detail_id in enumerate(detail_ids):
+                    ordinal = (
+                        int(source_ordinals[index])
+                        if source_ordinals is not None and index < len(source_ordinals)
+                        else index + 1
+                    )
+                    conn.execute(
+                        "UPDATE questions_detail SET import_id = ?, source_ordinal = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (import_id, ordinal, detail_id),
+                    )
+            contribution_request_id = None
+            if admin_public_import_actor_id is not None:
+                from app.services.public_contributions import (
+                    create_admin_public_import_approval,
+                )
+
+                conn.execute(
+                    "UPDATE interview SET publish_status = 'pending' WHERE id = ?",
+                    (interview_id,),
+                )
+                contribution_request_id = create_admin_public_import_approval(
+                    conn,
+                    import_id=import_id,
+                    admin_id=int(admin_public_import_actor_id),
+                    interview_id=int(interview_id),
+                    detail_ids=[int(detail_id) for detail_id in detail_ids],
+                    source_snapshot=admin_public_source_snapshot or {},
+                )
+            if enqueue:
+                from app.services.pipeline.queue import enqueue_questions
+
+                enqueue_questions(
+                    interview_id,
+                    owner_id=owner_id,
+                    question_detail_ids=detail_ids,
+                    contribution_request_id=contribution_request_id,
+                    root_import_id=import_id,
+                    conn=conn,
+                )
             conn.commit()
-            return answer_tasks, interview_id, detail_ids
-        except Exception as e:
-            conn.rollback()
-            if "UNIQUE" in str(e):
-                raise ValueError("该 URL 已存在，不可重复上传")
-            raise
-
-
-def submit_interview_txn_tag_only(
-    saved_url, data, questions, season, owner_id, status, job_position, tagged_rows
-):
-    """提交新面经（仅打标签）：insert_interview + insert_details，不做聚类。
-
-    聚类由两阶段流水线的阶段2负责。
-    单事务，返回 interview_id。
-    """
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            cursor.execute("BEGIN")
-            _insert_interview_txn(
-                cursor,
-                saved_url,
-                data,
-                questions,
-                season,
-                owner_id,
-                status,
-                job_position,
-            )
-            interview_id = cursor.lastrowid
-            _insert_details_txn(
-                cursor, tagged_rows, job_position, interview_id=interview_id
-            )
-            conn.commit()
-            return interview_id
+            return (interview_id, detail_ids) if return_detail_ids else interview_id
         except Exception as e:
             conn.rollback()
             if "UNIQUE" in str(e):
@@ -938,6 +1046,15 @@ def insert_personal_questions_txn(tagged_rows, user_id, job_position):
 # ═══════════════════════════════════════════════════
 #  JD 插入（独立操作，不涉及聚类）
 # ═══════════════════════════════════════════════════
+
+
+def _insert_jd_in_conn(conn, saved_url, data, tech_stack, season="", owner_id=None, status="approved", job_position=""):
+    """Insert JD without committing the caller's upload transaction."""
+    cur = conn.execute(
+        "INSERT INTO jd (url,company,job_title,salary,tech_stack,bonus,season,owner_id,status,url_signature,job_position) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (saved_url, data.get("公司","未提供"),data.get("岗位名称","未提供"),data.get("薪资范围","未提供"),tech_stack,data.get("加分项","未提供"),season,owner_id,status,_extract_url_signature(saved_url),job_position),
+    )
+    return int(cur.lastrowid)
 
 
 def _insert_jd(

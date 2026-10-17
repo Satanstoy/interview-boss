@@ -362,7 +362,8 @@ def _build_critic_prompt(question: str, draft: str, sources: list[dict]) -> str:
 {source_text}
 
 ## 质量标准（逐条核对）
-1. 事实准确性：候选答案中的技术事实与参考资料冲突时，以官方文档为准；资料未覆盖的判断不算错。
+1. 事实准确性：候选答案中的技术事实与参考资料冲突时，以官方文档为准；资料未覆盖的技术事实也须核对，无法确认时明确提出需复核，不得自动视为正确。
+   检查必要条件和反例：例如 tuple 的容器不可变不保证可哈希，只有全部元素可哈希时才可作为 dict 键；tuple 包含 list 时不可哈希。
 2. 口述性：是否短句、大白话、可直接背诵；是否教科书腔或连续长段落。
 3. 结构：单一问题是否使用 3–4 个三级标题，多子问或复杂架构题可用 4–6 个；是否匹配场景 A/B/C（算法题给可运行代码，题目指定语言时必须遵从、未指定时使用 Python；系统设计题给总体分层、选型依据、执行链路与故障边界；原理题给核心解释+记忆锚点+实用场景）。
 4. 字数：篇幅应跟随问题复杂度。单一概念题通常 300–500 字；多子问、系统设计、架构、方案选型或需要说明端到端流程的工程题可用 600–1000 字。不能仅因复杂题超过 520 字判错，也不能用篇幅为由删掉显式子问。
@@ -447,10 +448,14 @@ def _answer_length_limit(question: str) -> int:
     return _DEFAULT_MAX_ANSWER_LEN
 
 
+def _review_unavailable(problem: str) -> dict:
+    return {"verdict": "UNAVAILABLE", "issues": [{"code": "review_unavailable", "problem": problem, "evidence": "审校未完成"}]}
+
+
 def _parse_critique(raw: str) -> dict:
-    """宽松解析 critic 输出；任何失败返回 PASS 语义（保守回退，不多花一轮 revise）"""
+    """解析审校结果；缺失、损坏或未知结果明确保留为待复核。"""
     if not raw:
-        return {"verdict": "PASS", "issues": []}
+        return _review_unavailable("审校返回空结果")
     text = raw.strip()
     try:
         parsed = json.loads(text)
@@ -458,19 +463,19 @@ def _parse_critique(raw: str) -> dict:
         start = text.find("{")
         end = text.rfind("}")
         if start == -1 or end <= start:
-            return {"verdict": "PASS", "issues": []}
+            return _review_unavailable("审校结果不是 JSON")
         try:
             parsed = json.loads(text[start : end + 1])
         except Exception:
-            return {"verdict": "PASS", "issues": []}
+            return _review_unavailable("审校结果 JSON 无效")
     if not isinstance(parsed, dict):
-        return {"verdict": "PASS", "issues": []}
+        return _review_unavailable("审校结果格式无效")
     issues = parsed.get("issues", [])
-    if not isinstance(issues, list):
-        issues = []
-    verdict = str(parsed.get("verdict", "PASS")).strip().upper()
-    if verdict != "ISSUES":
-        verdict = "PASS"
+    if not isinstance(issues, list) or any(not isinstance(issue, dict) or not issue.get("problem") for issue in issues):
+        return _review_unavailable("审校问题列表格式无效")
+    verdict = str(parsed.get("verdict", "")).strip().upper()
+    if verdict not in ("PASS", "ISSUES") or (verdict == "ISSUES" and not issues) or (verdict == "PASS" and issues):
+        return _review_unavailable("审校结论缺失或不一致")
     return {"verdict": verdict, "issues": issues}
 
 
@@ -481,7 +486,7 @@ async def _critic_answer(
     user_id: int | None,
     llm_scope: str = "user",
 ) -> dict:
-    """调用 critic：返回 {"verdict", "issues"}；LLM 异常返回 PASS 语义
+    """调用 critic：返回 {"verdict", "issues"}；LLM 异常标记待复核
 
     critic 显式开启深度思考（thinking=True）：关思考会让审查变宽松，
     漏报字数超标等实质问题（2026-08-06 实验观察）。
@@ -498,7 +503,7 @@ async def _critic_answer(
         return _parse_critique(raw)
     except Exception:
         logger.exception("答案质量 critic 调用失败，跳过本轮修订")
-        return {"verdict": "PASS", "issues": []}
+        return _review_unavailable("审校调用失败，请复核参考答案")
 
 
 async def _revise_answer(
@@ -528,31 +533,33 @@ async def refine_answer(
     draft: str,
     sources: list[dict],
     user_id: int | None = None,
-    max_rounds: int = 2,
+    max_rounds: int = 1,
     llm_scope: str = "user",
 ) -> tuple[str, list[dict]]:
     """生成后质量 loop：critic（对照参考资料 + 硬性标准）→ 必要时 revise。
 
-    - critic 输出 PASS → 直接返回草稿（零额外 LLM 调用）
-    - 有 sources 才跑 loop；无来源（纯模型知识）直接返回草稿
-    - 每轮 = 1 次 critic + 最多 1 次 revise；超过 max_rounds 轮停止
-    - best-effort：任何异常回退草稿，不影响主流程
+    - PASS 返回当前答案并清空已经解决的问题
+    - 无来源或审查失败保留草稿，同时返回待复核原因
+    - max_rounds 限制修订次数；修订稿需要最终审校才可宣称通过
 
     Returns:
         (final_answer, issues)
     """
-    if not draft:
-        return draft, []
+    if not draft or not draft.strip():
+        return draft, _review_unavailable("生成结果为空")["issues"]
     if not sources:
-        return _normalise_answer_headings(draft), []
+        return _normalise_answer_headings(draft), _review_unavailable("缺少参考来源，答案尚未完成资料核对")["issues"]
     question = _extract_question(prompt)
     current = _normalise_answer_headings(draft)
     all_issues: list[dict] = []
-    for _round in range(max_rounds):
+    for _round in range(max(0, max_rounds) + 1):
         critique = await _critic_answer(
             question, current, sources, user_id, llm_scope=llm_scope
         )
         issues = critique.get("issues") or []
+        if critique.get("verdict") == "UNAVAILABLE":
+            all_issues = issues
+            break
         if critique.get("verdict", "PASS") == "PASS" or not issues:
             # 确定性字数校验：超过上限视为 ISSUES（不依赖 LLM 估算）
             max_answer_len = _answer_length_limit(question)
@@ -564,8 +571,11 @@ async def refine_answer(
                     }
                 ]
             else:
+                all_issues = []
                 break
         all_issues = issues
+        if _round >= max_rounds:
+            break
         current = await _revise_answer(
             question,
             current,

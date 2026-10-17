@@ -1,6 +1,8 @@
 import os
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -10,51 +12,72 @@ from app.db.connection import get_db_connection, run_db
 
 logger = logging.getLogger("interview-boss")
 
-# ── Secret Key: 优先读环境变量，否则自动生成并持久化到 .env ──
-_env_secret = os.getenv("JWT_SECRET")
-if _env_secret:
-    if len(_env_secret) < 32:
-        raise RuntimeError(
-            "JWT_SECRET 长度不足 32 字节（当前 "
-            f"{len(_env_secret)}）。生产环境禁止弱密钥，请使用 64 字节以上的"
-            "随机字符串，或删除 .env 中的 JWT_SECRET 让系统自动生成。"
+class JWTSecretConfigurationError(RuntimeError):
+    """A signing-key configuration error with a stable diagnostic category."""
+
+    def __init__(self, reason: str, detail: str):
+        self.reason = reason
+        super().__init__(f"JWT_SECRET configuration {reason}: {detail}")
+
+
+def _production_environment(values: dict[str, str]) -> bool:
+    return str(values.get("ENV", "")).strip().lower() in {"production", "prod"}
+
+
+def _parse_dotenv_secret(content: str) -> str | None:
+    for line in content.splitlines():
+        candidate = line.strip()
+        if candidate.startswith("JWT_SECRET="):
+            return candidate.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
+
+
+def _validate_jwt_secret(value: str) -> str:
+    secret = str(value).strip()
+    if not secret:
+        raise JWTSecretConfigurationError("empty", "provide a non-empty signing key")
+    if len(secret) < 32:
+        raise JWTSecretConfigurationError(
+            "format", "signing key must contain at least 32 characters"
         )
-    SECRET_KEY = _env_secret
-else:
-    # 先尝试从 .env 文件读取（避免多进程竞态各自生成不同密钥）
+    return secret
+
+
+def _load_jwt_secret(
+    values: dict[str, str] | None = None,
+    env_path: Path | None = None,
+) -> str:
+    """Load a signing key without silently persisting a generated replacement.
+
+    Production requires an explicitly configured key. Development/test runs
+    may use a process-local ephemeral key, which is intentionally not written
+    to disk and therefore cannot masquerade as durable configuration.
+    """
+    environ = os.environ if values is None else values
+    production = _production_environment(environ)
+    if "JWT_SECRET" in environ:
+        return _validate_jwt_secret(environ.get("JWT_SECRET", ""))
+
+    path = env_path or Path(__file__).resolve().parent.parent.parent / ".env"
     try:
-        from pathlib import Path
+        file_secret = _parse_dotenv_secret(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        if production:
+            raise JWTSecretConfigurationError("missing", "JWT_SECRET is not configured") from exc
+        file_secret = None
+    except PermissionError as exc:
+        raise JWTSecretConfigurationError("permission", f"cannot read {path}") from exc
+    except OSError as exc:
+        raise JWTSecretConfigurationError("io", f"cannot read {path}") from exc
 
-        _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-        if _env_path.exists():
-            with open(_env_path) as f:
-                for line in f:
-                    if line.strip().startswith("JWT_SECRET="):
-                        _env_secret = (
-                            line.strip().split("=", 1)[1].strip().strip('"').strip("'")
-                        )
-                        break
-    except Exception:
-        pass
+    if file_secret is None:
+        if production:
+            raise JWTSecretConfigurationError("missing", "JWT_SECRET is not configured")
+        return secrets.token_hex(64)
+    return _validate_jwt_secret(file_secret)
 
-    if _env_secret and len(_env_secret) >= 32:
-        SECRET_KEY = _env_secret
-    else:
-        SECRET_KEY = os.urandom(64).hex()
-        try:
-            from pathlib import Path
 
-            _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
-            from dotenv import set_key
-
-            set_key(str(_env_path), "JWT_SECRET", SECRET_KEY)
-            logger.info(
-                "JWT_SECRET 未设置，已自动生成并写入 .env（重启后会话不再丢失）"
-            )
-        except Exception as e:
-            logger.warning(
-                f"JWT_SECRET 已生成但写入 .env 失败: {e}，重启后旧 token 将失效"
-            )
+SECRET_KEY = _load_jwt_secret()
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
@@ -74,8 +97,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def _generate_jti() -> str:
-    import secrets
-
     return secrets.token_urlsafe(32)
 
 

@@ -169,9 +169,219 @@ def _record_pipeline_metric(
         logger.debug("pipeline_metrics 写入失败（非致命）: %s", exc)
 
 
+def _record_queue_resolutions(
+    conn,
+    batch: List[Dict],
+    *,
+    matched_rows: List[Dict],
+    new_cluster_rows: List[Dict],
+    new_qb_ids: List[int],
+) -> List[Dict]:
+    """Persist canonical links for root/contribution-owned queue occurrences.
+
+    Clustering writes the canonical rows and their source resolutions in one
+    transaction. Unmapped tracked rows become explicit failed resolutions so
+    queue completion cannot be mistaken for successful publication.
+    """
+
+    from app.services.question_resolution import record_resolution
+
+    canonical_by_detail: dict[int, tuple[int, str, float | None]] = {}
+    for match in matched_rows:
+        try:
+            detail_id = int(match["qd_id"])
+            canonical_id = int(match["cluster_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        canonical_by_detail[detail_id] = (
+            canonical_id,
+            "matched",
+            match.get("confidence"),
+        )
+
+    for cluster, canonical_id in zip(new_cluster_rows, new_qb_ids):
+        try:
+            canonical_id = int(canonical_id)
+        except (TypeError, ValueError):
+            continue
+        for raw_detail_id in cluster.get("ids") or []:
+            try:
+                detail_id = int(raw_detail_id)
+            except (TypeError, ValueError):
+                continue
+            canonical_by_detail[detail_id] = (canonical_id, "created", None)
+
+    recorded = []
+    for item in batch:
+        if not item.get("root_import_id") and not item.get("contribution_request_id"):
+            continue
+        try:
+            detail_id = int(item["qd_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        owner_id = item.get("owner_id")
+        occurrence_scope = "private" if owner_id is not None else "public"
+        canonical_scope = occurrence_scope
+        outcome = canonical_by_detail.get(detail_id)
+        root_import_id = item.get("root_import_id")
+        if not root_import_id and item.get("contribution_request_id"):
+            linked_root = conn.execute(
+                "SELECT id FROM upload_imports WHERE contribution_request_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (item["contribution_request_id"],),
+            ).fetchone()
+            if linked_root:
+                root_import_id = str(linked_root["id"])
+        if outcome:
+            canonical_id, status, confidence = outcome
+            record_resolution(
+                conn,
+                detail_id=detail_id,
+                occurrence_scope=occurrence_scope,
+                occurrence_owner_id=int(owner_id) if owner_id is not None else None,
+                canonical_id=canonical_id,
+                canonical_scope=canonical_scope,
+                status=status,
+                pipeline_version="upload-pipeline-v1",
+                confidence=confidence,
+            )
+            recorded.append(
+                {"detail_id": detail_id, "canonical_id": canonical_id, "status": status}
+            )
+            error_code = None
+        else:
+            record_resolution(
+                conn,
+                detail_id=detail_id,
+                occurrence_scope=occurrence_scope,
+                occurrence_owner_id=int(owner_id) if owner_id is not None else None,
+                canonical_id=None,
+                canonical_scope=canonical_scope,
+                status="failed",
+                pipeline_version="upload-pipeline-v1",
+                reason="聚类处理未返回该题的规范题关联",
+            )
+            recorded.append(
+                {"detail_id": detail_id, "canonical_id": None, "status": "failed"}
+            )
+            error_code = "CLUSTER_RESOLUTION_MISSING"
+        if root_import_id:
+            result_json = json.dumps(
+                {
+                    "detail_id": detail_id,
+                    "canonical_id": outcome[0] if outcome else None,
+                    "status": outcome[1] if outcome else "failed",
+                },
+                ensure_ascii=False,
+            )
+            conn.execute(
+                "INSERT INTO upload_stage_results "
+                "(import_id, stage, unit_key, input_version, pipeline_version, status, "
+                "result_json, error_code, retryable) "
+                "VALUES (?, 'resolve', ?, 1, 'upload-pipeline-v1', ?, ?, ?, ?) "
+                "ON CONFLICT(import_id, stage, unit_key, input_version) DO UPDATE SET "
+                "status = excluded.status, result_json = excluded.result_json, "
+                "error_code = excluded.error_code, retryable = excluded.retryable, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (
+                    root_import_id,
+                    f"detail:{detail_id}",
+                    "succeeded" if outcome else "failed",
+                    result_json,
+                    error_code,
+                    0 if outcome else 1,
+                ),
+            )
+    return recorded
+
+
+async def _refresh_completed_roots(
+    batch: List[Dict],
+    *,
+    include_contributions=False,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
+    root_ids = {
+        str(item["root_import_id"])
+        for item in batch
+        if item.get("root_import_id")
+        and (include_contributions or not item.get("contribution_request_id"))
+    }
+    if not root_ids:
+        return
+
+    def _refresh():
+        conn = get_db_connection()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
+            from app.services.upload_lifecycle import refresh_completed_upload_roots
+
+            reports = refresh_completed_upload_roots(conn, root_ids)
+            conn.execute("COMMIT")
+            return reports
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    await _run_db(_refresh)
+
+
+def _assert_upload_write_fences(conn, job_fence, scope_fence):
+    if job_fence is not None:
+        from app.services.job_lifecycle import assert_job_fence
+
+        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+    if scope_fence is not None:
+        from app.services.upload_scope_leases import assert_upload_scope_lease
+
+        assert_upload_scope_lease(
+            conn,
+            scope_fence[0],
+            holder_token=scope_fence[1],
+            generation=int(scope_fence[2]),
+        )
+
+
+async def _persist_unmapped_queue_items(
+    batch: List[Dict],
+    *,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
+):
+    """Persist sanitization rejects as failed resolutions and cluster stages."""
+
+    if not batch:
+        return
+
+    def _write():
+        conn = get_db_connection()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
+            result = _record_queue_resolutions(
+                conn,
+                batch,
+                matched_rows=[],
+                new_cluster_rows=[],
+                new_qb_ids=[],
+            )
+            conn.execute("COMMIT")
+            return result
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    await _run_db(_write)
+    await _refresh_completed_roots(batch)
+
+
 async def cluster_batch(
     batch: List[Dict], user_id: int = None, skip_clean: bool = False,
     return_new_ids: bool = False,
+    job_fence: tuple[int, int] | None = None,
+    scope_fence: tuple[str, str, int] | None = None,
 ) -> int | Dict:
     """对一批问题做增量聚类:匹配已有聚类 → 内部聚类剩余 → 原子写入 question_bank
 
@@ -187,7 +397,14 @@ async def cluster_batch(
 
     batch, filtered = sanitize_batch(batch)
     if filtered:
-        mark_batch_done([item["queue_id"] for item in filtered])
+        await _persist_unmapped_queue_items(
+            filtered, job_fence=job_fence, scope_fence=scope_fence
+        )
+        mark_batch_done(
+            [item["queue_id"] for item in filtered],
+            job_fence=job_fence,
+            scope_fence=scope_fence,
+        )
         logger.info(f"清洗拦截 {len(filtered)} 条脏数据")
     if not batch:
         return {"count": 0, "ids": []} if return_new_ids else 0
@@ -202,6 +419,29 @@ async def cluster_batch(
         }
     )
     batch_urls = list({item["url"] for item in batch if item.get("url")})
+    contribution_interview_ids = {
+        int(item["interview_id"])
+        for item in batch
+        if item.get("contribution_request_id") is not None
+        and item.get("interview_id") is not None
+    }
+    contribution_urls = {
+        item["url"]
+        for item in batch
+        if item.get("contribution_request_id") is not None and item.get("url")
+    }
+    interview_urls = {
+        int(item["interview_id"]): item.get("url")
+        for item in batch
+        if item.get("interview_id") is not None
+    }
+    cleanup_interview_ids = [
+        interview_id
+        for interview_id in batch_interview_ids
+        if interview_id not in contribution_interview_ids
+        and interview_urls.get(interview_id) not in contribution_urls
+    ]
+    cleanup_urls = [url for url in batch_urls if url not in contribution_urls]
     t0 = _time.time()
 
     # ── Step 0: 保存旧 AI 答案 + 清理旧贡献 ──
@@ -226,26 +466,29 @@ async def cluster_batch(
                 pass
         del rows
 
-    if not skip_clean:
+    if not skip_clean and (
+        cleanup_interview_ids if batch_interview_ids else cleanup_urls
+    ):
 
         def _pre_clean():
             c = get_db_connection()
-            c.execute("BEGIN")
+            c.execute("BEGIN IMMEDIATE")
             try:
+                _assert_upload_write_fences(c, job_fence, scope_fence)
                 from app.db.operations import (
                     _cleanup_old_sources_txn_v2,
                     cleanup_interview_question_bank_sources,
                 )
 
                 if batch_interview_ids:
-                    for interview_id in batch_interview_ids:
+                    for interview_id in cleanup_interview_ids:
                         cleanup_interview_question_bank_sources(
                             c.cursor(), interview_id, job_position=job_position
                         )
                 else:
                     # Compatibility for legacy callers that construct queue
                     # items without interview_id; keep the owner boundary.
-                    for url in batch_urls:
+                    for url in cleanup_urls:
                         _cleanup_old_sources_txn_v2(
                             c.cursor(), url, job_position, owner_id=owner_id
                         )
@@ -299,20 +542,77 @@ async def cluster_batch(
         answer_cache=saved_answers,
     ):
         conn = get_db_connection()
-        conn.execute("BEGIN")
+        conn.execute("BEGIN IMMEDIATE")
         new_qb_ids = []
         try:
-            apply_matched(conn, matched_rows, job_position, answer_cache)
+            _assert_upload_write_fences(conn, job_fence, scope_fence)
+            contribution_ids = sorted(
+                {
+                    int(item["contribution_request_id"])
+                    for item in batch
+                    if item.get("contribution_request_id") is not None
+                }
+            )
+            withdrawn_ids = set()
+            if contribution_ids:
+                placeholders = ",".join("?" * len(contribution_ids))
+                withdrawn_ids = {
+                    int(row["id"])
+                    for row in conn.execute(
+                        "SELECT id FROM public_contribution_requests "
+                        f"WHERE id IN ({placeholders}) AND status = 'withdrawn'",
+                        contribution_ids,
+                    ).fetchall()
+                }
+            write_batch = [
+                item
+                for item in batch
+                if item.get("contribution_request_id") is None
+                or int(item["contribution_request_id"]) not in withdrawn_ids
+            ]
+            write_detail_ids = {int(item["qd_id"]) for item in write_batch}
+            write_matches = [
+                row
+                for row in matched_rows
+                if int(row.get("qd_id", -1)) in write_detail_ids
+            ]
+            write_clusters = []
+            for cluster in new_cluster_rows:
+                cluster_ids = []
+                for detail_id in cluster.get("ids") or []:
+                    try:
+                        cluster_ids.append(int(detail_id))
+                    except (TypeError, ValueError):
+                        continue
+                if not cluster_ids or all(detail_id in write_detail_ids for detail_id in cluster_ids):
+                    write_clusters.append(cluster)
+
+            if not write_batch:
+                conn.execute("COMMIT")
+                return {"ids": [], "resolutions": []}
+
+            apply_matched(conn, write_matches, job_position, answer_cache)
             new_qb_ids = insert_new_clusters(
-                conn, new_cluster_rows, job_position, answer_cache, owner_id=owner_id
+                conn, write_clusters, job_position, answer_cache, owner_id=owner_id
+            )
+            resolutions = _record_queue_resolutions(
+                conn,
+                write_batch,
+                matched_rows=write_matches,
+                new_cluster_rows=write_clusters,
+                new_qb_ids=new_qb_ids,
             )
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
             raise
-        return new_qb_ids
+        return {"ids": new_qb_ids, "resolutions": resolutions}
 
-    qb_ids = await _run_db(_atomic_write)
+    write_result = await _run_db(_atomic_write)
+    qb_ids = write_result["ids"]
+    await _refresh_completed_roots(
+        batch, job_fence=job_fence, scope_fence=scope_fence
+    )
 
     # Incremental FAISS cache maintenance: add newly created clusters to the
     # in-memory index via add_with_ids instead of full reload.
@@ -353,7 +653,11 @@ async def cluster_batch(
 
     del matched, new_clusters, saved_answers, existing_by_cat2
     if return_new_ids:
-        return {"count": len(qb_ids), "ids": list(qb_ids)}
+        return {
+            "count": len(qb_ids),
+            "ids": list(qb_ids),
+            "resolutions": write_result["resolutions"],
+        }
     return len(qb_ids)
 
 
@@ -407,18 +711,26 @@ async def force_cluster_all_pending(user_id: int = None) -> Dict:
         create_cluster_rebuild_job,
         mark_job_dispatched,
     )
+    from app.services.pipeline.queue import has_active_rootless_cluster_batch_job
 
     def _create():
         with get_db_connection() as conn:
+            # Serialize durable rebuild creation against incremental batch
+            # creation/dispatch. Once the rebuild row exists, batch scheduling
+            # sees it and leaves the shared rootless queue to this rebuild.
+            conn.execute("BEGIN IMMEDIATE")
             job_id, status = create_cluster_rebuild_job(conn, user_id=user_id)
+            batch_is_active = has_active_rootless_cluster_batch_job(conn)
             conn.commit()
-            return job_id, status
+            return job_id, status, batch_is_active
 
     # This transaction is intentionally small; keeping it on the request
     # thread also preserves the connection-local test/database context.
-    job_id, existing_status = _create()
+    job_id, existing_status, batch_is_active = _create()
     if existing_status in {"queued", "running"}:
         return {"status": existing_status, "job_id": job_id}
+    if batch_is_active:
+        return {"status": "pending", "job_id": job_id}
 
     try:
         from app.worker import enqueue_cluster_rebuild_job

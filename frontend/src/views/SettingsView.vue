@@ -4,7 +4,7 @@
       :display-user="displayUser"
       :practice-stats="practiceStats"
       :master-bank="masterBank"
-      :is-admin="displayUser?.is_admin"
+      :is-admin="Boolean(displayUser?.is_admin)"
       :active-season="activeSeason"
       :available-seasons="availableSeasons"
       :is-building="isBuilding"

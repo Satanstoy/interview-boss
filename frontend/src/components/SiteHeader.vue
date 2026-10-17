@@ -17,6 +17,10 @@ const props = defineProps({
     type: String,
     required: true
   },
+  showCurrentPageLabel: {
+    type: Boolean,
+    default: true
+  },
   activeSeason: {
     type: String,
     default: null
@@ -178,7 +182,7 @@ const createPlaylist = async () => {
     </AppTooltip>
 
     <div class="flex h-8 min-w-0 shrink-0 items-center gap-2">
-      <span class="hidden h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground sm:flex">
+      <span v-if="showCurrentPageLabel" class="hidden h-8 items-center truncate text-[13px] font-semibold leading-none text-foreground sm:flex">
         {{ activeTabLabel }}
       </span>
 
@@ -254,6 +258,7 @@ const createPlaylist = async () => {
       <!-- 全局上传任务进度胶囊 -->
       <div v-if="activeJobs.length > 0" class="relative">
         <button
+          data-testid="job-progress-toggle"
           @click="showJobPanel = !showJobPanel"
           class="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-muted/50 hover:bg-muted transition text-xs"
         >
@@ -268,6 +273,7 @@ const createPlaylist = async () => {
         <Transition name="fade-slide">
           <div
             v-if="showJobPanel"
+            data-testid="job-progress-panel"
             class="absolute right-0 top-full z-50 mt-1 w-[min(24rem,calc(100vw-1rem))] rounded-xl border border-border bg-card shadow-lg overflow-hidden"
           >
             <div class="text-xs font-semibold text-foreground p-3 pb-2">处理进度</div>

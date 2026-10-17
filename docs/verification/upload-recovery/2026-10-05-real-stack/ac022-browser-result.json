@@ -1,0 +1,40 @@
+{
+  "username": "ac022_1791211590314476",
+  "idempotency_key": "e112647c-2719-4104-9f34-5cdf558c9470",
+  "rejected_statuses": [
+    400,
+    400,
+    413
+  ],
+  "oversized_request_measurements": {
+    "limit_bytes": 10485760,
+    "file_bytes_observed": 10650039,
+    "file_bytes_buffered": 10387895,
+    "parser_spool_rolled": "true",
+    "parser_spool_closed": "true",
+    "endpoint_file_read_bytes": 0
+  },
+  "accepted_import_id": "2144b8e4-8b93-4ae9-850f-3e3ee57d6d03",
+  "accepted_created": true,
+  "replay_import_id": "2144b8e4-8b93-4ae9-850f-3e3ee57d6d03",
+  "replay_created": false,
+  "changed_hash_status": 409,
+  "submit_request_keys": [
+    "e112647c-2719-4104-9f34-5cdf558c9470",
+    "e112647c-2719-4104-9f34-5cdf558c9470",
+    "e112647c-2719-4104-9f34-5cdf558c9470",
+    "e112647c-2719-4104-9f34-5cdf558c9470",
+    "e112647c-2719-4104-9f34-5cdf558c9470",
+    "e112647c-2719-4104-9f34-5cdf558c9470"
+  ],
+  "by_key_lookup_statuses": [
+    404,
+    404,
+    404,
+    404,
+    404,
+    404,
+    404
+  ],
+  "draft_preserved_after_rejection": true
+}

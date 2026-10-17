@@ -3,9 +3,7 @@ BUG-003 + BUG-005: 孤岛修复端点测试
 测试 fix-lone-islands API 的合并逻辑
 """
 import json
-import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestFixLoneIslands:
@@ -125,4 +123,4 @@ class TestFixLoneIslands:
         assert row["frequency"] == 2
         assert "Agent 死循环如何恢复？" in originals
         assert "你的 Agent 死循环了怎么办？" in originals
-        assert test_db.execute("SELECT id FROM question_bank WHERE id = 2").fetchone() is None
+        assert test_db.execute("SELECT deleted_at FROM question_bank WHERE id = 2").fetchone()[0] is not None

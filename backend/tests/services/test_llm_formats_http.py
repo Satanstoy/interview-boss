@@ -11,16 +11,18 @@ import json
 import httpx
 import pytest
 from openai import AsyncOpenAI
+from tenacity import wait_none
 
 
 # ---------------- mock transport 基础设施 ----------------
 
-def _mock_client(handler, base_url="https://mock.example.com/v1"):
+def _mock_client(handler, base_url="https://mock.example.com/v1", *, max_retries=2):
     """构造带 MockTransport 的真实 OpenAI/Anthropic client（SDK 层真实发请求）。"""
     transport = httpx.MockTransport(handler)
     return AsyncOpenAI(
         api_key="test-key",
         base_url=base_url,
+        max_retries=max_retries,
         http_client=httpx.AsyncClient(transport=transport),
     ), base_url
 
@@ -31,6 +33,22 @@ def _body(request: httpx.Request) -> dict:
 
 def _ok(json_data: dict) -> httpx.Response:
     return httpx.Response(200, json=json_data, request=request_for_response())
+
+
+async def _async_chat_format(*args, **kwargs):
+    return "chat"
+
+
+def _import_llm_without_machine_upstream(monkeypatch):
+    """Load the module with a fake transport before its global client is built."""
+
+    import app.core.outbound_url as outbound_url
+
+    monkeypatch.setattr(outbound_url, "assert_safe_outbound_url_sync", lambda _url: None)
+    monkeypatch.setattr(outbound_url, "build_pinned_async_http_transport", lambda _url: None)
+    import app.services.llm as llm
+
+    return llm
 
 
 def request_for_response():
@@ -69,7 +87,7 @@ async def test_http_chat_full_params(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "test-model", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
     )
     from app.services.llm import raw_llm_call
 
@@ -94,6 +112,200 @@ async def test_http_chat_full_params(monkeypatch):
     assert captured["tool_choice"] == "auto"
 
 
+async def test_llm_rate_limit_is_capped_and_each_physical_call_is_ledgered(monkeypatch, test_db):
+    """AC-013：应按真实 HTTP provider 请求计数，SDK 与 Tenacity 不可叠加重试。"""
+
+    from openai import RateLimitError
+
+    attempts = 0
+    test_db.execute(
+        "INSERT OR IGNORE INTO users (id, username, password_hash, is_admin) "
+        "VALUES (101, 'retry-budget-owner', 'x', 0)"
+    )
+    test_db.execute(
+        "INSERT INTO upload_imports (id, requester_id, idempotency_key, request_hash, "
+        "target_intent, source_type, pipeline_version, policy_json, payload_json, status) "
+        "VALUES ('imp-retry-budget', 101, 'retry-budget', 'hash', 'private', "
+        "'interview', 'upload-pipeline-v1', '{}', '{}', 'running')"
+    )
+    test_db.commit()
+
+    def handler(request):
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "message": "rate limited",
+                    "type": "rate_limit_error",
+                    "code": "rate_limit_exceeded",
+                }
+            },
+            headers={"x-request-id": "upload-retry-test"},
+            request=request,
+        )
+
+    client, base_url = _mock_client(handler, max_retries=0)
+    llm = _import_llm_without_machine_upstream(monkeypatch)
+    monkeypatch.setattr(
+        llm,
+        "_resolve_client_and_model",
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
+    )
+    monkeypatch.setattr(llm, "resolve_api_format_async", _async_chat_format)
+    monkeypatch.setattr(llm, "_should_use_response_format", lambda _: False)
+    from app.services.upload_llm_accounting import upload_llm_context
+    from app.services.upload_credentials import ResolvedCredential
+
+    monkeypatch.setattr(
+        "app.services.upload_credentials.resolve_upload_credentials",
+        lambda **kwargs: ResolvedCredential(
+            scope="global",
+            payer_type="system",
+            payer_user_id=None,
+            model="test-model",
+            base_url=base_url,
+            provider="openai",
+            config_fingerprint="retry-budget-test",
+            api_key="test-key",
+        ),
+    )
+
+    call_without_wait = llm._call_llm_with_retry_messages.retry_with(
+        wait=wait_none(), reraise=True
+    )
+    with upload_llm_context(
+        root_import_id="imp-retry-budget",
+        stage="extract",
+        unit_key="document",
+        credential_scope="global",
+    ):
+        with pytest.raises(RateLimitError):
+            await call_without_wait(
+                [{"role": "user", "content": "retry boundary"}], user_id=1
+            )
+
+    assert attempts <= 3, "一次上传阶段的 429 物理 provider 请求总数不得超过 3"
+    ledger_rows = test_db.execute(
+        "SELECT status FROM upload_llm_calls WHERE root_import_id = ? "
+        "AND stage = 'extract' AND unit_key = 'document'",
+        ("imp-retry-budget",),
+    ).fetchall()
+    assert len(ledger_rows) == attempts == 3
+    assert {row["status"] for row in ledger_rows} == {"failed"}
+    await client.close()
+
+
+async def test_authentication_error_uses_one_physical_provider_call(monkeypatch):
+    """401/鉴权拒绝不能被 SDK 或外层重试再次发送。"""
+
+    from openai import AuthenticationError
+
+    attempts = 0
+
+    def handler(request):
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": "invalid api key",
+                    "type": "authentication_error",
+                    "code": "invalid_api_key",
+                }
+            },
+            headers={"x-request-id": "upload-auth-test"},
+            request=request,
+        )
+
+    client, base_url = _mock_client(handler, max_retries=0)
+    llm = _import_llm_without_machine_upstream(monkeypatch)
+    monkeypatch.setattr(
+        llm,
+        "_resolve_client_and_model",
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
+    )
+    monkeypatch.setattr(llm, "resolve_api_format_async", _async_chat_format)
+    monkeypatch.setattr(llm, "_should_use_response_format", lambda _: False)
+
+    call_without_wait = llm._call_llm_with_retry_messages.retry_with(
+        wait=wait_none(), reraise=True
+    )
+    with pytest.raises(AuthenticationError):
+        await call_without_wait([{"role": "user", "content": "auth boundary"}], user_id=1)
+
+    assert attempts == 1
+    await client.close()
+
+
+async def test_production_llm_clients_disable_sdk_owned_retries(monkeypatch):
+    """Upload accounting must see one ledger reservation per physical SDK request."""
+
+    from types import SimpleNamespace
+
+    llm = _import_llm_without_machine_upstream(monkeypatch)
+    from app.services.upload_llm_accounting import upload_llm_context
+
+    monkeypatch.setattr(
+        "app.services.upload_credentials.resolve_upload_credentials",
+        lambda **kwargs: SimpleNamespace(
+            api_key="test-key",
+            base_url="https://mock.example.com/v1",
+            timeout=5,
+            provider="openai" if kwargs["credential_scope"] == "user" else "anthropic",
+            api_format=None,
+            model="test-model",
+        ),
+    )
+    with upload_llm_context(
+        root_import_id="imp-retry-client-user",
+        stage="extract",
+        unit_key="document",
+        credential_scope="user",
+        user_id=101,
+    ):
+        user_client = llm.get_llm_client_for_user(101)[0]
+    with upload_llm_context(
+        root_import_id="imp-retry-client-global",
+        stage="cluster",
+        unit_key="question-batch",
+        credential_scope="global",
+    ):
+        global_client = llm.get_llm_client_for_user(101, llm_scope="global")[0]
+    try:
+        assert user_client.max_retries == 0
+        assert global_client.max_retries == 0
+    finally:
+        await user_client.close()
+        await global_client.close()
+
+
+def test_upload_retry_backoff_uses_contract_delays(monkeypatch):
+    from types import SimpleNamespace
+
+    llm = _import_llm_without_machine_upstream(monkeypatch)
+    from app.services.upload_llm_accounting import (
+        upload_llm_context,
+        upload_retry_budget_scope,
+    )
+
+    wait = llm._call_llm_with_retry_messages.retry.wait
+    with upload_llm_context(
+        root_import_id="imp-retry-delay",
+        stage="extract",
+        unit_key="document",
+        credential_scope="user",
+        user_id=101,
+    ):
+        with upload_retry_budget_scope() as budget:
+            budget.physical_attempts = 1
+            assert wait(SimpleNamespace(attempt_number=1)) == 30
+            budget.physical_attempts = 2
+            assert wait(SimpleNamespace(attempt_number=2)) == 60
+
+
 async def test_http_chat_tool_calls_response(monkeypatch):
     """chat：工具调用响应解析（tool_calls + finish_reason=tool_calls）"""
     def handler(request):
@@ -109,7 +321,7 @@ async def test_http_chat_tool_calls_response(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -152,7 +364,7 @@ async def test_http_chat_tool_calls_normalizes_prompt_cache_usage(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -192,7 +404,7 @@ async def test_http_chat_sends_prompt_cache_key_only_to_known_openai(monkeypatch
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -228,7 +440,7 @@ async def test_http_chat_does_not_send_prompt_cache_key_to_openai_looking_relay(
     )
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import llm_with_tools
 
@@ -257,7 +469,7 @@ async def test_http_chat_streaming(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.siliconflow.cn/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     from app.services.llm import stream_llm_messages
 
@@ -289,7 +501,7 @@ async def test_http_responses_full_params(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "test-model", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "test-model", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import _call_llm_with_retry
@@ -323,7 +535,7 @@ async def test_http_responses_tools_and_message_history(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import llm_with_tools
@@ -368,7 +580,7 @@ async def test_http_responses_streaming(monkeypatch):
     client, base_url = _mock_client(handler, "https://api.openai.com/v1")
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "m", 60, base_url, "openai"),
+        lambda user_id, llm_scope="user": (client, "m", 60, base_url, "openai"),
     )
     monkeypatch.setenv("LLM_API_FORMAT", "responses")
     from app.services.llm import stream_llm_messages
@@ -422,7 +634,7 @@ async def test_http_anthropic_full_params(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import _call_llm_with_retry
 
@@ -452,7 +664,7 @@ async def test_http_anthropic_messages_preserve_json_instruction_and_parameters(
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "claude-test", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import _call_llm_with_retry_messages
 
@@ -484,7 +696,7 @@ async def test_http_anthropic_tools(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import llm_with_tools
 
@@ -522,7 +734,7 @@ async def test_http_anthropic_tool_history_round_trip(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import llm_with_tools
 
@@ -583,7 +795,7 @@ async def test_http_anthropic_streaming(monkeypatch):
     client = _anthropic_client(handler)
     monkeypatch.setattr(
         "app.services.llm._resolve_client_and_model",
-        lambda user_id: (client, "c", 60, "https://api.anthropic.com", "anthropic"),
+        lambda user_id, llm_scope="user": (client, "c", 60, "https://api.anthropic.com", "anthropic"),
     )
     from app.services.llm import stream_llm_messages
 

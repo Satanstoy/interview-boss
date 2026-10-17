@@ -1,0 +1,88 @@
+{
+  "requests": [
+    {
+      "id": 1,
+      "source_id": 1,
+      "status": "published"
+    },
+    {
+      "id": 2,
+      "source_id": 1,
+      "status": "published"
+    }
+  ],
+  "items": [
+    {
+      "id": 1,
+      "request_id": 1,
+      "source_item_id": 1,
+      "public_detail_id": 2,
+      "status": "published",
+      "error_message": null
+    },
+    {
+      "id": 2,
+      "request_id": 2,
+      "source_item_id": 3,
+      "public_detail_id": 4,
+      "status": "published",
+      "error_message": null
+    }
+  ],
+  "public_interview_id": 2,
+  "public_url": "https://ac016.example/interview/shared",
+  "public_questions": [
+    "1. AC016 question A: how does a distributed lock prevent stale writes?",
+    "2. AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?"
+  ],
+  "public_detail_ids": [
+    2,
+    4
+  ],
+  "resolutions": [
+    {
+      "public_detail_id": 2,
+      "canonical_id": 1,
+      "question": "AC016 question A: how does a distributed lock prevent stale writes?",
+      "resolution_status": "created",
+      "source_count": 1
+    },
+    {
+      "public_detail_id": 4,
+      "canonical_id": 2,
+      "question": "AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?",
+      "resolution_status": "created",
+      "source_count": 1
+    }
+  ],
+  "private_interview_id": 1,
+  "private_owner_id": 2,
+  "private_questions": [
+    "AC016 question A: how does a distributed lock prevent stale writes?",
+    "AC016_FAIL_PUBLIC_B: how should a queue consumer enforce idempotency?"
+  ],
+  "second_request_queue": [
+    {
+      "id": 2,
+      "question_detail_id": 4,
+      "status": "done"
+    }
+  ],
+  "failure_boundary": {
+    "request_id": 2,
+    "request_status_before_retry": "failed",
+    "failed_item_id": 2,
+    "failed_source_item_id": 3,
+    "failed_public_detail_id": 4,
+    "failure_error_message": "AC016_PUBLIC_ITEM_FAILURE detail_id=4",
+    "b_resolution_exists_before_retry": false,
+    "b_canonical_exists_before_retry": false,
+    "public_interview_id": 2,
+    "public_questions_before_retry": [
+      "1. AC016 question A: how does a distributed lock prevent stale writes?"
+    ],
+    "published_a_item_id": 1,
+    "published_a_detail_id": 2,
+    "published_a_question_before_retry": "AC016 question A: how does a distributed lock prevent stale writes?"
+  }
+}

@@ -7,6 +7,60 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
+
+def _link_public_resolution(conn, detail_id):
+    from app.services.question_resolution import record_resolution
+
+    detail = conn.execute(
+        "SELECT question, cat1, cat2 FROM questions_detail WHERE id = ?", (detail_id,)
+    ).fetchone()
+    canonical_id = conn.execute(
+        "INSERT INTO question_bank (question, cat1, cat2, owner_id, status, frequency) "
+        "VALUES (?, ?, ?, NULL, 'approved', 1) RETURNING id",
+        (detail["question"], detail["cat1"] or "", detail["cat2"] or ""),
+    ).fetchone()["id"]
+    record_resolution(
+        conn,
+        detail_id=detail_id,
+        occurrence_scope="public",
+        occurrence_owner_id=None,
+        canonical_id=canonical_id,
+        canonical_scope="public",
+        status="created",
+        pipeline_version="upload-pipeline-v1",
+    )
+
+
+def test_cluster_answers_are_dispatched_immediately_and_leave_other_jobs_pending(test_db):
+    from types import SimpleNamespace
+    from app.worker_cluster_tasks import _schedule_cluster_answer_jobs
+    test_db.execute("INSERT INTO jobs (id, job_type, status) VALUES (7900, 'cluster_batch', 'running'), (7901, 'generate_answer', 'pending')")
+    test_db.execute("INSERT INTO question_bank (id, question, status) VALUES (7902, 'Python tuple 和 list 的区别', 'approved')")
+    test_db.commit()
+    with patch('app.worker_scheduled.enqueue_generate_answer_job', new_callable=AsyncMock, return_value=SimpleNamespace(job_id='immediate-answer')) as enqueue:
+        ids = asyncio.run(_schedule_cluster_answer_jobs(7900, [7902], owner_id=None, actor_id=1))
+    assert len(ids) == 1
+    enqueue.assert_awaited_once_with(ids[0])
+    assert test_db.execute('SELECT status FROM jobs WHERE id = ?', (ids[0],)).fetchone()[0] == 'queued'
+    assert test_db.execute('SELECT status FROM jobs WHERE id = 7901').fetchone()[0] == 'pending'
+
+
+def test_cluster_answer_enqueue_failure_keeps_durable_job_for_recovery(test_db):
+    from app.worker_cluster_tasks import _schedule_cluster_answer_jobs
+    test_db.execute("INSERT INTO jobs (id, job_type, status) VALUES (7910, 'cluster_batch', 'running')")
+    test_db.execute("INSERT INTO question_bank (id, question, status) VALUES (7912, 'Python 对象身份', 'approved')")
+    test_db.commit()
+    with patch('app.worker_scheduled.enqueue_generate_answer_job', new_callable=AsyncMock, side_effect=RuntimeError('Redis unavailable')) as enqueue:
+        ids = asyncio.run(_schedule_cluster_answer_jobs(7910, [7912], owner_id=None, actor_id=1))
+    enqueue.assert_awaited_once_with(ids[0])
+    assert test_db.execute('SELECT status FROM jobs WHERE id = ?', (ids[0],)).fetchone()[0] == 'pending'
+
 def test_enqueue_questions_uses_interview_id_and_is_idempotent(test_db):
     # The workspace .env points at a proxy endpoint that resolves to the
     # RFC-2544 fake-IP range.  This test does not exercise outbound calls; keep
@@ -106,8 +160,8 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
         "INSERT INTO users (id, username, password_hash) VALUES (7, 'submit-owner', 'hash')"
     )
     test_db.execute(
-        "INSERT INTO question_bank (question, cat2, owner_id, status, job_position) "
-        "VALUES ('公共代表题', '系统设计', NULL, 'approved', '后端开发')"
+        "INSERT INTO question_bank (id, question, cat2, owner_id, status, job_position) "
+        "VALUES (999, '公共代表题', '系统设计', NULL, 'approved', '后端开发')"
     )
     test_db.commit()
 
@@ -136,13 +190,22 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
 
     calls = []
 
-    async def _match(rows, existing, user_id=None):
+    async def _match(rows, existing, user_id=None, strict=True, llm_scope=None):
         calls.append(rows)
         if len(calls) == 1:
-            return {"matched": [], "unmatched": rows}
+            # 第一轮：个人题库无命中 → 全部 no_match，交给公共轮
+            return {
+                "results": [
+                    {"new_id": r["id"], "ordinal": r.get("ordinal", 0), "cat2": r.get("cat2", ""), "outcome": "no_match"}
+                    for r in rows
+                ]
+            }
+        # 第二轮：公共题库 → 第 0 行命中 999，第 1 行 no_match
         return {
-            "matched": [{"new_id": 0, "question_bank_id": 999}],
-            "unmatched": [rows[1]],
+            "results": [
+                {"new_id": 0, "ordinal": 0, "cat2": "系统设计", "outcome": "matched", "canonical_id": 999},
+                {"new_id": 1, "ordinal": 1, "cat2": "系统设计", "outcome": "no_match"},
+            ]
         }
 
     async def _run_db(func):
@@ -163,19 +226,16 @@ def test_personal_upload_does_not_queue_public_matches_or_sync_singletons(test_d
     }
 
     with (
-        patch("app.services.clustering.match_new_questions", new=AsyncMock(side_effect=_match)),
+        patch("app.services.clustering.match_outcomes", new=AsyncMock(side_effect=_match)),
         patch("app.db.connection.get_current_job_position", return_value="后端开发"),
         patch("app.db.connection.run_db", new=_run_db),
-        patch("app.services.pipeline.enqueue_questions") as mock_enqueue,
+        patch("app.services.pipeline.queue._run_cluster_batch_in_background", AsyncMock(return_value=False)),
     ):
         result = asyncio.run(match_and_persist_personal_node(state))
 
     interview_id = result["saved_interview_id"]
-    mock_enqueue.assert_called_once_with(
-        interview_id,
-        owner_id=7,
-        question_detail_ids=[2],
-    )
+    queued = test_db.execute("SELECT question_detail_id, owner_id, interview_id FROM analysis_queue").fetchall()
+    assert [tuple(row) for row in queued] == [(2, 7, interview_id)]
     assert test_db.execute(
         "SELECT COUNT(*) FROM question_bank WHERE owner_id = 7"
     ).fetchone()[0] == 0
@@ -484,6 +544,7 @@ def test_public_contribution_uses_snapshot_and_creates_separate_public_projectio
     ).fetchone()
     assert item_row["public_detail_id"] == queue_row["question_detail_id"]
 
+    _link_public_resolution(test_db, queue_row["question_detail_id"])
     test_db.execute(
         "UPDATE analysis_queue SET status = 'done' WHERE id = ?", (queue_row["id"],)
     )
@@ -602,7 +663,7 @@ def test_public_contribution_failed_queue_can_close_after_retry(test_db):
     test_db.commit()
 
     request = create_public_contribution_request(test_db, "interview", 930, 7)
-    approved = approve_public_contribution(test_db, request["id"], 1)
+    approve_public_contribution(test_db, request["id"], 1)
     queue_id = test_db.execute(
         "SELECT id FROM analysis_queue WHERE contribution_request_id = ?",
         (request["id"],),
@@ -613,7 +674,175 @@ def test_public_contribution_failed_queue_can_close_after_retry(test_db):
     ).fetchone()[0] == "failed"
 
     test_db.execute("UPDATE analysis_queue SET status = 'done' WHERE id = ?", (queue_id,))
+    question_detail_id = test_db.execute(
+        "SELECT question_detail_id FROM analysis_queue WHERE id = ?", (queue_id,)
+    ).fetchone()["question_detail_id"]
+    _link_public_resolution(test_db, question_detail_id)
     mark_public_contribution_queue_done(test_db, [queue_id])
     assert test_db.execute(
         "SELECT status FROM public_contribution_requests WHERE id = ?", (request["id"],)
     ).fetchone()[0] == "published"
+
+
+@pytest.mark.asyncio
+async def test_incremental_public_contribution_does_not_clean_existing_public_sources(
+    test_db, monkeypatch
+):
+    """AC-016: processing appended public items must preserve earlier URL contributions."""
+    source_url = "https://ac016.example/interview/shared"
+    question_a = "AC016 question A: existing public canonical"
+    question_b = "AC016 question B: appended public item"
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (71, ?, NULL, 'approved', '后端开发')",
+        (source_url,),
+    )
+    test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, url, question, cat1, cat2, "
+        "owner_id, status, job_position) VALUES "
+        "(711, 71, ?, ?, '后端', '系统设计', NULL, 'approved', '后端开发')",
+        (source_url, question_b),
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, sources, original_questions, "
+        "original_question_sources, owner_id, status, job_position) VALUES "
+        "(801, ?, 1, ?, ?, ?, NULL, 'approved', '后端开发')",
+        (
+            question_a,
+            '[{"url": "https://ac016.example/interview/shared"}]',
+            '["AC016 question A: existing public canonical"]',
+            '[{"question":"AC016 question A: existing public canonical",'
+            '"sources":[{"url":"https://ac016.example/interview/shared"}]}]',
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (801, ?)",
+        (source_url,),
+    )
+    ordinary_url = "https://ac016.example/interview/ordinary"
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (72, ?, NULL, 'approved', '后端开发')",
+        (ordinary_url,),
+    )
+    # A normal interview can coexist with a contributed interview at the same
+    # URL. Its ordinary cleanup must not erase the shared public projection.
+    test_db.execute(
+        "INSERT INTO interview (id, url, owner_id, status, job_position) "
+        "VALUES (73, ?, NULL, 'approved', '后端开发')",
+        (source_url,),
+    )
+    test_db.execute(
+        "INSERT INTO questions_detail (id, interview_id, url, question, cat1, cat2, "
+        "owner_id, status, job_position) VALUES "
+        "(712, 72, ?, 'ordinary public replacement', '后端', '系统设计', NULL, 'approved', '后端开发'), "
+        "(713, 73, ?, 'same URL ordinary replacement', '后端', '系统设计', NULL, 'approved', '后端开发')",
+        (ordinary_url, source_url),
+    )
+    test_db.execute(
+        "INSERT INTO question_bank (id, question, frequency, sources, original_questions, "
+        "original_question_sources, owner_id, status, job_position) VALUES "
+        "(802, 'ordinary old public canonical', 1, ?, ?, ?, NULL, 'approved', '后端开发')",
+        (
+            '[{"url": "https://ac016.example/interview/ordinary"}]',
+            '["ordinary old public canonical"]',
+            '[{"question":"ordinary old public canonical",'
+            '"sources":[{"url":"https://ac016.example/interview/ordinary"}]}]',
+        ),
+    )
+    test_db.execute(
+        "INSERT INTO question_sources (question_bank_id, url) VALUES (802, ?)",
+        (ordinary_url,),
+    )
+    test_db.commit()
+
+    batch = [
+        {
+            "queue_id": 9901,
+            "qd_id": 711,
+            "interview_id": 71,
+            "question": question_b,
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": source_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": 900,
+            "root_import_id": None,
+        },
+        {
+            "queue_id": 9902,
+            "qd_id": 712,
+            "interview_id": 72,
+            "question": "ordinary public replacement",
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": ordinary_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": None,
+            "root_import_id": None,
+        },
+        {
+            "queue_id": 9903,
+            "qd_id": 713,
+            "interview_id": 73,
+            "question": "same URL ordinary replacement",
+            "cat1": "后端",
+            "cat2": "系统设计",
+            "tags": "",
+            "diff_tag": "L2",
+            "url": source_url,
+            "company": "",
+            "round": "",
+            "job_position": "后端开发",
+            "owner_id": None,
+            "contribution_request_id": None,
+            "root_import_id": None,
+        },
+    ]
+
+    async def _cluster_new_item(_rows, _existing, user_id=None):
+        assert user_id is None
+        return {"matched_to_existing": [], "new_clusters": []}
+
+    monkeypatch.setattr(
+        "app.services.pipeline.batch.process_incremental_batch",
+        AsyncMock(side_effect=_cluster_new_item),
+    )
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.pipeline.batch.get_index_manager",
+        lambda: SimpleNamespace(
+            invalidate=lambda *_args: None,
+            get_all_by_cat2=lambda *_args: {},
+        ),
+    )
+
+    from app.services.pipeline.batch import cluster_batch
+
+    await cluster_batch(batch, user_id=1)
+
+    canonical = test_db.execute(
+        "SELECT deleted_at, frequency FROM question_bank WHERE id = 801"
+    ).fetchone()
+    source = test_db.execute(
+        "SELECT deleted_at FROM question_sources WHERE question_bank_id = 801 AND url = ?",
+        (source_url,),
+    ).fetchone()
+    ordinary_canonical = test_db.execute(
+        "SELECT deleted_at FROM question_bank WHERE id = 802"
+    ).fetchone()
+    assert canonical["deleted_at"] is None
+    assert canonical["frequency"] == 1
+    assert source["deleted_at"] is None
+    assert ordinary_canonical["deleted_at"] is not None

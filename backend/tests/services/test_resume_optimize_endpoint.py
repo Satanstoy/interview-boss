@@ -1,9 +1,17 @@
 """TDD 测试 — 简历优化 SSE 端点"""
+import pytest
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """这些用例会触达数据库连接，必须落在内存测试库。"""
+
+    return app_db_isolation
 
 
 class TestResumeOptimizeEndpoint:

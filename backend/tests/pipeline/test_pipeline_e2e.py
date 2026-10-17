@@ -129,6 +129,7 @@ def create_test_db():
             contribution_request_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
+            locked_until TEXT,
             UNIQUE(question_detail_id),
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
@@ -249,7 +250,7 @@ def _make_interview(
 
 
 def _mock_tag_batch(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     results = []
     for q in questions:

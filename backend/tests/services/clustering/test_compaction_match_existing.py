@@ -7,8 +7,6 @@
 3. 未匹配的题走原有互相比流程
 """
 import json
-import sqlite3
-import asyncio
 from unittest.mock import patch, AsyncMock, Mock
 
 import pytest
@@ -104,7 +102,6 @@ class TestMatchSingletonsToExisting:
 
         from app.services.pipeline.compact import (
             _match_singletons_to_existing,
-            _load_existing_clusters_for_compact,
         )
 
         singletons = [
@@ -147,11 +144,11 @@ class TestMatchSingletonsToExisting:
         # id=12 没有匹配（C1 无 existing clusters）
         assert 12 not in matched_ids
 
-        # 验证 DB：id=10 被删除
+        # 保留规范题行供历史引用，当前题库仅软删除。
         row = test_db.execute(
             "SELECT * FROM question_bank WHERE id = 10"
         ).fetchone()
-        assert row is None
+        assert row is not None and row['deleted_at'] is not None
 
         # 验证 DB：id=1 被正确更新（frequency 增加，sources 合并）
         row = test_db.execute(
@@ -401,5 +398,3 @@ class TestCompactSingletonsEndToEnd:
 
         # 第一次调用应该包含"已有标准题库"（匹配已有聚类）
         assert any('已有标准题库' in p for p in call_prompts)
-
-

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import socket
 from urllib.parse import urlsplit
+
+import httpcore
+import httpx
 
 
 class OutboundURLBlocked(ValueError):
@@ -96,15 +100,152 @@ def _resolved_addresses(host: str, port: int | None) -> set[str]:
     return addresses
 
 
-def _check_resolved(url: str) -> str:
+def _is_disposable_e2e_stub(parsed) -> bool:
+    """Allow only the named local test provider in the disposable E2E stack."""
+    return (
+        os.environ.get("ENV", "").strip().lower() == "test"
+        and os.environ.get("E2E_STUB_PROVIDER", "") == "1"
+        and (parsed.hostname or "").rstrip(".").lower() == "llm-stub"
+    )
+
+
+def _resolve_and_validate(url: str) -> tuple[object, tuple[str, ...]]:
     parsed = _split_url(url)
+    if _is_disposable_e2e_stub(parsed):
+        return parsed, ()
     try:
-        addresses = _resolved_addresses(parsed.hostname, parsed.port)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = _resolved_addresses(parsed.hostname, port)
     except OSError as exc:
         raise OutboundURLBlocked("上游主机无法解析") from exc
     if not addresses or any(_blocked_ip(address) for address in addresses):
         raise OutboundURLBlocked("上游主机解析到了内网或保留 IP")
+    return parsed, tuple(sorted(addresses))
+
+
+def _check_resolved(url: str) -> str:
+    _resolve_and_validate(url)
     return url.strip()
+
+
+class _PinnedNetworkBackend(httpcore.NetworkBackend):
+    """Synchronous network backend restricted to pre-validated addresses."""
+
+    def __init__(self, addresses: tuple[str, ...]):
+        self._addresses = addresses
+        self._backend = httpcore.SyncBackend()
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:  # pragma: no cover - network-specific fallback
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OSError(f"no validated address available for {host}")
+
+    def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options=None):
+        raise OSError("Unix sockets are not valid outbound HTTP targets")
+
+    def sleep(self, seconds: float) -> None:
+        return self._backend.sleep(seconds)
+
+
+class _PinnedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
+    """Connect to the addresses checked before the request was created.
+
+    The HTTP request keeps the original hostname, so HTTP Host and HTTPS SNI
+    remain correct while the TCP dial cannot be redirected by a second DNS
+    answer. Each new connection tries only the already-validated addresses.
+    """
+
+    def __init__(self, addresses: tuple[str, ...]):
+        self._addresses = addresses
+        self._backend = httpcore.AnyIOBackend()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ):
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:  # pragma: no cover - network-specific fallback
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OSError(f"no validated address available for {host}")
+
+    async def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options=None):
+        raise OSError("Unix sockets are not valid outbound HTTP targets")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
+
+
+class PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
+    """httpx transport whose DNS result is pinned for the client lifetime."""
+
+    def __init__(self, addresses: tuple[str, ...]):
+        super().__init__(trust_env=False)
+        self._pool._network_backend = _PinnedAsyncNetworkBackend(addresses)
+
+
+class PinnedHTTPTransport(httpx.HTTPTransport):
+    """Synchronous httpx transport whose DNS result is pinned."""
+
+    def __init__(self, addresses: tuple[str, ...]):
+        super().__init__(trust_env=False)
+        self._pool._network_backend = _PinnedNetworkBackend(addresses)
+
+
+def build_pinned_async_http_transport(url: str) -> PinnedAsyncHTTPTransport | None:
+    """Build an async transport that dials only the validated addresses."""
+    _parsed, addresses = _resolve_and_validate(url)
+    if not addresses:
+        # The disposable E2E provider is a Docker DNS name. It is explicitly
+        # allowed only in test mode and must be resolved by the container DNS.
+        return None
+    return PinnedAsyncHTTPTransport(addresses)
+
+
+def build_pinned_http_transport(url: str) -> PinnedHTTPTransport | None:
+    """Build a sync transport that dials only the validated addresses."""
+    _parsed, addresses = _resolve_and_validate(url)
+    if not addresses:
+        return None
+    return PinnedHTTPTransport(addresses)
+
+
+async def build_pinned_http_transport_async(url: str) -> PinnedAsyncHTTPTransport | None:
+    """Async wrapper so DNS resolution never blocks the event loop."""
+    return await asyncio.to_thread(build_pinned_async_http_transport, url)
 
 
 async def assert_safe_outbound_url(url: str, *, resolve: bool = True) -> str:

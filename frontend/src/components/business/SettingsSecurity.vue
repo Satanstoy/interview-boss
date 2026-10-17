@@ -161,7 +161,6 @@ onUnmounted(() => {
   <div class="w-full space-y-6">
     <div>
       <h3 class="text-lg font-semibold text-foreground">账户安全</h3>
-      <p class="text-sm text-muted-foreground mt-1">管理你的账户安全设置</p>
     </div>
 
     <!-- Card 1: 修改密码 -->

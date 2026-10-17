@@ -10,29 +10,16 @@ class TestBugTaxonomyConfirm:
     """BUG-001: UPSERT 语句与唯一索引不匹配"""
 
     @pytest.mark.asyncio
-    async def test_save_taxonomy_for_position_with_composite_index(self):
-        """save_taxonomy_for_position 应正确处理复合唯一索引（owner_id 不为 NULL）"""
+    async def test_save_taxonomy_for_position_rejects_user_owned_taxonomy(self):
+        """旧 helper 不得绕过系统统一维护的 taxonomy 写入策略。"""
         # Arrange
         from app.db.connection import save_taxonomy_for_position
 
         position = "测试岗位"
         categories = [{"cat1": "A.测试", "children": ["A1.子类"]}]
 
-        # Mock 数据库连接
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-
-        with patch('app.db.connection.get_db_connection', return_value=mock_conn):
-            # Act - 使用 owner_id 不为 NULL
+        with pytest.raises(ValueError, match="系统维护"):
             save_taxonomy_for_position(position, categories, source='user', owner_id=1)
-
-            # Assert - 验证 SQL 包含复合索引的 ON CONFLICT
-            call_args = mock_conn.execute.call_args
-            sql = call_args[0][0]
-            assert "ON CONFLICT(position_name, source, owner_id)" in sql
-            assert "source" in sql
-            assert "owner_id" in sql
 
     @pytest.mark.asyncio
     async def test_save_taxonomy_for_position_null_owner_id(self):
@@ -64,25 +51,14 @@ class TestBugTaxonomyConfirm:
 
     @pytest.mark.asyncio
     async def test_confirm_taxonomy_endpoint_works(self):
-        """confirm_taxonomy 端点应正常工作"""
+        """已停用的个人 taxonomy endpoint 应返回明确的 410。"""
         # Arrange
         from app.routers.profile_pkg.taxonomy import confirm_taxonomy
+        from fastapi import HTTPException
 
-        # Mock 依赖
         mock_user = {"id": 1, "is_admin": True}
+        req = {"categories": [{"cat1": "A.测试", "children": ["A1.子类"]}]}
 
-        with patch('app.routers.profile_pkg.taxonomy.get_current_user', return_value=mock_user):
-            with patch('app.routers.profile_pkg.taxonomy.run_db') as mock_run_db:
-                # Mock get_user_job_position
-                mock_run_db.side_effect = [
-                    (None, "测试岗位"),  # get_user_job_position 返回值
-                    None  # save_taxonomy_suggestion 返回值
-                ]
-
-                # Act
-                req = {"categories": [{"cat1": "A.测试", "children": ["A1.子类"]}]}
-                result = await confirm_taxonomy(req, user=mock_user)
-
-                # Assert
-                assert result["status"] == "success"
-                assert result["position"] == "测试岗位"
+        with pytest.raises(HTTPException) as exc_info:
+            await confirm_taxonomy(req, user=mock_user)
+        assert exc_info.value.status_code == 410

@@ -7,6 +7,13 @@ import pytest
 from app.agents.chat.pipeline import _step_classify
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
+
 @pytest.mark.asyncio
 async def test_classifier_semantic_signals_are_available_to_turn_planner():
     state = {

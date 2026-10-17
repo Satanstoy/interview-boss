@@ -50,15 +50,19 @@ const sections = computed(() => {
 // 支持 /settings?section=ai 直达对应配置区（模型守卫引导入口）
 const sectionFromQuery = (value) => {
   const known = ['profile', 'interview', 'ai', 'search', 'mcp', 'security', 'admin']
-  return known.includes(value) ? value : 'profile'
+  if (!known.includes(value)) return 'profile'
+  if (value === 'admin' && !props.isAdmin) return 'profile'
+  return value
 }
-watch(() => route.query.section, (value) => {
+watch([() => route.query.section, () => props.isAdmin], ([value]) => {
   if (value) activeSection.value = sectionFromQuery(value)
+  else if (!props.isAdmin && activeSection.value === 'admin') activeSection.value = 'profile'
 }, { immediate: true })
 
-const currentSectionLabel = computed(
-  () => sections.value.find(s => s.id === activeSection.value)?.label || '设置',
-)
+const adminTabFromQuery = computed(() => {
+  return typeof route.query.adminTab === 'string' ? route.query.adminTab : 'taxonomy'
+})
+
 </script>
 
 <template>
@@ -109,9 +113,6 @@ const currentSectionLabel = computed(
           <PanelLeft :size="14" />
           <span>设置菜单</span>
         </Button>
-        <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {{ currentSectionLabel }}
-        </span>
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
@@ -160,6 +161,7 @@ const currentSectionLabel = computed(
             <SettingsAdmin
               :is-building="isBuilding"
               :is-admin="isAdmin"
+              :initial-tab="adminTabFromQuery"
               @build-master-bank="emit('build-master-bank')"
               @taxonomy-updated="emit('profile-updated')"
             />

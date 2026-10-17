@@ -33,6 +33,37 @@ const runItemPayload = {
   artifacts: [],
 };
 
+// 结构化证据视图（EvidenceSchema），/runs/:id/items/:itemId/evidence 返回该形状
+const evidencePayload = {
+  schema_version: '1.0',
+  run: { id: 12, status: 'completed', quality_status: 'failed', target_type: 'interview', target_release_key: 'interview-agent@1.0', evaluation_release_key: 'interview-eval@1.0' },
+  item: { id: 102, case_id: 302, case_key: 'tool_timing', score: 0.45, primary_failure_reason: '工具时机不符合' },
+  case: {
+    case_key: 'tool_timing',
+    scenario_key: 'tool_timing',
+    input_digest: 'input-digest',
+    candidate_input: { opening: '你好' },
+    admin_harness_context: { max_turns: 8 },
+    contract: { hard_assertions: [{ id: 'tool_calls_valid' }] },
+  },
+  execution: { status: 'failed', contract_status: 'valid', hard_gate_status: 'failed', judge_status: 'succeeded', quality_status: 'failed' },
+  observation: {
+    status: 'succeeded',
+    hard_assertions: [{ id: 'tool_calls_valid', passed: false, evidence: '工具时机不符合' }],
+    contract_violations: ['tool_calls_valid'],
+    target_payload: {
+      target_type: 'interview',
+      payload_schema_version: '1.0',
+      output: { conversation_id: 'c-1', turns: [{ turn: 1, assistant: '请介绍一下你的项目。' }] },
+      trace: { tool_calls: [] },
+      metrics: { tool_metrics: { call_count: 1, failed_call_count: 1 } },
+    },
+  },
+  scoring: { score: 0.45, deterministic_score: null, judge_score: 0.5, judge_status: 'succeeded', details: { score: 0.45, judge_score: 0.5 } },
+  attempts: [{ id: 401, attempt_index: 1, status: 'succeeded', raw_observation: { observation: { status: 'succeeded' } } }],
+  artifacts: [{ id: 501, artifact_type: 'transcript', storage_path: 'evals/12/transcript.json', digest: 'artifact-digest' }],
+};
+
 async function mockAuth(page) {
   await page.route('**/api/auth/**', route => {
     if (route.request().url().includes('/refresh')) {
@@ -58,6 +89,7 @@ test.describe('评测工作台布局', () => {
     await mockAuth(page);
     await page.route('**/api/admin/evals/runs/12', route => route.fulfill({ json: runDetailPayload }));
     await page.route('**/api/admin/evals/runs/12/items/**', route => route.fulfill({ json: runItemPayload }));
+    await page.route('**/api/admin/evals/runs/12/items/*/evidence', route => route.fulfill({ json: evidencePayload }));
     await page.route('**/api/admin/evals/runs/12/events', route => route.fulfill({ json: {} }));
   });
 

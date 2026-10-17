@@ -1,6 +1,6 @@
 #!/bin/bash
 # InterviewBoss Docker 部署脚本（多项目安全版）
-# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|eval-worker-install|eval-worker-status|test|check|backup|restore|cleanup|storage-check|storage-maintenance|diagnose|mirrors]
+# 用法：./docker-deploy.sh [build|up|down|restart|status|logs|update|frontend|worker-up|worker-down|worker-restart|worker-logs|eval-worker-install|eval-worker-status|test|check|backup|restore|cleanup|storage-check|storage-maintenance|storage-self-check|diagnose|mirrors]
 # 不使用全局 prune（docker system prune / container prune / network prune / image prune），
 # 只清理本项目资源和 BuildKit 缓存，不影响其他 Docker 项目。
 
@@ -17,16 +17,39 @@ export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 export BUILDKIT_PROGRESS="${BUILDKIT_PROGRESS:-plain}"
 
-# 磁盘保护阈值（单位：MB）。构建前硬性保留 6GB；构建后尽量恢复到 8GB。
+# 磁盘保护阈值（单位：MB）。构建前硬性保留 4GB；定时维护至少保留 1GB；构建后仍需保持 4GB。
+# 2026-09-28：硬阈值与目标统一为 4096（原 6144 / 8192）；可用同名环境变量覆盖。
 # 构建后低于硬阈值时返回失败，避免以“空间不足但仍成功”的状态继续部署。
-DEPLOY_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-6144}"
-DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-8192}"
+DEPLOY_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-4096}"
+DEPLOY_MAINTENANCE_MIN_FREE_MB="${DEPLOY_MAINTENANCE_MIN_FREE_MB:-1024}"
+DEPLOY_TARGET_FREE_MB="${DEPLOY_TARGET_FREE_MB:-4096}"
 BUILDKIT_MAX_USED_SPACE="${BUILDKIT_MAX_USED_SPACE:-1536MB}"
-BUILDKIT_CACHE_MAX_AGE="${BUILDKIT_CACHE_MAX_AGE:-168h}"
+# buildx prune 的 --max-used-space 是修剪目标而非精确上限：收敛后会残留少量
+# 记录（2026-09-28 实测 cap 1536MB 收敛到 1547MB），故校验留显式容差。
+BUILDKIT_CACHE_SLACK_MB="${BUILDKIT_CACHE_SLACK_MB:-128}"
 BUILDKIT_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 BUILDKIT_BUILDER_DRIVER="${BUILDKIT_BUILDER_DRIVER:-docker-container}"
+
+# 必须始终保留的生产镜像标签：删掉就等于切断回滚后路。
+# 悬空镜像清理循环里也按镜像 ID 保护它们（容器切到新镜像后旧镜像会短暂
+# 落进 --filter dangling=true，仅凭"是否被容器引用"判断会误删）。
+PROTECTED_IMAGE_TAGS="interview-boss-app:local interview-boss-app:previous interview-boss-nginx:local interview-boss-nginx:previous interview-boss-oauth-gateway:latest interview-boss-oauth-gateway:previous"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 BACKUP_MIN_KEEP_FILES="${BACKUP_MIN_KEEP_FILES:-3}"
+BACKUP_MAX_BYTES="${BACKUP_MAX_BYTES:-10737418240}"
+MIGRATION_BACKUP_MAX_BYTES="${MIGRATION_BACKUP_MAX_BYTES:-10737418240}"
+LOCAL_BACKUP_MAX_BYTES="${LOCAL_BACKUP_MAX_BYTES:-10737418240}"
+EVALUATION_MAX_BYTES="${EVALUATION_MAX_BYTES:-10737418240}"
+PROJECT_ARCHIVE_MAX_BYTES="${PROJECT_ARCHIVE_MAX_BYTES:-21474836480}"
+DATA_HARD_MIN_FREE_MB="${DATA_HARD_MIN_FREE_MB:-}"
+DATA_WARN_FREE_MB="${DATA_WARN_FREE_MB:-}"
+STORAGE_METRICS_FILE="${STORAGE_METRICS_FILE:-/data/interview-boss/storage.prom}"
+APP_RUNTIME_UID="${APP_RUNTIME_UID:-1000}"
+APP_RUNTIME_GID="${APP_RUNTIME_GID:-1000}"
+if [ "$APP_RUNTIME_UID" != "1000" ] || [ "$APP_RUNTIME_GID" != "1000" ]; then
+  echo "[ERROR] APP_RUNTIME_UID/GID 必须匹配镜像 appuser 1000:1000" >&2
+  exit 1
+fi
 
 # 镜像源策略：
 # - 默认复用缓存/稳定默认源，保持 Docker layer cache key 稳定。
@@ -65,8 +88,10 @@ ensure_runtime_secrets() {
   chmod 600 "$redis_secret_file"
 
   local oauth_secret=""
+  local jwt_secret=""
   if [ -f "$env_file" ]; then
     oauth_secret=$(awk -F= '$1 == "OAUTH_SECRET_KEY" { value=$2; sub(/^[[:space:]]+/, "", value); gsub(/^"|"$/, "", value); print value; exit }' "$env_file")
+    jwt_secret=$(awk -F= '$1 == "JWT_SECRET" { value=$2; sub(/^[[:space:]]+/, "", value); gsub(/^"|"$/, "", value); print value; exit }' "$env_file")
     chmod 600 "$env_file"
   fi
   if [ -f "$env_file" ] && [ -z "$oauth_secret" ]; then
@@ -80,6 +105,67 @@ ensure_runtime_secrets() {
     chmod 600 "$env_file"
     log "已生成 OAuth 签名密钥并写入 backend/.env"
   fi
+  if [ -f "$env_file" ] && [ -z "$jwt_secret" ]; then
+    umask 077
+    if command -v openssl >/dev/null 2>&1; then
+      generated_secret=$(openssl rand -hex 32)
+    else
+      generated_secret=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+    fi
+    printf '\nJWT_SECRET=%s\n' "$generated_secret" >> "$env_file"
+    chmod 600 "$env_file"
+    log "已生成 JWT 签名密钥并写入 backend/.env（仅首次部署）"
+  fi
+}
+
+ensure_runtime_data_dir() {
+  local data_dir="$PROJECT_DIR/backend/data"
+  local current_owner db_path write_probe
+
+  mkdir -p "$data_dir"
+  current_owner=$(stat -c '%u:%g' "$data_dir" 2>/dev/null || true)
+  db_path="$data_dir/interview-boss.db"
+  if [ "$current_owner" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ] || {
+    [ -f "$db_path" ] && [ "$(stat -c '%u:%g' "$db_path" 2>/dev/null || true)" != "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" ]
+  }; then
+    if [ "$(id -u)" -eq 0 ]; then
+      chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo chown -R "${APP_RUNTIME_UID}:${APP_RUNTIME_GID}" "$data_dir"
+    else
+      err "运行时数据目录不可由 appuser 写入: $data_dir（需要 UID:GID ${APP_RUNTIME_UID}:${APP_RUNTIME_GID}）"
+      return 1
+    fi
+  fi
+
+  run_as_runtime_user() {
+    if [ "$(id -u)" -eq "$APP_RUNTIME_UID" ]; then
+      "$@"
+    elif [ "$(id -u)" -eq 0 ] && command -v setpriv >/dev/null 2>&1; then
+      setpriv --reuid="${APP_RUNTIME_UID}" --regid="${APP_RUNTIME_GID}" --clear-groups -- "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo -u "#${APP_RUNTIME_UID}" -g "#${APP_RUNTIME_GID}" -- "$@"
+    else
+      return 127
+    fi
+  }
+
+  write_probe="$data_dir/.write-test.$$"
+  rm -f "$write_probe" 2>/dev/null || true
+  run_as_runtime_user touch "$write_probe" 2>/dev/null || true
+  if [ ! -e "$write_probe" ]; then
+    err "运行时数据目录写入检查失败: $data_dir（appuser 需要可写）"
+    return 1
+  fi
+  rm -f "$write_probe"
+
+  if [ -f "$db_path" ] && {
+    ! run_as_runtime_user test -r "$db_path" || ! run_as_runtime_user test -w "$db_path"
+  }; then
+    err "SQLite 数据库文件不可由 appuser 读写: $db_path"
+    return 1
+  fi
+  log "运行时数据目录权限通过: $data_dir (${APP_RUNTIME_UID}:${APP_RUNTIME_GID})"
 }
 
 # ── 检查 Docker 权限 ──
@@ -165,7 +251,13 @@ rollback_backend() {
   if [ -n "$OLD_BACKEND_IMAGE" ]; then
     warn "Rolling back backend to previous image..."
     docker tag "$OLD_BACKEND_IMAGE" interview-boss-app:rollback 2>/dev/null || true
-    docker compose up -d --no-deps --wait --wait-timeout 30 backend 2>/dev/null || true
+    # compose 固定按 interview-boss-app:local 启动（docker-compose.yml:29），
+    # 只打 :rollback 标签不会生效，必须把上一版镜像恢复到 :local 再 up，回滚才真正落地。
+    if docker tag "$OLD_BACKEND_IMAGE" interview-boss-app:local 2>/dev/null; then
+      docker compose up -d --no-deps --wait --wait-timeout 30 backend 2>/dev/null || true
+    else
+      err "回滚失败：无法把 $OLD_BACKEND_IMAGE 恢复为 interview-boss-app:local"
+    fi
     err "Rollback attempted. Check status with: $0 status"
   else
     err "No previous image available for rollback"
@@ -184,10 +276,136 @@ show_disk_usage() {
   docker system df 2>/dev/null || true
 }
 
+# 读取 buildx builder 的 driver 名。
+# 2026-09-28 实测：docker buildx inspect 的 stdout 接管道时约 40% 概率返回空
+# （30 次复现 12 次），重定向到文件 30/30 稳定。磁盘保护依赖读取结果：读空会
+# 静默跳过缓存清理，进而让构建后检查拒绝部署，因此必须先落盘再解析，
+# 不要改回管道写法。
+_buildx_driver() {
+  local builder="$1"
+  local probe_file driver attempt
+  probe_file=$(mktemp 2>/dev/null) || return 1
+  for attempt in 1 2; do
+    if docker buildx inspect "$builder" >"$probe_file" 2>/dev/null; then
+      driver=$(awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}' "$probe_file")
+      if [ -n "$driver" ]; then
+        rm -f "$probe_file"
+        printf '%s\n' "$driver"
+        return 0
+      fi
+    fi
+  done
+  rm -f "$probe_file"
+  return 1
+}
+
+# ── BuildKit 缓存用量读取与收敛 ──────────────────────────────────────
+# 2026-09-28 加固。设计不变量：
+#   1. 触发条件：缓存超 BUILDKIT_MAX_USED_SPACE，或根分区低于 DEPLOY_TARGET_FREE_MB
+#   2. 收敛不带年龄过滤 —— 旧 light 模式的 --filter until=168h 对刚用过的缓存
+#      永远清 0（实测输出 Total: 0B 而缓存 3.0GB），是缓存涨到 2x cap 的根因
+#   3. 读不到 / 清不动 / 校验不过 一律返回非 0，绝不静默跳过
+
+# docker 尺寸字符串（1.5GB / 1536MB / 500.5kB / 1.2GiB）→ 整数 MB
+_size_to_mb() {
+  local raw="$1" num unit
+  num=$(printf '%s' "$raw" | sed -n 's/^\([0-9][0-9.]*\)\([A-Za-z]*\)$/\1/p')
+  unit=$(printf '%s' "$raw" | sed -n 's/^\([0-9][0-9.]*\)\([A-Za-z]*\)$/\2/p')
+  [ -n "$num" ] || return 1
+  case "$unit" in
+    B)          awk -v n="$num" 'BEGIN{printf "%d", n/1048576}' ;;
+    kB|KB|KiB)  awk -v n="$num" 'BEGIN{printf "%d", n/1024}' ;;
+    MB|MiB|"")  awk -v n="$num" 'BEGIN{printf "%d", n}' ;;
+    GB|GiB)     awk -v n="$num" 'BEGIN{printf "%d", n*1024}' ;;
+    *) return 1 ;;
+  esac
+}
+
+_buildkit_cap_mb() { _size_to_mb "${BUILDKIT_MAX_USED_SPACE}"; }
+
+# 从 docker buildx du 输出取字段（Total / Reclaimable）。
+# 与 _buildx_driver 同理：输出落盘再解析；读不到一律 return 1 —— 绝不回退成 0，
+# 否则"读不到"会被当成"没缓存"，正是本次故障的根因。
+_buildx_du_field() {
+  local field="$1" probe_file raw attempt
+  probe_file=$(mktemp 2>/dev/null) || return 1
+  for attempt in 1 2; do
+    if docker buildx du --builder "$BUILDKIT_BUILDER" >"$probe_file" 2>/dev/null; then
+      # 兼容 "Total:\t\t1.2GB" 与 "Total: 1.2GB"（tab 数量不固定）
+      raw=$(sed -n "s/^${field}:[[:space:]]*\([^[:space:]]*\).*/\1/p" "$probe_file" | head -n 1)
+      if [ -n "$raw" ]; then
+        rm -f "$probe_file"
+        _size_to_mb "$raw" && return 0
+      fi
+    fi
+  done
+  rm -f "$probe_file"
+  return 1
+}
+
+buildkit_cache_total_mb()       { _buildx_du_field "Total"; }
+buildkit_cache_reclaimable_mb() { _buildx_du_field "Reclaimable"; }
+
+# 读回真实状态并断言。返回 0 = 达标；非 0 = 不达标（已发告警）。
+verify_disk_state() {
+  local stage="$1" free_mb cache_mb cap_mb rc=0
+  free_mb=$(root_free_mb)
+  cap_mb=$(_buildkit_cap_mb) || cap_mb=0
+  if ! cache_mb=$(buildkit_cache_total_mb); then
+    cache_mb=""
+  fi
+
+  if [ -z "$cache_mb" ]; then
+    err "[$stage] 无法读取 BuildKit 缓存用量，状态不可校验"
+    storage_emit_alert "error" "[$stage] BuildKit 缓存用量不可读"
+    rc=1
+  elif [ "$cap_mb" -gt 0 ] && [ "$cache_mb" -gt "$((cap_mb + BUILDKIT_CACHE_SLACK_MB))" ]; then
+    err "[$stage] BuildKit 缓存 ${cache_mb}MB 超上限 ${cap_mb}MB（容差 ${BUILDKIT_CACHE_SLACK_MB}MB）"
+    storage_emit_alert "error" "[$stage] BuildKit 缓存 ${cache_mb}MB 超上限 ${cap_mb}MB"
+    rc=1
+  fi
+
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    err "[$stage] 根分区可用 ${free_mb}MB 低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB"
+    storage_emit_alert "critical" "[$stage] 根分区可用 ${free_mb}MB 低于硬阈值"
+    rc=1
+  elif [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    warn "[$stage] 根分区可用 ${free_mb}MB 低于目标 ${DEPLOY_TARGET_FREE_MB}MB"
+  fi
+
+  log "[$stage] 磁盘状态: 可用 ${free_mb}MB / BuildKit 缓存 ${cache_mb:-未知}MB"
+  write_build_metrics || true
+  return "$rc"
+}
+
+# 把根盘与 BuildKit 缓存写进 Prometheus textfile（与 storage.prom 同目录）。
+write_build_metrics() {
+  local dir target tmp free_mb cache_mb cap_mb
+  dir="$(dirname "${STORAGE_METRICS_FILE:-/data/interview-boss/storage.prom}")"
+  target="$dir/interview-boss-build.prom"
+  mkdir -p "$dir" || return 1
+  free_mb=$(root_free_mb)
+  cache_mb=$(buildkit_cache_total_mb) || cache_mb=0
+  cap_mb=$(_buildkit_cap_mb) || cap_mb=0
+  tmp="${target}.tmp.$$"
+  {
+    printf '# HELP interview_boss_root_free_bytes Free bytes on the root filesystem.\n'
+    printf '# TYPE interview_boss_root_free_bytes gauge\n'
+    printf 'interview_boss_root_free_bytes %s\n' "$((free_mb * 1024 * 1024))"
+    printf '# HELP interview_boss_buildkit_cache_bytes Current buildx cache size.\n'
+    printf '# TYPE interview_boss_buildkit_cache_bytes gauge\n'
+    printf 'interview_boss_buildkit_cache_bytes %s\n' "$((cache_mb * 1024 * 1024))"
+    printf '# HELP interview_boss_buildkit_cache_cap_bytes Configured buildx cache cap.\n'
+    printf '# TYPE interview_boss_buildkit_cache_cap_bytes gauge\n'
+    printf 'interview_boss_buildkit_cache_cap_bytes %s\n' "$((cap_mb * 1024 * 1024))"
+  } > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  chmod 644 "$tmp" && mv -f -- "$tmp" "$target"
+}
+
 ensure_buildkit_builder() {
   local driver
   if docker buildx inspect "$BUILDKIT_BUILDER" >/dev/null 2>&1; then
-    driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
+    driver=$(_buildx_driver "$BUILDKIT_BUILDER" || true)
     if [ "$driver" != "$BUILDKIT_BUILDER_DRIVER" ]; then
       err "BuildKit builder $BUILDKIT_BUILDER 的 driver=$driver，不符合隔离要求（需要 $BUILDKIT_BUILDER_DRIVER）"
       return 1
@@ -205,50 +423,65 @@ ensure_buildkit_builder() {
   fi
 }
 
+# 把 BuildKit 缓存收敛到 BUILDKIT_MAX_USED_SPACE。
+# 返回 0 仅当：builder 确实不存在（合法 no-op），或清理后读回校验 ≤ cap。
+# 任何"读不到 / 清不动 / 校验不过"一律返回非 0 —— 不再有 return 0 的静默跳过。
 prune_build_cache() {
-  local mode="${1:-light}"
-  local filter_args=(--filter "until=${BUILDKIT_CACHE_MAX_AGE}")
-  local builder_driver
-  if ! docker buildx inspect "$BUILDKIT_BUILDER" >/dev/null 2>&1; then
-    log "InterviewBoss 专用 BuildKit builder 尚未创建，跳过其缓存清理"
+  local cap_mb before_mb after_mb driver
+  cap_mb=$(_buildkit_cap_mb) || { err "无法解析 BUILDKIT_MAX_USED_SPACE=${BUILDKIT_MAX_USED_SPACE}"; return 1; }
+
+  if ! docker buildx ls >/dev/null 2>&1; then
+    err "docker buildx 不可用，无法确认 BuildKit 缓存状态"
+    return 1
+  fi
+  if ! docker buildx ls 2>/dev/null | awk 'NF {print $1}' | grep -qx "$BUILDKIT_BUILDER"; then
+    log "BuildKit builder ${BUILDKIT_BUILDER} 不存在，无缓存需清理"
     return 0
   fi
-  builder_driver=$(docker buildx inspect "$BUILDKIT_BUILDER" 2>/dev/null | awk -F': ' '/^Driver:/ {gsub(/^ +| +$/, "", $2); print $2; exit}')
-  if [ "$builder_driver" != "$BUILDKIT_BUILDER_DRIVER" ]; then
-    err "拒绝清理非隔离 BuildKit builder: $BUILDKIT_BUILDER (driver=$builder_driver)"
+  if ! driver=$(_buildx_driver "$BUILDKIT_BUILDER"); then
+    err "无法读取 ${BUILDKIT_BUILDER} 的 driver，拒绝静默跳过缓存清理"
+    return 1
+  fi
+  if [ "$driver" != "$BUILDKIT_BUILDER_DRIVER" ]; then
+    err "拒绝清理非隔离 BuildKit builder: $BUILDKIT_BUILDER (driver=$driver)"
     return 1
   fi
   if ! docker buildx inspect "$BUILDKIT_BUILDER" --bootstrap >/dev/null 2>&1; then
-    warn "InterviewBoss BuildKit builder 无法启动，跳过本轮缓存清理"
+    err "${BUILDKIT_BUILDER} 无法启动，无法清理缓存"
     return 1
   fi
 
-  if [[ "$mode" == "aggressive" ]]; then
-    local free_mb
-    free_mb=$(root_free_mb)
-    if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-      filter_args=()
-      warn "根分区低于硬阈值，允许应急清理近期 BuildKit 缓存"
-    else
-      warn "空间未低于硬阈值，aggressive 请求降级为 7 天过期缓存清理"
-      mode="light"
-    fi
+  if ! before_mb=$(buildkit_cache_total_mb); then
+    err "无法读取 BuildKit 缓存用量，拒绝在未知状态下继续"
+    return 1
   fi
-
-  warn "清理 BuildKit 构建缓存（模式=${mode}，最大 ${BUILDKIT_MAX_USED_SPACE}）..."
-  if docker buildx prune --builder "$BUILDKIT_BUILDER" -f \
-    "${filter_args[@]}" \
-    --max-used-space "${BUILDKIT_MAX_USED_SPACE}" \
-    --min-free-space "${DEPLOY_TARGET_FREE_MB}MB"; then
+  local limit_mb=$((cap_mb + BUILDKIT_CACHE_SLACK_MB))
+  if [ "$before_mb" -le "$limit_mb" ]; then
+    log "BuildKit 缓存 ${before_mb}MB 在上限 ${cap_mb}MB + 容差 ${BUILDKIT_CACHE_SLACK_MB}MB 内，无需清理"
     return 0
   fi
 
-  warn "docker buildx prune 参数不可用，使用兼容回退模式..."
-  local fallback_args=(--reserved-space "${BUILDKIT_MAX_USED_SPACE}")
-  if [[ "$mode" != "aggressive" ]]; then
-    fallback_args+=(--filter "until=${BUILDKIT_CACHE_MAX_AGE}")
+  warn "BuildKit 缓存 ${before_mb}MB 超过上限 ${cap_mb}MB，收敛中（无年龄过滤）..."
+  if ! docker buildx prune --builder "$BUILDKIT_BUILDER" -f \
+    --max-used-space "${BUILDKIT_MAX_USED_SPACE}" \
+    --min-free-space "${DEPLOY_TARGET_FREE_MB}MB"; then
+    warn "docker buildx prune 参数不可用，回退为 --reserved-space 兼容模式..."
+    if ! docker builder prune --builder "$BUILDKIT_BUILDER" -f \
+      --reserved-space "${BUILDKIT_MAX_USED_SPACE}"; then
+      err "BuildKit 缓存清理执行失败"
+      return 1
+    fi
   fi
-  docker builder prune --builder "$BUILDKIT_BUILDER" -f "${fallback_args[@]}"
+
+  if ! after_mb=$(buildkit_cache_total_mb); then
+    err "清理后无法读取 BuildKit 缓存用量，无法校验"
+    return 1
+  fi
+  if [ "$after_mb" -gt "$limit_mb" ]; then
+    err "清理后 BuildKit 缓存仍为 ${after_mb}MB > 上限 ${cap_mb}MB（容差 ${BUILDKIT_CACHE_SLACK_MB}MB）"
+    return 1
+  fi
+  log "BuildKit 缓存已收敛: ${before_mb}MB → ${after_mb}MB（上限 ${cap_mb}MB，容差 ${BUILDKIT_CACHE_SLACK_MB}MB）"
 }
 
 # 清理测试专用镜像和卷。测试服务使用显式命名，生产服务不依赖它们。
@@ -299,8 +532,20 @@ prune_test_resources() {
   # 同一测试 tag 被重复构建时，旧 image 可能变成 <none>:<none>。
   # 无标签镜像没有名称可匹配，只有同时具备 Compose project/service 标签时才处理，
   # 并且仍跳过有容器引用的 image，避免触碰其他 Docker project。
+  local protected_ids="" protected_tag
+  for protected_tag in $PROTECTED_IMAGE_TAGS; do
+    protected_ids="$protected_ids $(docker image inspect -f '{{.Id}}' "$protected_tag" 2>/dev/null || true)"
+  done
+
   while IFS= read -r image_id; do
     [ -n "$image_id" ] || continue
+    # 受保护镜像（当前版本 / 上一版本）绝不能删，否则回滚无处可退。
+    candidate_full=$(docker image inspect -f '{{.Id}}' "$image_id" 2>/dev/null || true)
+    if [ -n "$candidate_full" ] \
+      && printf '%s\n' $protected_ids | grep -qx "$candidate_full"; then
+      log "保留受保护镜像（当前/上一版本）: $image_id"
+      continue
+    fi
     project=$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$image_id" 2>/dev/null || true)
     compose_service=$(docker image inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$image_id" 2>/dev/null || true)
     case "$project:$compose_service" in
@@ -329,12 +574,8 @@ prune_production_images() {
   local image image_id linked_containers
   while IFS= read -r image; do
     [ -n "$image" ] || continue
-    case "$image" in
-      interview-boss-app:local|interview-boss-app:previous|\
-      interview-boss-nginx:local|interview-boss-nginx:previous|\
-      interview-boss-oauth-gateway:latest|interview-boss-oauth-gateway:previous)
-        continue
-        ;;
+    case " $PROTECTED_IMAGE_TAGS " in
+      *" $image "*) continue ;;
     esac
     image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)
     [ -n "$image_id" ] || continue
@@ -360,7 +601,7 @@ prune_production_images() {
 }
 
 # 安全清理：BuildKit cache、测试资源、项目 stopped/orphan 资源。
-# 默认不清理宿主机 node_modules/.venv，除非 DEPLOY_PRUNE_HOST_ARTIFACTS=1 或传入 --aggressive。
+# 这个函数永远不删除宿主机 node_modules、.venv 或 Playwright 浏览器缓存。
 prune_unused_docker() {
   local aggressive="${1:-}"
   warn "安全清理本项目未使用资源（多项目安全，不使用全局 prune）..."
@@ -383,103 +624,51 @@ prune_unused_docker() {
   prune_production_images
   prune_test_resources
 
-  # 3. 正常空间不做重型缓存清理；低于目标时只清理过期缓存。
+  # 3. BuildKit 缓存收敛由 prune_build_cache / ensure_build_space 显式负责，
+  #    这里只处理容器、镜像与测试资源，避免同一次操作重复 prune。
+  #    注：--aggressive 仍被接受以保持 CLI 兼容，但不再改变 BuildKit 行为。
   if [[ "${STORAGE_RETENTION_DRY_RUN:-0}" == "1" ]]; then
     log "dry-run：跳过 BuildKit 实际清理"
-  elif [[ "${SKIP_BUILDKIT_CLEANUP:-0}" == "1" ]]; then
-    log "调用方负责 BuildKit 缓存维护，跳过重复清理"
-  else
-    local free_mb
-    free_mb=$(root_free_mb)
-    if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-      prune_build_cache light
-    else
-      log "磁盘 ${free_mb}MB 高于目标 ${DEPLOY_TARGET_FREE_MB}MB，保留热 BuildKit 缓存"
-    fi
   fi
 
-  # 4. 宿主机大文件目录（只报告，除非显式启用）
-  local host_free_mb
-  host_free_mb=$(root_free_mb)
-  if { [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; } \
-    && [ "$host_free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "磁盘低于目标，清理宿主机 node_modules 和 .venv..."
-    local pdir="$PROJECT_DIR"
-    if [ -d "$pdir/frontend/node_modules" ] && ! rm -rf -- "$pdir/frontend/node_modules"; then
-      warn "清理 frontend/node_modules 失败"
-    fi
-    if [ -d "$pdir/backend/.venv" ] && ! rm -rf -- "$pdir/backend/.venv"; then
-      warn "清理 backend/.venv 失败"
-    fi
-  elif [ "${aggressive}" = "--aggressive" ] || [ "${DEPLOY_PRUNE_HOST_ARTIFACTS:-0}" = "1" ]; then
-    log "磁盘 ${host_free_mb}MB 未低于目标，保留 node_modules 和 .venv"
-  else
-    local pdir="$PROJECT_DIR"
-    local nm_size venv_size
-    nm_size=$(du -sh "$pdir/frontend/node_modules" 2>/dev/null | cut -f1 || echo "N/A")
-    venv_size=$(du -sh "$pdir/backend/.venv" 2>/dev/null | cut -f1 || echo "N/A")
-    log "宿主机目录（只报告，不清理；用 --aggressive 或 DEPLOY_PRUNE_HOST_ARTIFACTS=1 启用）："
-    log "  frontend/node_modules: $nm_size"
-    log "  backend/.venv:         $venv_size"
-  fi
 }
 
-ensure_disk_before_build() {
-  local free_mb
+# 构建前/后唯一的磁盘关卡：缓存超 cap 或根盘低于目标就收敛，然后读回校验。
+# 与旧 ensure_disk_before_build 的差异：不再"只有 free < 硬阈值才动手"，
+# 也不再把缓存收敛交给带年龄过滤的 light 模式。
+ensure_build_space() {
+  local stage="${1:-pre-build}" free_mb cache_mb cap_mb need=0
   free_mb=$(root_free_mb)
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    err "根分区可用空间 ${free_mb}MB，低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB，直接拒绝构建"
-    show_disk_usage
-    exit 1
-  fi
-  if [ "$free_mb" -ge "$DEPLOY_TARGET_FREE_MB" ]; then
-    log "磁盘检查通过: ${free_mb}MB 可用"
-    return 0
+  cap_mb=$(_buildkit_cap_mb) || cap_mb=0
+  if ! cache_mb=$(buildkit_cache_total_mb); then
+    cache_mb=""
   fi
 
-  warn "根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，执行轻量定向清理..."
-  prune_unused_docker
-
-  free_mb=$(root_free_mb)
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    err "清理后根分区可用空间仍只有 ${free_mb}MB，低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB，拒绝构建"
-    show_disk_usage
-    exit 1
+  if [ -n "$cache_mb" ] && [ "$cap_mb" -gt 0 ] \
+    && [ "$cache_mb" -gt "$((cap_mb + BUILDKIT_CACHE_SLACK_MB))" ]; then
+    log "[$stage] BuildKit 缓存 ${cache_mb}MB 超上限 ${cap_mb}MB + 容差 ${BUILDKIT_CACHE_SLACK_MB}MB"
+    need=1
   fi
-  log "清理后磁盘检查通过: ${free_mb}MB 可用"
+  if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
+    log "[$stage] 根分区可用 ${free_mb}MB 低于目标 ${DEPLOY_TARGET_FREE_MB}MB"
+    need=1
+  fi
+
+  if [ "$need" -eq 1 ]; then
+    prune_unused_docker || warn "[$stage] 本项目容器/镜像清理未完全成功"
+    prune_build_cache || { err "[$stage] BuildKit 缓存收敛失败"; return 1; }
+  else
+    log "[$stage] 磁盘与缓存均达标（可用 ${free_mb}MB，缓存 ${cache_mb}MB），保留热缓存"
+  fi
+
+  if ! verify_disk_state "$stage"; then
+    show_disk_usage
+    return 1
+  fi
 }
 
 cleanup_after_build() {
-  local free_mb cleanup_rc=0
-  free_mb=$(root_free_mb)
-  # 正常空间只检查；低于目标时才执行轻量定向清理，避免每次 build 重型 prune。
-  if [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "构建后可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB，收缩过期 BuildKit 缓存..."
-    if ! prune_build_cache light; then
-      err "BuildKit 缓存清理失败，拒绝继续部署"
-      cleanup_rc=1
-    fi
-    free_mb=$(root_free_mb)
-  else
-    log "构建后可用空间 ${free_mb}MB，高于目标，保留热缓存"
-  fi
-
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    warn "轻量清理后仍低于硬阈值，执行一次应急 BuildKit 清理..."
-    if ! prune_build_cache aggressive; then
-      err "应急 BuildKit 缓存清理失败，拒绝继续部署"
-      cleanup_rc=1
-    fi
-    free_mb=$(root_free_mb)
-  fi
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    err "构建后根分区可用空间 ${free_mb}MB，低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB，拒绝继续部署"
-    cleanup_rc=1
-  elif [ "$free_mb" -lt "$DEPLOY_TARGET_FREE_MB" ]; then
-    warn "构建后根分区可用空间 ${free_mb}MB，低于目标 ${DEPLOY_TARGET_FREE_MB}MB；下一次构建将按硬阈值检查"
-  fi
-  show_disk_usage
-  return "$cleanup_rc"
+  ensure_build_space "post-build"
 }
 
 # 镜像源准备：默认轻量健康检查，失败才刷新 package 镜像源。
@@ -542,7 +731,7 @@ preflight_update_contract() {
 guarded_compose_build() {
   local rc cleanup_rc
   preflight_update_contract
-  ensure_disk_before_build
+  ensure_build_space "pre-build"
   if ! ensure_buildkit_builder; then
     exit 1
   fi
@@ -568,7 +757,7 @@ guarded_compose_build_project() {
   shift
   local rc cleanup_rc
   preflight_update_contract
-  ensure_disk_before_build
+  ensure_build_space "pre-build"
   if ! ensure_buildkit_builder; then
     return 1
   fi
@@ -600,6 +789,7 @@ do_build() {
 # ── 启动核心服务 ──
 do_up() {
   log "启动核心服务（redis queue/cache、backend/nginx/oauth-gateway，不默认启动 worker）..."
+  ensure_runtime_data_dir
   docker compose up -d --wait --wait-timeout 60 redis redis-cache backend nginx oauth-gateway
   do_status
 }
@@ -614,6 +804,7 @@ do_down() {
 # ── 重启核心服务 ──
 do_restart() {
   log "重启核心服务..."
+  ensure_runtime_data_dir
   docker compose restart --wait --wait-timeout 30 redis redis-cache backend nginx oauth-gateway
   do_status
 }
@@ -642,7 +833,8 @@ do_update() {
   log "更新核心服务（不中断 Redis，不默认启动 worker）..."
 
   # 1. Pre-flight
-  ensure_disk_before_build
+  ensure_runtime_data_dir
+  ensure_build_space "pre-build"
   save_old_image
 
   # 2. 数据库备份
@@ -702,6 +894,7 @@ do_frontend() {
 # ── Worker 按需挂载 ──
 do_worker_up() {
   log "启动 Worker（按需后台任务）..."
+  ensure_runtime_data_dir
   guarded_compose_build backend
   docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status
@@ -716,6 +909,7 @@ do_worker_down() {
 
 do_worker_restart() {
   log "重建并重启 Worker..."
+  ensure_runtime_data_dir
   guarded_compose_build backend
   docker compose --profile worker up -d --no-deps --wait --wait-timeout 30 worker
   do_status
@@ -1000,15 +1194,30 @@ do_check() {
 
 # ── 检查磁盘和 /data 挂载 ──
 do_storage_check() {
-  local free_mb
+  local free_mb allow_root_low="${1:-0}" check_rc=0
   free_mb=$(root_free_mb)
   log "根分区可用空间: ${free_mb}MB"
   df -hT / /data 2>/dev/null || df -hT /
 
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    warn "根分区可用空间 ${free_mb}MB 低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB"
+    if [ "$allow_root_low" != "1" ]; then
+      storage_emit_alert "critical" "根分区可用空间低于硬阈值，已阻止存储检查通过"
+      check_rc=1
+    fi
+  fi
+
   if storage_data_mount_available; then
     log "/data 真实挂载信息："
     findmnt -M /data -o TARGET,SOURCE,FSTYPE,OPTIONS
-    return 0
+    if ! storage_check_data_capacity; then
+      storage_emit_alert "critical" "/data 可用空间低于硬阈值，已阻止存储检查通过"
+      return 1
+    fi
+    if ! storage_write_metrics; then
+      warn "无法写入存储指标: $STORAGE_METRICS_FILE"
+    fi
+    return "$check_rc"
   fi
 
   warn "/data 未检测到真实挂载；禁止向 /data-backed 缓存/备份路径写入"
@@ -1016,6 +1225,21 @@ do_storage_check() {
 }
 
 # ── 诊断磁盘使用 ──
+# 自检：跑一次"收敛 → 读回校验"链路，用于部署前秒级预检与故障复现。
+do_storage_self_check() {
+  log "存储自检：收敛 BuildKit 缓存并校验"
+  prune_unused_docker || warn "本项目容器/镜像清理未完全成功"
+  if ! prune_build_cache; then
+    err "自检失败：BuildKit 缓存无法收敛"
+    return 1
+  fi
+  if ! verify_disk_state "self-check"; then
+    err "自检失败：磁盘状态未达标"
+    return 1
+  fi
+  log "自检通过"
+}
+
 do_diagnose() {
   log "========== 磁盘诊断 =========="
   echo ""
@@ -1043,13 +1267,24 @@ do_diagnose() {
   fi
   echo ""
   log "阈值设置（当前值 / 默认值）："
-  log "  DEPLOY_HARD_MIN_FREE_MB:  $DEPLOY_HARD_MIN_FREE_MB / 6144"
-  log "  DEPLOY_TARGET_FREE_MB:    $DEPLOY_TARGET_FREE_MB / 8192"
+  log "  DEPLOY_HARD_MIN_FREE_MB:  $DEPLOY_HARD_MIN_FREE_MB / 4096"
+  log "  DEPLOY_TARGET_FREE_MB:    $DEPLOY_TARGET_FREE_MB / 4096"
   log "  BUILDKIT_MAX_USED_SPACE:  $BUILDKIT_MAX_USED_SPACE / 1536MB"
-  log "  BUILDKIT_CACHE_MAX_AGE:   $BUILDKIT_CACHE_MAX_AGE / 168h"
+  log "  BUILDKIT_CACHE_SLACK_MB: $BUILDKIT_CACHE_SLACK_MB / 128"
   log "  BUILDKIT_BUILDER:          $BUILDKIT_BUILDER ($BUILDKIT_BUILDER_DRIVER)"
   log "  BACKUP_RETENTION_DAYS:    $BACKUP_RETENTION_DAYS / 7"
   log "  BACKUP_MIN_KEEP_FILES:    $BACKUP_MIN_KEEP_FILES / 3"
+  log "  BACKUP_MAX_BYTES:         $BACKUP_MAX_BYTES / 10737418240"
+  log "  EVALUATION_MAX_BYTES:     $EVALUATION_MAX_BYTES / 10737418240"
+  log "  PROJECT_ARCHIVE_MAX_BYTES:$PROJECT_ARCHIVE_MAX_BYTES / 21474836480"
+  if storage_data_mount_available; then
+    log "  DATA_WARN_FREE_MB:        ${DATA_WARN_FREE_MB:-$(storage_default_data_warn_mb)} (auto if blank)"
+    log "  DATA_HARD_MIN_FREE_MB:    ${DATA_HARD_MIN_FREE_MB:-$(storage_default_data_hard_min_mb)} (auto if blank)"
+  else
+    log "  DATA_WARN_FREE_MB:        ${DATA_WARN_FREE_MB:-auto (requires /data)}"
+    log "  DATA_HARD_MIN_FREE_MB:    ${DATA_HARD_MIN_FREE_MB:-auto (requires /data)}"
+  fi
+  log "  STORAGE_METRICS_FILE:     $STORAGE_METRICS_FILE"
   echo ""
   log "========== 诊断完成 =========="
 }
@@ -1057,37 +1292,49 @@ do_diagnose() {
 # ── 定时存储维护 ──
 do_maintenance() {
   local mount_rc=0
+  local cleanup_rc=0
   local free_mb
   log "执行 InterviewBoss 存储维护（备份、测试资源、BuildKit 缓存）..."
-  do_storage_check || mount_rc=1
-  storage_cleanup_backups "$PROJECT_DIR"
+  do_storage_check 1 || mount_rc=1
+  if ! storage_cleanup_backups "$PROJECT_DIR"; then
+    cleanup_rc=1
+    storage_emit_alert "error" "备份/评测产物 retention 清理失败"
+  fi
   free_mb=$(root_free_mb)
   if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    warn "维护开始时已低于硬阈值，允许回收可重建的 node_modules/.venv"
-    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker --aggressive
-  else
-    SKIP_BUILDKIT_CLEANUP=1 prune_unused_docker
+    warn "维护开始时已低于硬阈值，只清理可回收的 Docker 资源，不删除宿主机开发依赖"
   fi
-  if ! prune_build_cache light; then
-    err "定时 BuildKit 过期缓存维护失败"
+  if ! ensure_build_space "maintenance"; then
+    err "定时维护：磁盘空间或 BuildKit 缓存未达标"
     return 1
-  fi
-  free_mb=$(root_free_mb)
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    if ! prune_build_cache aggressive; then
-      err "定时应急 BuildKit 缓存维护失败"
-      return 1
-    fi
   fi
   show_disk_usage
 
   free_mb=$(root_free_mb)
-  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
-    err "维护后根分区仍只有 ${free_mb}MB，低于硬阈值 ${DEPLOY_HARD_MIN_FREE_MB}MB"
+  if [ "$free_mb" -lt "$DEPLOY_MAINTENANCE_MIN_FREE_MB" ]; then
+    err "维护后根分区仍只有 ${free_mb}MB，低于维护最低线 ${DEPLOY_MAINTENANCE_MIN_FREE_MB}MB"
     return 1
   fi
   if [ "$mount_rc" -ne 0 ]; then
     err "/data 未挂载，维护已跳过 /data-backed 备份清理"
+    return 1
+  fi
+  if ! storage_check_data_capacity; then
+    storage_emit_alert "critical" "/data 维护后可用空间低于硬阈值"
+    return 1
+  fi
+  if ! storage_write_metrics; then
+    cleanup_rc=1
+    storage_emit_alert "error" "存储维护指标写入失败: $STORAGE_METRICS_FILE"
+  fi
+  free_mb=$(root_free_mb)
+  if [ "$free_mb" -lt "$DEPLOY_HARD_MIN_FREE_MB" ]; then
+    storage_emit_alert "critical" "存储维护后根分区可用空间仍低于硬阈值: ${free_mb}MB"
+    err "存储维护后根分区可用空间仍低于硬阈值: ${free_mb}MB < ${DEPLOY_HARD_MIN_FREE_MB}MB"
+    return 1
+  fi
+  if [ "$cleanup_rc" -ne 0 ]; then
+    err "存储 retention 或指标维护失败"
     return 1
   fi
   log "存储维护完成: ${free_mb}MB 可用"
@@ -1113,13 +1360,16 @@ do_cleanup() {
   fi
 
   log "清理本项目资源（多项目安全）..."
+  local rc=0
   storage_cleanup_backups "$PROJECT_DIR"
   prune_unused_docker "$aggressive"
-  if ! prune_build_cache light; then
-    err "定向 BuildKit 过期缓存清理失败"
+  prune_build_cache || { warn "BuildKit 缓存收敛失败"; rc=1; }
+  verify_disk_state "cleanup" || rc=1
+  show_disk_usage
+  if [ "$rc" -ne 0 ]; then
+    err "清理完成但磁盘状态未达标"
     return 1
   fi
-  show_disk_usage
   log "清理完成"
 }
 
@@ -1147,7 +1397,7 @@ do_migrate() {
 MODE="${1:-all}"
 
 case "$MODE" in
-  diagnose|mirrors|migrate|cleanup|maintenance|storage-check|storage-maintenance|help|--help|-h) ;;
+  diagnose|mirrors|migrate|cleanup|maintenance|storage-check|storage-maintenance|storage-self-check|help|--help|-h) ;;
   *) ensure_runtime_secrets ;;
 esac
 
@@ -1180,6 +1430,7 @@ case "$MODE" in
   maintenance)     check_docker; do_maintenance ;;
   storage-check)   do_storage_check ;;
   storage-maintenance) check_docker; do_maintenance ;;
+  storage-self-check)  check_docker; do_storage_self_check ;;
   diagnose)        do_diagnose ;;
   mirrors)         check_docker; do_mirrors ;;
   migrate)         do_migrate ;;
@@ -1217,6 +1468,7 @@ case "$MODE" in
     echo "  storage-check   只检查根盘空间和 /data 是否真实挂载"
     echo "  storage-maintenance  执行定时清理：备份、测试资源和 BuildKit 缓存"
     echo "  maintenance     storage-maintenance 的兼容别名"
+    echo "  storage-self-check   自检：收敛 BuildKit 缓存并校验磁盘状态"
     echo "  diagnose        输出磁盘/资源诊断信息（不修改任何资源）"
     echo "  mirrors         强制刷新镜像源缓存和 Docker Hub registry mirror"
     echo "  migrate         停止宿主机服务（首次迁移用）"

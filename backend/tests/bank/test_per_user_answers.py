@@ -19,6 +19,12 @@ from unittest.mock import patch, MagicMock, AsyncMock
 # ── Helper ──
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 def _mock_user(user_id=2, is_admin=False, bank_mode="public"):
     return {"id": user_id, "is_admin": is_admin, "bank_mode": bank_mode}
 

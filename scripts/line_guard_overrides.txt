@@ -5,13 +5,8 @@
 # 2026-08-14: 5 个 god-file 全部拆分至 1500 行红线以下,本清单已清空。
 # 2026-08-24 结构审计发现 4 个文件在清空后重新越线(拆分欠账回归),回填冻结其当前行数,
 # 恢复门禁「红即异常」语义;Stage B 需再次拆分后移除条目。
-# 2026-08-24 晚: 并行会话 WIP 使 3 个文件继续增长,按门禁语义重基线为当时行数;
-# Stage B 拆分欠账不变。
-backend/app/services/llm.py 1950
-backend/app/routers/admin_evaluation.py 1919
-backend/app/worker.py 1927
-frontend/src/components/business/ChatView.vue 1609
-backend/app/agents/chat/react_loop.py 1515
+# 2026-08-26: five production god-files were split below the 1500-line redline;
+# only the historical test-file freezes below remain.
 # 测试文件纳入红线扫描时的存量冻结（2026-08-24）
 backend/tests/chat/test_react_loop.py 3782
 backend/tests/chat/test_chat.py 2038

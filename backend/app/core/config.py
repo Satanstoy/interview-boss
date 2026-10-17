@@ -43,6 +43,10 @@ MAX_TOTAL_UPLOAD_SIZE = (
     int(os.environ.get("MAX_TOTAL_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 )  # 默认 50MB
 
+# 上传恢复 v2 灰度开关已收口：所有新入口统一走 policy/接受服务
+# （contracts §8 禁止两套可写图入口）。2026-10-01 决策：前端已是 v2 界面，
+# 后端契约缺口全部修复，故取消 flag 并删除遗留路径；如需回退按 git revert
+# 处理，不保留运行期开关（历史 flag=off 状态本身就与前端错配）。
 LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")
 
@@ -218,6 +222,40 @@ def get_user_llm_config(user_id: int) -> dict | None:
     except Exception:
         pass
     return _get_global_llm_config()
+
+
+def get_strict_user_llm_config(user_id: int) -> dict | None:
+    """只读取用户本人的 LLM 配置，**绝不回退全局**（AC-004）。
+
+    上传恢复链路的私人阶段（``credential_scope="user"``）必须用本函数：
+    - 本人无行 / 无 api_key / 解密或读取异常 → 返回 ``None``，调用方按
+      ``MODEL_CONFIG_MISSING`` 处理，禁止用系统配置代付（contracts §1.7、§2.2）；
+    - 与 ``get_user_llm_config``（通用读取器，缺 Key 静默回退 global）严格区分。
+    """
+
+    try:
+        from app.db.connection import get_db_connection
+        from app.services.encryption import decrypt_value
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT api_key, base_url, model, timeout, api_format, thinking FROM user_llm_config WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if not row:
+                return None
+            cfg = dict(row)
+            if not cfg.get("api_key"):
+                return None
+            try:
+                cfg["api_key"] = decrypt_value(cfg["api_key"])
+            except Exception:
+                return None
+            if not cfg.get("api_key"):
+                return None
+            return cfg
+    except Exception:
+        return None
 
 
 def _read_public_search_config_from_db() -> dict | None:

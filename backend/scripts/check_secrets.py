@@ -28,6 +28,7 @@ EXCLUDE_DIRS = {
     "frontend/tests",
     ".tech-audit",
     "frontend/dist",
+    "test-results",
     ".venv",
 }
 EXCLUDE_SUFFIXES = {".lock", ".pyc"}

@@ -42,7 +42,6 @@ function goPractice() {
     <header class="flex flex-col gap-1">
       <p class="text-sm text-muted-foreground">目标岗位：{{ snapshot.target_position.name }}</p>
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">洞察总览</h1>
-      <p class="max-w-2xl text-sm text-muted-foreground">把岗位、题库和个人练习证据整理成下一步准备任务。</p>
     </header>
 
     <div v-if="summary.evidence_state === 'insufficient'" class="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50/70 p-4 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-100">

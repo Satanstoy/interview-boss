@@ -7,6 +7,7 @@ import { useSelection } from '@/composables/useSelection.js'
 import { useTheme } from '@/composables/useTheme.js'
 import { useToast, useConfirm } from '@/composables/useNotification.js'
 import AppSidebar from '@/components/AppSidebar.vue'
+import UploadTaskCenter from '@/components/business/UploadTaskCenter.vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import {
   Sheet,
@@ -40,6 +41,7 @@ import { useAuth, initAuthSingleton } from '@/composables/useAuth.js'
 import { useMasterBankData } from '@/composables/useMasterBankData.js'
 import { useBuildTrigger } from '@/composables/useBuildTrigger.js'
 import { setOnJobDone, restoreActiveJobs } from '@/composables/useSubmitJobs.js'
+import { fetchInterviewLocation } from '@/services/dataApi.js'
 import { fetchCodingPlaylists } from '@/services/codingApi.js'
 import { usePracticeDecks } from '@/composables/usePracticeDecks.js'
 
@@ -144,7 +146,7 @@ const {
 let afterFetchCleanup = () => {}
 const {
   jdData, interviewData, masterBank,
-  isDataLoading, dataLoadError,
+  isDataLoading, dataLoadError, isInterviewLoading, interviewLoadError,
   analytics, practiceStats, popularTags, categoryCounts,
   masterBankTotal, masterBankOverallTotal,
   activeSeason, availableSeasons,
@@ -153,10 +155,13 @@ const {
   filterDifficulty, showStarredOnly,
   filterSeason, interviewSortOrder,
   bankFilter,
+  interviewPositionId,
   filteredMasterBank, filteredInterviewData,
   availableSubTags, interviewSeasons, practicedQuestions,
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadActiveSeason, loadAllData, formatDate,
+  interviewTotal, interviewCurrentPage, interviewPageSize,
+  loadInterviewPage, fetchInterviewSeasonSource,
 } = useMasterBankData({ onAfterFetch: () => afterFetchCleanup() })
 
 // ── Build（题库重建） ──
@@ -170,8 +175,6 @@ const sidebarCollapsed = ref(localStorage.getItem('sidebar-collapsed') === 'true
 const mobileNavOpen = ref(false)
 const jdCurrentPage = ref(1)
 const jdPageSize = ref(20)
-const interviewCurrentPage = ref(1)
-const interviewPageSize = ref(20)
 const showReviewPanel = ref(false)
 const practiceQuestion = ref(null)
 
@@ -492,7 +495,7 @@ const toggleSubTag = (tag) => {
   fetchTableData({ resetSubTags: false })
 }
 
-const onNavigateToInterview = (event) => {
+const onNavigateToInterview = async (event) => {
   const source = event?.source || event
   const questionId = event?.questionId
   const targetUrl = source.url || ''
@@ -503,25 +506,50 @@ const onNavigateToInterview = (event) => {
   }
   const targetPath = normalizeUrl(targetUrl)
 
-  const match = interviewData.value.find(row => {
+  const matchesSource = (row) => {
     const rowUrl = row['来源链接'] || row.url || ''
     return rowUrl === targetUrl || normalizeUrl(rowUrl) === targetPath
-  })
-  if (!match) { toast.warning('未找到该面经记录'); return }
+  }
+  let match = interviewData.value.find(matchesSource)
+  let location
+  try {
+    // 面经列表只缓存当前页，来源记录可能尚未加载。
+    if (!match && !isPreviewMode) match = (await fetchInterviewSeasonSource()).find(matchesSource)
+    if (!match) { toast.warning('未找到该面经记录'); return }
+    location = isPreviewMode ? {
+      page: Math.floor(interviewData.value.indexOf(match) / interviewPageSize.value) + 1,
+      page_size: interviewPageSize.value,
+    } : await fetchInterviewLocation(match.id, {
+      page_size: interviewPageSize.value,
+      sort: interviewSortOrder.value === 'asc' ? 'created_at_asc' : 'created_at_desc',
+      scope: 'all',
+      ...(interviewPositionId.value ? { position_id: interviewPositionId.value } : {}),
+    })
+  } catch {
+    toast.error('面经定位失败，请稍后重试')
+    return
+  }
 
   returnTab.value = activeTab.value
   const outerScroll = document.querySelector('.overflow-y-auto.custom-scrollbar')
   if (outerScroll) setSavedScrollTop(outerScroll.scrollTop)
 
   if (activeTab.value === 'Practice') returnToPracticeMode.value = true
-  router.push(routeLocation('/interview'))
-
   filterSeason.value = ''
-  const sortedIdx = filteredInterviewData.value.indexOf(match)
-  const idx = sortedIdx >= 0 ? sortedIdx : interviewData.value.indexOf(match)
-  interviewCurrentPage.value = Math.floor(idx / interviewPageSize.value) + 1
-
-  highlightInterviewId.value = match.id
+  if (isPreviewMode) {
+    interviewCurrentPage.value = location.page
+    highlightInterviewId.value = match.id
+    await router.push(routeLocation('/interview'))
+  } else {
+    await router.push({
+      path: '/interview',
+      query: {
+        page: String(location.page),
+        page_size: String(location.page_size || interviewPageSize.value),
+        highlight: String(match.id),
+      },
+    })
+  }
 
   const scrollAndHighlight = (attempt = 0) => {
     const el = document.querySelector(`[data-row-id="${match.id}"]`)
@@ -566,7 +594,7 @@ setOnJobDone((_jobId, _result) => {
 provide('appData', {
   // Data
   jdData, interviewData, masterBank,
-  isDataLoading, dataLoadError,
+  isDataLoading, dataLoadError, isInterviewLoading, interviewLoadError,
   analytics, practiceStats, popularTags, categoryCounts,
   masterBankTotal, masterBankOverallTotal,
   activeSeason, availableSeasons,
@@ -582,6 +610,8 @@ provide('appData', {
   // Fetch
   fetchTableData, fetchAnalytics, fetchPracticeStats,
   loadAllData, formatDate,
+  interviewTotal,
+  loadInterviewPage,
   // Auth
   displayUser, isAuthenticatedForUi, currentUser,
   pendingReviewCount, showLoginModal,
@@ -625,12 +655,89 @@ provide('appData', {
 // ── Lifecycle ──
 // initAuth() 在 App.vue 中执行，authCompleted 变为 true 后触发数据加载
 watch(authCompleted, (done) => {
-  if (done && currentUser.value) {
+  if (done && currentUser.value && !isPreviewMode) {
     loadAllData()
   }
 }, { immediate: true })
 
+// R09：面经列表按当前岗位筛选传给服务端（position_id 契约，与 location 一致）
+watch(
+  () => currentUser.value?.current_position_id,
+  (posId) => {
+    if (isPreviewMode) return
+    interviewPositionId.value = posId ? String(posId) : ''
+    interviewCurrentPage.value = 1
+    fetchTableData()
+  },
+  { immediate: true },
+)
+
 watch([() => route.fullPath, isAuthenticatedForUi], () => { void loadPracticeContext() }, { immediate: true })
+
+// ── AC-001：任务中心「查看结果」写入 page/position/highlight 查询参数，
+// 这里消费它们：切换岗位筛选、跳到目标页并高亮目标行（只主动打开时生效）。
+const locationQueryConsumed = ref('')
+watch(
+  () => [route.path, route.query.page, route.query.highlight, route.query.position, route.query.position_name, route.query.page_size],
+  async ([path, page, highlight, position, positionName, pageSize]) => {
+    if (path !== '/interview') {
+      locationQueryConsumed.value = ''
+      return
+    }
+    const requestedPageSize = Number(pageSize)
+    if ([10, 20, 50, 100].includes(requestedPageSize)) {
+      interviewPageSize.value = requestedPageSize
+    }
+    if (!isAuthenticatedForUi.value) return
+    if (!highlight) {
+      locationQueryConsumed.value = ''
+      return
+    }
+    // 同一目标不重复触发（消费后我们清掉参数，再次进入不重复）
+    const targetKey = [page, highlight, position, pageSize].map(value => String(value || '')).join(':')
+    if (locationQueryConsumed.value === targetKey && highlightInterviewId.value) return
+    if (position && String(position) !== String(currentUser.value?.current_position_id || '')) {
+      // 仅主动「查看结果」时切到目标岗位并回到第 1 页（spec §7）。
+      // 通过个人岗位接口切换当前用户；管理员岗位维护端点禁止普通用户调用。
+      try {
+        const { fetchPositions, switchMyPosition } = await import('@/services/profileApi.js')
+        let targetName = positionName ? String(positionName) : ''
+        if (!targetName) {
+          const { positions = [] } = await fetchPositions()
+          targetName = positions.find((item) => String(item.id) === String(position))?.name || ''
+        }
+        if (!targetName) throw new Error('目标岗位不可用')
+        const data = await switchMyPosition(targetName)
+        if (currentUser.value) {
+          currentUser.value = {
+            ...currentUser.value,
+            current_position: data.current_position || data.current_job_position || currentUser.value.current_position,
+            current_position_id: data.current_position_id ?? Number(position),
+          }
+        }
+        await fetchTableData()
+        // AC-001：切岗显式提示（spec §7「返回任务结果时可切换到该面经所属岗位并明确提示」）
+        toast.info(`已切换到岗位：${currentUser.value?.current_position || '目标岗位'}`)
+      } catch {
+        // 岗位切换失败不阻塞定位
+      }
+    }
+    const pageNumber = Math.max(1, parseInt(String(page), 10) || 1)
+    interviewCurrentPage.value = pageNumber
+    highlightInterviewId.value = String(highlight)
+    // contracts §4.5：定位目标页时向服务端拉取该页数据
+    loadInterviewPage(pageNumber, interviewPageSize.value)
+    locationQueryConsumed.value = targetKey
+    // 消费后清理 query，避免刷新再次触发/污染 URL
+    if (String(route.query.page || '') !== String(pageNumber) || String(route.query.highlight || '') !== String(highlight)) {
+      router.replace({
+        path: '/interview',
+        query: pageSize ? { page_size: String(interviewPageSize.value) } : {},
+      })
+    }
+  },
+  { immediate: true },
+)
 
 onMounted(async () => {
   if (isPreviewMode) {
@@ -678,7 +785,8 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
           :active-tab-label="activeTabLabel"
           :active-season="activeSeason"
           :show-coding-controls="activeTab === 'Coding'"
-          :show-practice-controls="activeTab === 'Practice'"
+          :show-current-page-label="!route.meta.pageOwnsTitle"
+          :show-practice-controls="route.name === 'practice'"
           :practice-decks="practiceDecks"
           :practice-selected-deck-key="practiceSelectedDeckKey"
           :practice-deck-loading="practiceDeckLoading"
@@ -791,6 +899,9 @@ onUnmounted(() => { cancelAllRequests(); detachHighlightScroll() })
         </div>
       </div>
     </Transition>
+
+    <!-- 上传任务中心：常驻入口，折叠/关页面不删除服务端任务 -->
+    <UploadTaskCenter />
   </div>
 </template>
 

@@ -8,7 +8,6 @@ from app.db.connection import get_db_connection, run_db, get_current_job_positio
 from app.services.clustering.matcher import match_new_questions
 from app.services.question_bank_integrity import (
     canonicalize_question_bank_payload,
-    claim_public_original_questions,
     sync_question_bank_projections,
 )
 
@@ -18,8 +17,13 @@ router = APIRouter()  # NO prefix - paths include both /api/jobs/... and /api/ma
 
 @router.get("/api/jobs/{job_id}/stream")
 async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user)):
-    """Stream job progress via SSE."""
-    is_admin = user.get("is_admin", 0)
+    """Stream job progress via SSE（本人任务专属，AC-018/R07）。
+
+    旧实现 ``is_admin=1 OR created_by=user`` 允许管理员读取任意用户任务的
+    私人正文（submit worker 会把提取结果写进 jobs.result）。admin 的运维
+    可见范围收敛到 `/api/admin/upload-operations` 白名单；旧接口一律 owner
+    校验，非本人（含管理员）返回 404，不泄露任务存在性与正文。
+    """
     user_id = user["id"]
 
     async def event_generator():
@@ -30,8 +34,8 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 with get_db_connection() as conn:
                     return conn.execute(
                         "SELECT status, progress_current, progress_total, progress_message, progress_phase, result, last_error "
-                        "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
-                        (job_id, is_admin, user_id),
+                        "FROM jobs WHERE id = ? AND created_by = ?",
+                        (job_id, user_id),
                     ).fetchone()
 
             job = await run_db(_check)
@@ -53,8 +57,8 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
                 last_update = current_update
 
             if job["status"] in ("completed", "failed"):
-                if job["error"]:
-                    yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['error']}, ensure_ascii=False)}\n\n"
+                if job["last_error"]:
+                    yield f"data: {json.dumps({'type': 'error', 'status': 'failed', 'job_id': job_id, 'message': job['last_error']}, ensure_ascii=False)}\n\n"
                 elif job["result"]:
                     # 尝试解析 JSON result（submit_import 等任务会存 JSON）
                     try:
@@ -77,16 +81,15 @@ async def stream_job_progress(job_id: int, user: dict = Depends(get_current_user
 
 @router.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: int, user: dict = Depends(get_current_user)):
-    """Get job status (non-streaming)."""
-    is_admin = user.get("is_admin", 0)
+    """Get job status (non-streaming)（本人任务专属，AC-018/R07）。"""
     user_id = user["id"]
 
     def _query():
         with get_db_connection() as conn:
             return conn.execute(
                 "SELECT id, job_type, status, progress_current, progress_total, progress_message, last_error AS error, created_at, completed_at "
-                "FROM jobs WHERE id = ? AND (? = 1 OR created_by = ?)",
-                (job_id, is_admin, user_id),
+                "FROM jobs WHERE id = ? AND created_by = ?",
+                (job_id, user_id),
             ).fetchone()
 
     job = await run_db(_query)
@@ -296,7 +299,6 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
             def _merge():
                 nonlocal merged_count
                 with get_db_connection() as conn:
-                    is_admin = bool(user.get("is_admin", 0))
                     for m in matched:
                         new_id = m["new_id"]
                         qb_id = m["question_bank_id"]
@@ -350,63 +352,29 @@ async def build_personal_bank(user: dict = Depends(get_current_user)):
                             sources, orig_qs, orig_qs_src = canonicalize_question_bank_payload(
                                 sources, orig_qs, orig_qs_src
                             )
-                            if is_admin:
-                                # 管理员：个人题并入公共题（现有行为）
-                                conn.execute(
-                                    "UPDATE question_bank SET frequency = ?, sources = ?, original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (
-                                        len(orig_qs),
-                                        json.dumps(sources, ensure_ascii=False),
-                                        json.dumps(orig_qs, ensure_ascii=False),
-                                        json.dumps(orig_qs_src, ensure_ascii=False),
-                                        qb_id,
-                                    ),
-                                )
-                                claim_public_original_questions(
-                                    conn,
-                                    qb_id,
-                                    existing["owner_id"],
-                                    existing["status"],
-                                    orig_qs,
-                                )
-                                sync_question_bank_projections(
-                                    conn.cursor(), qb_id, sources, orig_qs, orig_qs_src
-                                )
-                                from app.services.cluster_review_lifecycle import (
-                                    mark_cluster_review_pending,
-                                )
-
-                                mark_cluster_review_pending(conn, qb_id, "private_question_merged")
-                                # 删除已合并的个人题目
-                                conn.execute(
-                                    "DELETE FROM question_bank WHERE id = ?",
-                                    (personal_row["id"],),
-                                )
-                            else:
-                                # 非管理员：合并只落个人题，公共题数据绝不改动
-                                # 个人题吸收公共题来源（去重后），公共题保持原样，个人题保留
-                                conn.execute(
-                                    "UPDATE question_bank SET sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                    (
-                                        json.dumps(sources, ensure_ascii=False),
-                                        personal_row["id"],
-                                    ),
-                                )
-                                personal_oqs = personal_row.get("original_questions") or []
-                                personal_oqs_src = (
-                                    personal_row.get("original_question_sources") or []
-                                )
-                                if isinstance(personal_oqs, str):
-                                    personal_oqs = json.loads(personal_oqs or "[]")
-                                if isinstance(personal_oqs_src, str):
-                                    personal_oqs_src = json.loads(personal_oqs_src or "[]")
-                                sync_question_bank_projections(
-                                    conn.cursor(),
+                            # 重建始终写回当前用户个人题；公共题库只作为匹配候选。
+                            conn.execute(
+                                "UPDATE question_bank SET sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (
+                                    json.dumps(sources, ensure_ascii=False),
                                     personal_row["id"],
-                                    sources,
-                                    personal_oqs,
-                                    personal_oqs_src,
-                                )
+                                ),
+                            )
+                            personal_oqs = personal_row.get("original_questions") or []
+                            personal_oqs_src = (
+                                personal_row.get("original_question_sources") or []
+                            )
+                            if isinstance(personal_oqs, str):
+                                personal_oqs = json.loads(personal_oqs or "[]")
+                            if isinstance(personal_oqs_src, str):
+                                personal_oqs_src = json.loads(personal_oqs_src or "[]")
+                            sync_question_bank_projections(
+                                conn.cursor(),
+                                personal_row["id"],
+                                sources,
+                                personal_oqs,
+                                personal_oqs_src,
+                            )
                         merged_count += 1
                     conn.commit()
 

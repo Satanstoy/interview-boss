@@ -1,6 +1,6 @@
 """
-自动化测试 — 针对 BUG-001 和 BUG-002
-使用 pytest + unittest.mock，所有外部依赖均已 mock
+历史 SQL 语法回归，以及真实 JWT/HTTP/SQLite 的 personal → mine 读取验证。
+其他历史单元用例沿用既有 mock；个人题库行为不 mock 路由、权限或 SQL 写入。
 """
 
 import pytest
@@ -59,22 +59,53 @@ class TestBug001MixedModeSQL:
             assert "qb.duplicate_of" not in where_clause
             assert "AND qb.deleted_at IS NULL" in where_clause
 
-    @pytest.mark.asyncio
-    async def test_bug001_personal_mode_sql_valid(self):
-        """个人模式 SQL 应该正确（无 bug）"""
-        with patch("app.db.queries.get_user_job_position") as mock_pos:
-            mock_pos.return_value = (1, "测试岗位")
+    def test_bug001_personal_mode_sql_valid(self, client, test_db):
+        """Mine lists the owner's private/pending rows and excludes other banks."""
+        from app.core.auth import create_access_token
 
-            from app.routers.questions import _build_bank_where_clause
+        position = test_db.execute(
+            "INSERT INTO job_positions(name) VALUES ('personal-mode-position')"
+        ).lastrowid
+        for uid in (7701, 7702):
+            test_db.execute(
+                "INSERT INTO users(id,username,password_hash,current_position_id,bank_mode) "
+                "VALUES (?,?,'TEST_HASH',?,'personal')",
+                (uid, f"personal-mode-{uid}", position),
+            )
+        for qid, owner, status, submitter in (
+            (701, 7701, "approved", None),
+            (702, None, "pending", 7701),
+            (703, None, "approved", None),
+            (704, 7702, "approved", None),
+            (705, None, "pending", 7702),
+        ):
+            test_db.execute(
+                "INSERT INTO question_bank(id,question,owner_id,status,submitted_by,job_position) "
+                "VALUES (?, ?, ?, ?, ?, 'personal-mode-position')",
+                (qid, f"personal-mode-{qid}", owner, status, submitter),
+            )
+            test_db.execute(
+                "INSERT INTO question_position(question_id,position_id) VALUES (?,?)",
+                (qid, position),
+            )
+        test_db.commit()
+        response = client.get(
+            "/api/master-bank?filter=mine",
+            headers={"Authorization": "Bearer " + create_access_token(
+                {"user_id": 7701, "type": "access"}
+            )},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 2
+        assert {row["id"] for row in response.json()["items"]} == {701, 702}
+        # Preserve the legacy personal -> mine mapping without mocking SQL or
+        # coupling the assertion to its parameter count/implementation text.
+        from app.routers.questions import _build_bank_where_clause
 
-            user = {"id": 1, "bank_mode": "personal", "is_admin": False}
-
-            from_clause, where_clause, params = _build_bank_where_clause(user)
-
-            # personal → mine 口径：owner_id=me OR (pending AND submitted_by=me)
-            assert "qb.owner_id = ?" in where_clause
-            assert "qb.deleted_at IS NULL" in where_clause
-            assert params == [1, 1, 1]  # [pos_id, uid, uid]
+        user = dict(test_db.execute("SELECT * FROM users WHERE id=7701").fetchone())
+        from_clause, where_clause, params = _build_bank_where_clause(user)
+        rows = test_db.execute(f"SELECT qb.id {from_clause} {where_clause}", params)
+        assert {row["id"] for row in rows} == {701, 702}
 
     @pytest.mark.asyncio
     async def test_bug001_public_mode_sql_valid(self):

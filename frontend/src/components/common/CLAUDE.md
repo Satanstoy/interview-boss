@@ -19,7 +19,7 @@
 | `AsyncLoading.vue` | 异步组件 loading/error 包装 |
 | `BatchActionPanel.vue` | 批量操作栏 |
 | `ConfirmDialog.vue` | 确认对话框 |
-| `DataTable.vue` | 数据表格（排序、分页） |
+| `DataTable.vue` | 数据表格（排序、分页）；可选 `serverTotal` prop（contracts §4.5 server 模式：total/总页数以服务端为准，rows 即当前页不再本地 slice；缺省维持 client 行为） |
 | `InlineEdit.vue` | 行内编辑 |
 | `TabBar.vue` | Tab 导航栏 |
 

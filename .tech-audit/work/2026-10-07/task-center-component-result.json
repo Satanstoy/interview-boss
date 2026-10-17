@@ -1,0 +1,45 @@
+{
+  "boundary": "current real Vue component; all business API responses mocked; no worker/database/prod validation",
+  "before": {
+    "cards": 20,
+    "totalText": "共 25 条刷新",
+    "history25Visible": 0,
+    "buttons": [
+      " 关闭 ",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      "查看摘要",
+      " 刷新 "
+    ],
+    "requests": [
+      {
+        "path": "/api/upload-imports",
+        "search": "?page=1&page_size=20",
+        "method": "GET"
+      }
+    ]
+  },
+  "after": {
+    "summaryCausedRequests": [],
+    "summaryChangedText": false,
+    "summaryChangedRoute": false
+  },
+  "pageErrors": []
+}

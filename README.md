@@ -142,11 +142,13 @@ cd interview-boss
 cp backend/.env.example backend/.env
 ```
 
-编辑 `backend/.env`，至少填入两项（首次启动会创建种子管理员）：
+编辑 `backend/.env`，至少填入以下配置（首次启动会创建种子管理员）：
 
 ```env
 # ── 必填 ──
 OPENAI_API_KEY=sk-xxx                         # LLM API 密钥
+JWT_SECRET=replace-with-a-random-string-32+    # 生产必填；每个部署必须独立且持久化
+ADMIN_USERNAME=sj                              # 种子管理员用户名
 ADMIN_PASSWORD=your-secure-password            # 种子管理员密码（首次启动必填）
 
 # ── 可选（有默认值） ──
@@ -192,7 +194,8 @@ cd frontend && npm install && npm run dev   # 打开 http://localhost:3000
 | `OPENAI_BASE_URL` | LLM API 地址 | 空 |
 | `LLM_MODEL_NAME` | 生成模型 | `gpt-4o` |
 | `LLM_TIMEOUT` | LLM 超时（秒） | `120` |
-| `JWT_SECRET` | JWT 签名密钥 | 自动生成 |
+| `DAILY_LLM_CALL_LIMIT` | 单用户每日 LLM 调用次数上限 | `200` |
+| `JWT_SECRET` | JWT 签名密钥（至少 32 字符） | 生产必填；部署脚本首次初始化时持久化生成 |
 | `ADMIN_USERNAME` | 种子管理员用户名 | `sj` |
 | `DEBUG` | 开启热重载和 Swagger 文档 | `false` |
 | `ALLOWED_ORIGINS` | CORS 允许来源（逗号分隔） | 空 |
@@ -213,12 +216,16 @@ cd frontend && npm install && npm run dev   # 打开 http://localhost:3000
 | `SEARCH_BASE_URL` | 搜索 API 自定义地址 | 空 |
 | `MCP_PUBLIC_URL` | 外部 agent 访问 MCP 的公开地址 | 空 |
 | `MCP_ALLOW_ANONYMOUS` | 允许匿名 MCP 访问（仅开发/测试） | `false` |
+| `DATA_WARN_FREE_MB` / `DATA_HARD_MIN_FREE_MB` | `/data` 可用空间预警/硬阈值（MB） | `20480` / `10240` |
+| `BACKUP_MAX_BYTES` / `EVALUATION_MAX_BYTES` | 备份与评测产物单类字节预算 | `10737418240` |
+| `PROJECT_ARCHIVE_MAX_BYTES` | 项目归档字节预算 | `21474836480` |
+| `STORAGE_ALERT_WEBHOOK_URL` | 可选存储告警 webhook；不设置则仅记录日志 | 空 |
 
-完整变量列表见 `backend/.env.example`。所有配置均可在运行时通过设置页在线修改，变更自动持久化到数据库和 `.env`。
+以上是常用配置摘要，不是完整变量清单；启动参数和默认值以 `backend/.env.example` 与 `backend/app/core/config.py` 为准。用户级 LLM 配置可在设置页在线修改，部署/容量/安全参数仍由环境变量和部署脚本管理。
 
 ## 部署
 
-`deploy/docker-deploy.sh` 是生产部署入口，内置磁盘保护（构建前根分区至少保留 2GB，构建后低于 5GB 自动收缩 BuildKit cache）、镜像源健康检查与版本化缓存。
+`deploy/docker-deploy.sh` 是生产部署入口，内置磁盘保护（构建前根分区至少保留 6GB，构建后目标为 8GB 并在低于硬阈值时拒绝继续部署）、镜像源健康检查与版本化缓存。
 
 ```bash
 sudo ./deploy/docker-deploy.sh                 # 默认 all：构建 + 启动核心服务

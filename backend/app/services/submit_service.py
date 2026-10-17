@@ -68,6 +68,7 @@ async def background_generate_answer(
     skip_search: bool = False,
     llm_scope: str = "user",
     search_scope: str = "user",
+    job_fence: tuple[int, int] | None = None,
 ):
     """后台任务：为新入库的题目生成 AI 参考答案。"""
     from app.services.answer_enrichment import prepare_answer_prompt, refine_answer, sources_json
@@ -98,28 +99,46 @@ async def background_generate_answer(
         answer = await _call_llm_with_retry(
             prompt, user_id=user_id, llm_scope=llm_scope
         )
-        answer, _ = await refine_answer(
+        if not answer or not answer.strip():
+            raise ValueError("模型返回空答案")
+        answer, review_issues = await refine_answer(
             prompt,
             answer,
             search_sources,
             user_id=user_id,
-            max_rounds=2,
+            max_rounds=2 if any(marker in question_text for marker in ("系统设计", "架构设计", "设计方案")) else 1,
             llm_scope=llm_scope,
         )
 
         def _update():
             with get_db_connection() as conn:
-                conn.execute(
-                    "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (answer, sources_json(search_sources), question_id),
-                )
-                conn.commit()
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if job_fence is not None:
+                        from app.services.job_lifecycle import assert_job_fence
+
+                        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+                    conn.execute(
+                        "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (answer, sources_json(search_sources), question_id),
+                    )
+                    conn.execute(
+                        "UPDATE question_bank SET answer_review_status = ?, answer_review_issues = ? WHERE id = ?",
+                        ("needs_review" if review_issues else "passed", json.dumps(review_issues, ensure_ascii=False), question_id),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
         await run_db(_update)
         logger.info(f"自动解答生成完毕: [ID:{question_id}] {question_text[:30]}...")
         return {
             "answer": answer,
             "search_sources": search_sources,
+            "answer_review_status": "needs_review" if review_issues else "passed",
+            "answer_review_issues": review_issues,
         }
     except Exception as e:
         logger.error(f"自动解答生成失败: [ID:{question_id}]: {e}")
@@ -128,8 +147,14 @@ async def background_generate_answer(
             with get_db_connection() as conn:
                 # 生成失败不能覆盖已有的有效参考答案；只有原本没有答案的题目
                 # 才写入失败占位符，避免一次外部接口超时造成数据丢失。
-                conn.execute(
-                    """
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if job_fence is not None:
+                        from app.services.job_lifecycle import assert_job_fence
+
+                        assert_job_fence(conn, int(job_fence[0]), int(job_fence[1]))
+                    conn.execute(
+                        """
                     UPDATE question_bank
                     SET ai_answer = CASE
                         WHEN ai_answer IS NULL OR TRIM(ai_answer) = ''
@@ -139,9 +164,12 @@ async def background_generate_answer(
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (question_id,),
-                )
-                conn.commit()
+                        (question_id,),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
         try:
             await run_db(_mark_failed)
         except Exception:
@@ -150,13 +178,13 @@ async def background_generate_answer(
             raise
 
 
-async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None, model: str = None) -> List[List[str]]:
+async def tag_questions_batch(url: str, company: str, round_: str, questions: List[str], taxonomy_config: dict = None, user_id: int = None, model: str = None, llm_scope: str = "user") -> List[List[str]]:
     input_data = [{"id": idx, "题目": q} for idx, q in enumerate(questions)]
     q_json = json.dumps(input_data, ensure_ascii=False)
     prompt = build_tagging_prompt(taxonomy_config) if taxonomy_config else TAGGING_PROMPT
     user_msg = prompt.replace("{questions}", q_json)
 
-    _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id) if user_id else (client, LLM_MODEL, None, None, "openai")
+    _c, _m, _t, _bu, _provider = get_llm_client_for_user(user_id, llm_scope=llm_scope) if user_id else (client, LLM_MODEL, None, None, "openai")
     kwargs = dict(
         model=_m,
         messages=[
@@ -174,6 +202,7 @@ async def tag_questions_batch(url: str, company: str, round_: str, questions: Li
         response_format=kwargs.get("response_format"),
         user_id=user_id,
         model=model,
+        llm_scope=llm_scope,
     )
     try:
         raw_items = _extract_json(raw_content).get("questions", [])

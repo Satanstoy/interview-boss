@@ -36,6 +36,12 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 
 **回归保护**：`backend/tests/chat/test_chat.py::test_api_does_not_write_production_db` 断言 API 测试前后生产库 `chat_conversations` 行数不变。修改 conftest 的 patch 范围时必须跑该测试。
 
+### DB 隔离 fixture 的还原契约（重要）
+
+`client` / `app_db_isolation` 的 teardown **必须**把 `get_db_connection` 还原到 conftest 在打补丁前捕获的真实实现（`_TRUE_GET_DB_CONNECTION`），**不能**还原「当时的当前值」：一旦某个模块残留了上一次 fixture 的测试闭包（捕获了已关闭的内存连接），该闭包会被当成 original 保存并在下次 teardown 再装回去，泄漏自我延续，后续不使用 TestClient 的测试会报 `Cannot operate on a closed database`（2026-10-01 实测：`chat/` 跑完后 `app.db.operations` 持有 `app_db_isolation` 闭包）。
+
+**回归保护**：`backend/tests/infra/test_db_isolation_leak.py` 在收集期捕获真实实现，断言 teardown 后所有 `app.*` 模块共用它（含一条自检，防止断言空转）。修改 conftest 的 patch/还原逻辑时必须跑该文件。
+
 ## 目录结构
 
 | 目录 | 测试内容 |
@@ -50,6 +56,9 @@ docker compose --profile test run --rm test uv run pytest backend/tests/test_xxx
 | `security/` | 安全测试（认证、CSRF、注入） |
 | `interview/` | 面试流程测试 |
 | `infra/` | 基础设施测试（DB、migration、config） |
+| `integration/` | 上传恢复隔离栈（AC-028）与逐题数据流（AC-029）：`test_upload_recovery_stack.py` 需显式 `UPLOAD_TEST_DB_PATH` + `UPLOAD_TEST_REDIS_PREFIX` 才启动（真实 HTTP + 真实 Redis 隔离队列 + 真实 worker 任务；浏览器腿未覆盖，见文件 docstring）；`test_upload_question_data_flow_worker.py` 走真实 HTTP/worker/审核/聚类且不 seed 中间产物 |
+
+`integration/test_upload_recovery_stack.py` 的 fixture **只 patch `app.db.connection.DB_PATH` + `_db_conn_var`**，不得逐模块 patch `get_db_connection`：测试期间才被导入的模块会永久绑定那个闭包，teardown 无法还原，后续测试会拿到已关闭的连接。
 
 `conftest.py` 的 `questions_detail` fixture 必须与生产写入列一致；当前包含 `diff_tag` 和 migration 042 添加的分布事实列。
 

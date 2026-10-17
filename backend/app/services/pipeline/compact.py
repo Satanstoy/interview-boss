@@ -10,7 +10,6 @@ import logging
 from typing import List, Dict
 
 from app.db.connection import get_db_connection
-from app.db.question_bank_sources import delete_all_for_qb
 from app.services.question_bank_integrity import sync_question_bank_projections
 from app.core.config import (
     CLUSTER_BATCH_SIZE,
@@ -148,7 +147,7 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
     row = conn.execute(
         "SELECT id, question, cat1, cat2, tags, difficulty, frequency, "
         "ai_answer, answer_sources, sources, original_questions, original_question_sources, "
-        "status, job_position, created_at, updated_at "
+        "owner_id, status, job_position, created_at, updated_at "
         "FROM question_bank WHERE id = ?",
         (qb_id,),
     ).fetchone()
@@ -163,13 +162,13 @@ def _snapshot_question(conn, qb_id: int) -> Dict:
 
 
 async def _load_existing_clusters_for_compact() -> Dict[str, List[Dict]]:
-    """加载所有 frequency>1 且未删除的题(id, question, cat2),按 cat2 分组"""
+    """加载公共 frequency>1 且未删除的题(id, question, cat2),按 cat2 分组"""
 
     def _query():
         conn = get_db_connection()
         rows = conn.execute(
             "SELECT id, question, cat2 FROM question_bank "
-            "WHERE status = 'approved' AND deleted_at IS NULL "
+            "WHERE owner_id IS NULL AND status = 'approved' AND deleted_at IS NULL "
             "AND frequency > 1 ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -204,8 +203,24 @@ def _do_merge_to_existing(
     if not existing:
         return
 
+    # Candidate selection is not authorization: recheck both current rows
+    # inside the caller's write transaction, including stale model inputs.
+    participant_rows = conn.execute(
+        "SELECT id,owner_id,status,deleted_at FROM question_bank WHERE id IN (?,?)",
+        (survivor_id, entry["id"]),
+    ).fetchall()
+    if len(participant_rows) != 2 or any(
+        row["owner_id"] is not None or row["status"] != "approved" or row["deleted_at"] is not None
+        for row in participant_rows
+    ):
+        raise ValueError("公共聚类整理仅允许操作有效公共题目")
+
     # 合并前快照
     pre_snapshot = _snapshot_question(conn, survivor_id)
+    pre_snapshot["participant_owners"] = {
+        str(row["id"]): row["owner_id"]
+        for row in participant_rows
+    }
 
     s_src = _safe_json_list(existing["sources"])
     s_oqs = _safe_json_list(existing["original_questions"])
@@ -254,14 +269,15 @@ def _do_merge_to_existing(
             oqs_entry.get("sources", []),
         )
 
-    try:
-        delete_all_for_qb(conn, entry["id"])
-    except Exception as e:
-        logger.warning(
-            f"[合并] 清理被合并题 normalized 数据失败 (id={entry['id']}): {e}"
-        )
-    conn.execute("DELETE FROM question_bank WHERE id = ?", (entry["id"],))
-    conn.execute("DELETE FROM question_position WHERE question_id = ?", (entry["id"],))
+    # Keep the canonical row for private/historical resolutions and practice
+    # references; merging must not cascade away their retained history.
+    from app.services.question_resolution import invalidate_resolutions_for_canonical
+
+    invalidate_resolutions_for_canonical(conn, canonical_id=entry["id"], reason="canonical_merged")
+    conn.execute(
+        "UPDATE question_bank SET deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (entry["id"],),
+    )
 
     conn.execute(
         "UPDATE question_bank SET frequency = ?, sources = ?, "

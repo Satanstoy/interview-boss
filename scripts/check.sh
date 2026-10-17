@@ -10,7 +10,7 @@ TEST_IMAGE_READY=0
 TEST_IMAGE_TAG="${INTERVIEW_BOSS_TEST_TAG:-$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo local)}"
 TEST_BUILDKIT_BUILDER="${BUILDKIT_BUILDER:-interview-boss}"
 TEST_BUILDKIT_DRIVER="${BUILDKIT_BUILDER_DRIVER:-docker-container}"
-TEST_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-6144}"
+TEST_HARD_MIN_FREE_MB="${DEPLOY_HARD_MIN_FREE_MB:-4096}"
 
 prepare_test_project() {
   if [ -z "$TEST_COMPOSE_PROJECT" ]; then
@@ -180,13 +180,19 @@ run_backend() {
       backend/tests/services/test_router_refactor.py \
       -q
 
-  # 全量关键子集 pytest(audit WARN 不拦截): 让完整失败面进入门禁报告。
-  # 已知既有失败(非本次引入)不会让门禁恒红; 收敛后可将此段改为 blocking。
-  run_nonblocking "backend full tests" \
+  # 默认后端测试全集已恢复为 0 failed，作为发布 blocking gate。
+  run_blocking "backend full tests" \
     compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
-      backend/tests/bank backend/tests/chat backend/tests/pipeline \
-      backend/tests/services backend/tests/security backend/tests/infra \
+      backend/tests \
       -q --tb=no
+
+  local schema_source_commit
+  schema_source_commit=$(git -C "$PROJECT_DIR" log -1 --format=%h -- backend/app/db/migrations 2>/dev/null || echo unknown)
+  run_blocking "schema docs freshness" \
+    compose_test run --rm \
+    -e ADMIN_PASSWORD=schema-check-placeholder \
+    -e SCHEMA_SOURCE_MIGRATION_COMMIT="$schema_source_commit" \
+    test uv run python /app/scripts/generate_schema_docs.py --check
 }
 
 run_frontend() {
@@ -194,6 +200,12 @@ run_frontend() {
 
   run_blocking "frontend build" \
     bash -lc "cd '$PROJECT_DIR/frontend' && npm run build"
+
+  run_blocking "frontend eslint" \
+    bash -lc "cd '$PROJECT_DIR/frontend' && npm run lint"
+
+  run_blocking "frontend type-check" \
+    bash -lc "cd '$PROJECT_DIR/frontend' && npm run type-check"
 
   run_blocking "frontend tests" \
     bash -lc "cd '$PROJECT_DIR/frontend' && npm run test"
@@ -261,8 +273,9 @@ run_static_backend() {
   run_blocking "backend ruff" \
     compose_test run --rm test uv run ruff check backend/app
 
-  run_nonblocking "backend mypy" \
-    compose_test run --rm test uv run mypy backend/app
+  run_blocking "backend mypy baseline" \
+    compose_test run --rm test bash /app/scripts/check_mypy_baseline.sh
+
 }
 
 run_static_frontend() {
@@ -271,12 +284,12 @@ run_static_frontend() {
     return
   fi
 
-  run_nonblocking "frontend eslint" \
+  run_blocking "frontend eslint" \
     bash -lc "cd '$PROJECT_DIR/frontend' && npm run lint"
 }
 
 run_audit() {
-  echo "AUDIT: reported only, non-blocking in this phase"
+  echo "AUDIT: dependency audit is WARN-only; static quality gates are blocking"
   run_frontend_audit
   run_backend_audit
   run_static_backend

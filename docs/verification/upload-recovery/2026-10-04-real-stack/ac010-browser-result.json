@@ -1,0 +1,573 @@
+{
+  "users": [
+    {
+      "username": "ac010_u1",
+      "user_id": 2,
+      "import_id": "imp-ac010-real-stack-u1"
+    },
+    {
+      "username": "ac010_u2",
+      "user_id": 3,
+      "import_id": "imp-ac010-real-stack-u2"
+    },
+    {
+      "username": "ac010_u2",
+      "user_id": 3,
+      "import_id": "imp-ac010-real-stack-u2-recoverable"
+    }
+  ],
+  "initial_snapshot_revision": 8,
+  "stale_snapshot_revision": 7,
+  "stale_revision_kept_out_of_ui": true,
+  "list_get_failure_statuses": [
+    500,
+    500,
+    500,
+    500,
+    500
+  ],
+  "detail_get_failure_statuses": [
+    500
+  ],
+  "recovery_failure_statuses": [
+    500,
+    500,
+    500
+  ],
+  "heartbeat_seen": true,
+  "user1_stream_count_at_switch": 2,
+  "user2_stream_count_after_switch": 2,
+  "old_draft_cleared": true,
+  "recovery_draft_preserved": true,
+  "generic_get_cache_user_after_switch": 3,
+  "network": [
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 200
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+      "status": 200
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2",
+      "status": 404
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+      "status": 200
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 500
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 401
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 401
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "requestfailed",
+      "path": "/api/jobs/1/stream",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "type": "requestfailed",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 200
+    },
+    {
+      "type": "request",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+      "status": 200
+    },
+    {
+      "type": "request",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "status": 500
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 401
+    },
+    {
+      "type": "request",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "status": 500
+    },
+    {
+      "type": "response",
+      "method": "GET",
+      "path": "/api/upload-imports",
+      "status": 401
+    },
+    {
+      "type": "request",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "fault": ""
+    },
+    {
+      "type": "response",
+      "method": "POST",
+      "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+      "status": 500
+    }
+  ],
+  "proxy": {
+    "requests": [
+      {
+        "at": 1791113470.610907,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113470.733495,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113470.736658,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113470.7820866,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+        "mode": "truncate-after-snapshot",
+        "status": 200
+      },
+      {
+        "at": 1791113470.9543378,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2",
+        "mode": "",
+        "status": 404
+      },
+      {
+        "at": 1791113475.9620836,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113476.9513586,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113477.9858382,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113480.996832,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113481.4246204,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113485.3099127,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113485.3612404,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113486.3727903,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113491.6712778,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "delay-401",
+        "status": 401
+      },
+      {
+        "at": 1791113492.380165,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "delay-401",
+        "status": 401
+      },
+      {
+        "at": 1791113493.8362763,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113493.8760524,
+        "method": "GET",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "status": 200
+      },
+      {
+        "at": 1791113494.3224301,
+        "method": "POST",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113494.7058733,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "delay-401",
+        "status": 401
+      },
+      {
+        "at": 1791113495.3361728,
+        "method": "POST",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+        "mode": "http-500",
+        "status": 500
+      },
+      {
+        "at": 1791113495.4110272,
+        "method": "GET",
+        "path": "/api/upload-imports",
+        "mode": "delay-401",
+        "status": 401
+      },
+      {
+        "at": 1791113498.3538973,
+        "method": "POST",
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2-recoverable/retry",
+        "mode": "http-500",
+        "status": 500
+      }
+    ],
+    "events": [
+      {
+        "at": 1791113470.7387898,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "event": "snapshot",
+        "id": "8",
+        "snapshot": {
+          "import_id": "imp-ac010-real-stack-u2",
+          "revision": 8,
+          "status": "running",
+          "stage": "answer",
+          "progress": {
+            "unit": "questions",
+            "completed": 0,
+            "total": 1
+          },
+          "counts": {
+            "extracted": 1,
+            "retained": 1,
+            "excluded": 0,
+            "needs_review": 0,
+            "resolved": 0,
+            "answered": 0,
+            "failed": 0,
+            "total": 1
+          }
+        }
+      },
+      {
+        "at": 1791113470.7855504,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+        "mode": "truncate-after-snapshot",
+        "event": "snapshot",
+        "id": "8",
+        "snapshot": {
+          "import_id": "imp-ac010-real-stack-u1",
+          "revision": 8,
+          "status": "running",
+          "stage": "answer",
+          "progress": {
+            "unit": "questions",
+            "completed": 0,
+            "total": 1
+          },
+          "counts": {
+            "extracted": 1,
+            "retained": 1,
+            "excluded": 0,
+            "needs_review": 0,
+            "resolved": 0,
+            "answered": 0,
+            "failed": 0,
+            "total": 1
+          }
+        }
+      },
+      {
+        "at": 1791113475.9675093,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+        "mode": "",
+        "event": "snapshot",
+        "id": "7",
+        "snapshot": {
+          "import_id": "imp-ac010-real-stack-u1",
+          "revision": 7,
+          "status": "running",
+          "stage": "answer",
+          "progress": {
+            "unit": "questions",
+            "completed": 0,
+            "total": 1
+          },
+          "counts": {
+            "extracted": 1,
+            "retained": 1,
+            "excluded": 0,
+            "needs_review": 0,
+            "resolved": 0,
+            "answered": 0,
+            "failed": 0,
+            "total": 1
+          }
+        }
+      },
+      {
+        "at": 1791113482.7676568,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "event": "heartbeat"
+      },
+      {
+        "at": 1791113487.9984574,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u1/stream",
+        "mode": "",
+        "event": "heartbeat"
+      },
+      {
+        "at": 1791113493.8805697,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "event": "snapshot",
+        "id": "8",
+        "snapshot": {
+          "import_id": "imp-ac010-real-stack-u2",
+          "revision": 8,
+          "status": "running",
+          "stage": "answer",
+          "progress": {
+            "unit": "questions",
+            "completed": 0,
+            "total": 1
+          },
+          "counts": {
+            "extracted": 1,
+            "retained": 1,
+            "excluded": 0,
+            "needs_review": 0,
+            "resolved": 0,
+            "answered": 0,
+            "failed": 0,
+            "total": 1
+          }
+        }
+      },
+      {
+        "at": 1791113496.8189058,
+        "path": "/api/upload-imports/imp-ac010-real-stack-u2/stream",
+        "mode": "",
+        "event": "heartbeat"
+      }
+    ]
+  }
+}

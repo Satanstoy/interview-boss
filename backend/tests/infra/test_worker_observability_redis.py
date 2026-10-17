@@ -9,6 +9,12 @@ import pytest
 from app.core import cache
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 class FakeRedis:
     """与 tests/cache/test_master_bank_cache.py 一致的 async 假客户端。"""
 

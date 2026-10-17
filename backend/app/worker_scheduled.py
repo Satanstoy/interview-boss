@@ -12,6 +12,7 @@ from app.worker_enqueue import (
     enqueue_cluster_batch_job,
     enqueue_cluster_rebuild_job,
     enqueue_cluster_review_task,
+    enqueue_credential_preflight_job,
     enqueue_generate_answer_job,
     enqueue_generate_recitation_job,
     enqueue_interview_import_analysis_job,
@@ -23,6 +24,42 @@ from app.worker_enqueue import (
 )
 
 logger = logging.getLogger("interview-boss")
+
+
+async def dispatch_answer_jobs(job_ids: list[int]):
+    """Hand newly committed answers to ARQ now; retain the outbox on failure."""
+    from app.db.connection import get_db_connection
+    from app.services.job_lifecycle import (
+        ANSWER_GENERATION_JOB_TYPE, claim_dispatch_batch,
+        mark_job_dispatched, mark_dispatch_failed,
+    )
+
+    def _reserve():
+        with get_db_connection() as conn:
+            rows = claim_dispatch_batch(conn, ANSWER_GENERATION_JOB_TYPE,
+                                        limit=len(job_ids), job_ids=job_ids)
+            conn.commit()
+            return rows
+
+    for row in await asyncio.to_thread(_reserve):
+        job_id = row["id"]
+        try:
+            arq_job = await enqueue_generate_answer_job(job_id)
+            arq_id = getattr(arq_job, "job_id", None)
+            if not arq_id:
+                raise RuntimeError("ARQ 未返回 job_id")
+            def _mark():
+                with get_db_connection() as conn:
+                    mark_job_dispatched(conn, job_id, str(arq_id))
+                    conn.commit()
+            await asyncio.to_thread(_mark)
+        except Exception as exc:
+            logger.warning("答案即时派发失败，保留补偿任务 job=%s: %s", job_id, exc)
+            def _reset(error=str(exc)):
+                with get_db_connection() as conn:
+                    mark_dispatch_failed(conn, job_id, error)
+                    conn.commit()
+            await asyncio.to_thread(_reset)
 
 
 async def scheduled_eval_expiry_task(ctx):
@@ -190,6 +227,18 @@ async def scheduled_submit_job_dispatch_task(ctx):
 
     def _reserve(job_type):
         with get_db_connection() as conn:
+            if job_type == CLUSTER_REBUILD_JOB_TYPE:
+                # Keep the check and reservation atomic with batch completion
+                # and new batch creation. A pending rebuild blocks new batches;
+                # this gate lets an already active batch finish first.
+                from app.services.pipeline.queue import (
+                    has_active_rootless_cluster_batch_job,
+                )
+
+                conn.execute("BEGIN IMMEDIATE")
+                if has_active_rootless_cluster_batch_job(conn):
+                    conn.rollback()
+                    return []
             jobs = claim_dispatch_batch(
                 conn, job_type=job_type, limit=10
             )
@@ -198,6 +247,7 @@ async def scheduled_submit_job_dispatch_task(ctx):
 
     enqueuers = {
         SUBMIT_IMPORT_JOB_TYPE: enqueue_submit_import_job,
+        "credential_preflight": enqueue_credential_preflight_job,
         ANSWER_GENERATION_JOB_TYPE: enqueue_generate_answer_job,
         CLUSTER_BATCH_JOB_TYPE: enqueue_cluster_batch_job,
         CLUSTER_REBUILD_JOB_TYPE: enqueue_cluster_rebuild_job,
@@ -259,6 +309,37 @@ async def scheduled_submit_job_dispatch_task(ctx):
     }
     logger.info("[上传任务] dispatcher 完成: %s", result)
     return result
+
+
+async def scheduled_upload_queue_reconcile_task(ctx):
+    """AC-007：恢复有 durable queue row、但缺少待执行 job 的分析工作。
+
+    覆盖带 root 的 v2 桶以及私人 rootless 队列行。重复运行会复用/忽略
+    已有活跃 rootless job；缺失 job 时由 durable scheduler 补建。
+    """
+    from app.db.connection import get_db_connection
+    from app.services.upload_queue import reconcile_pending_buckets
+    from app.services.personal_analysis_recovery import (
+        oldest_pending_personal_rootless_owner,
+    )
+
+    def _run():
+        with get_db_connection() as conn:
+            report = reconcile_pending_buckets(conn)
+            rootless_owner_id = oldest_pending_personal_rootless_owner(conn)
+            conn.commit()
+            return report, rootless_owner_id
+
+    report, rootless_owner_id = await asyncio.to_thread(_run)
+    if rootless_owner_id is not None:
+        from app.services.pipeline.queue import _run_cluster_batch_in_background
+
+        report["rootless_personal_owner_id"] = rootless_owner_id
+        report["rootless_personal_job_scheduled"] = bool(
+            await _run_cluster_batch_in_background(user_id=rootless_owner_id)
+        )
+    logger.info("[上传队列] 对账完成: %s", report)
+    return report
 
 
 async def scheduled_cluster_review_dispatch_task(ctx):
@@ -390,8 +471,34 @@ def run_db_retention(conn) -> dict:
         "AND updated_at < datetime('now', '-30 days')"
     )
     deleted["login_failures"] = cur.rowcount
+    # v2 恢复资料（AC-026）：活跃/needs_action/partial_failed/failed 一律保留；
+    # completed 超 90 天只清大正文，保留 import 摘要与结果引用。
     cur = conn.execute(
-        "DELETE FROM jobs WHERE status IN ('completed', 'failed') "
+        "UPDATE upload_imports SET payload_json = '{}', "
+        "payload_expires_at = COALESCE(payload_expires_at, datetime('now')) "
+        "WHERE status = 'completed' AND updated_at < datetime('now', '-90 days') "
+        "AND payload_json IS NOT NULL AND payload_json != '{}'"
+    )
+    deleted["upload_imports_payloads"] = cur.rowcount
+    cur = conn.execute(
+        "UPDATE job_payloads SET payload = '{}' WHERE job_id IN ("
+        "  SELECT j.id FROM jobs j JOIN upload_imports i ON i.id = j.root_import_id "
+        "  WHERE i.status = 'completed' AND j.completed_at < datetime('now', '-90 days')"
+        ") AND payload IS NOT NULL AND payload != '{}'"
+    )
+    deleted["job_payloads"] = cur.rowcount
+    cur = conn.execute(
+        "UPDATE upload_stage_results SET result_json = NULL WHERE import_id IN ("
+        "  SELECT id FROM upload_imports WHERE status = 'completed' "
+        "  AND updated_at < datetime('now', '-90 days')"
+        ") AND result_json IS NOT NULL"
+    )
+    deleted["upload_stage_results"] = cur.rowcount
+
+    # 仅清理陈旧的遗留 completed 叶子任务；failed 与 v2 归属任务一律保留
+    cur = conn.execute(
+        "DELETE FROM jobs WHERE status = 'completed' "
+        "AND root_import_id IS NULL "
         "AND completed_at < datetime('now', '-90 days') "
         "AND NOT EXISTS (SELECT 1 FROM jobs c WHERE c.parent_job_id = jobs.id)"
     )

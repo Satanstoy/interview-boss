@@ -10,8 +10,10 @@ import logging
 import os
 import sqlite3
 
-from app.core.config import DB_PATH
+from app.core.config import DB_PATH as DB_PATH
 from app.db.migrations.data_repair_2 import migration_091_repair_fk_orphans
+from app.db.migrations.question_promotions import _migration_126_question_promotions
+from app.db.migrations.import_quality import _migration_128_python_tags, _migration_129_answer_review
 
 # 破坏性迁移版本（含数据删除/表重建/格式转换）：执行前自动整库备份 + 临时关闭 FK 约束
 DESTRUCTIVE_VERSIONS = {81, 82, 84, 85, 86, 90, 91, 92, 115}
@@ -37,6 +39,19 @@ def _backup_before_destructive(db_path: str, version: int, name: str) -> str | N
     return dest
 
 
+def _conn_file_path(conn) -> str | None:
+    """迁移目标数据库的实际文件路径；内存库返回 None。
+
+    破坏性迁移备份必须备份**正在迁移的库**，不能一律备份全局 DB_PATH：
+    迁移测试库/临时库时误备份生产库既无用又危险。
+    """
+    try:
+        row = conn.execute("PRAGMA database_list").fetchone()
+        return row[2] if row and row[2] else None
+    except Exception:
+        return None
+
+
 def _conn_is_memory(conn) -> bool:
     """迁移连接是否指向内存库（测试环境），避免误备份生产文件。"""
     try:
@@ -44,6 +59,23 @@ def _conn_is_memory(conn) -> bool:
         return bool(row and row[1] == "main" and row[2] == "")
     except Exception:
         return True
+
+
+# These identities were shipped on the onboarding/evaluation branch before
+# upload recovery reused their version numbers. Never rewrite their history.
+_LEGACY_MIGRATION_NAMES = {
+    121: "onboarding", 122: "onboarding_revision",
+    123: "user_owned_fk_cleanup", 124: "onboarding_actions",
+    125: "evaluation_review_identity", 126: "evaluation_worker_claim",
+}
+
+
+def _migration_127_reconcile_branch_identities(conn):
+    """Record completion of reconciliation performed in dependency order.
+
+    The runner applies colliding additions at their original position before
+    dependent migrations, preserving each shipped version/name record.
+    """
 
 
 # ── Domain submodules ──────────────────────────────────────────────────────
@@ -55,6 +87,20 @@ from app.db.migrations.question_bank import (
     _migration_006_job_positions,
     _migration_007_taxonomy,
     _migration_063_answer_sources,
+    _migration_118_jd_bonus,
+)
+from app.db.migrations.admin_audit import _migration_119_admin_audit_log
+from app.db.migrations.clear_db_confirmation import (
+    _migration_120_clear_db_confirmations,
+)
+from app.db.migrations.upload_recovery import (
+    _migration_121_upload_recovery_core,
+    _migration_125_upload_llm_api_format,
+)
+from app.db.migrations.upload_resolution import (
+    _migration_122_upload_resolution,
+    _migration_123_public_publish_gate,
+    _migration_124_upload_spec_stage_names,
 )
 from app.db.migrations.auth import (
     _migration_003_auth_tables,
@@ -329,11 +375,26 @@ _MIGRATIONS = [
     (115, "evaluation_lifecycle", _migration_115_evaluation_lifecycle),
     (116, "evaluation_resume", _migration_116_evaluation_resume),
     (117, "evaluation_resume_idempotency", _migration_117_evaluation_resume_idempotency),
+    (118, "jd_bonus", _migration_118_jd_bonus),
+    (119, "admin_audit_log", _migration_119_admin_audit_log),
+    (120, "clear_db_confirmations", _migration_120_clear_db_confirmations),
+    (121, "upload_recovery_core", _migration_121_upload_recovery_core),
+    (122, "upload_resolution", _migration_122_upload_resolution),
+    (123, "public_publish_gate", _migration_123_public_publish_gate),
+    (124, "upload_spec_stage_names", _migration_124_upload_spec_stage_names),
+    (125, "upload_llm_api_format", _migration_125_upload_llm_api_format),
+    (126, "question_promotions", _migration_126_question_promotions),
+    (127, "reconcile_branch_identities", _migration_127_reconcile_branch_identities),
+    (128, "python_tags", _migration_128_python_tags),
+    (129, "answer_review", _migration_129_answer_review),
 ]
 
 
 def run_migrations(conn):
     """Apply all pending migrations in order."""
+    versions = [version for version, _, _ in _MIGRATIONS]
+    if len(versions) != len(set(versions)):
+        raise RuntimeError("Duplicate migration version in registry")
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -342,17 +403,32 @@ def run_migrations(conn):
             applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    applied = {row[0] for row in cursor.execute("SELECT version FROM schema_version").fetchall()}
+    applied = dict(cursor.execute("SELECT version, name FROM schema_version").fetchall())
+    # Validate all identities before applying anything, so an unknown collision
+    # cannot leave a partially upgraded database or silently skip required DDL.
+    for version, name, _ in _MIGRATIONS:
+        previous = applied.get(version)
+        if previous is not None and previous != name and previous != _LEGACY_MIGRATION_NAMES.get(version):
+            raise RuntimeError(
+                f"Migration identity mismatch at {version:03d}: recorded {previous!r}, expected {name!r}"
+            )
     for version, name, func in _MIGRATIONS:
-        if version in applied:
+        reconcile = (
+            version in _LEGACY_MIGRATION_NAMES
+            and applied.get(version) == _LEGACY_MIGRATION_NAMES[version]
+            and 127 not in applied
+        )
+        if version in applied and not reconcile:
             continue
         logger.info(f"Applying migration {version:03d}: {name}")
         destructive = version in DESTRUCTIVE_VERSIONS
         fk_was_on = False
         if destructive:
-            # 数据安全：破坏性迁移前整库备份（内存库/文件缺失则跳过）
-            if not _conn_is_memory(conn):
-                _backup_before_destructive(DB_PATH, version, name)
+            # 数据安全：破坏性迁移前整库备份（内存库/文件缺失则跳过）；
+            # 备份对象必须是正在迁移的库，而不是全局生产路径。
+            target_path = _conn_file_path(conn)
+            if target_path:
+                _backup_before_destructive(target_path, version, name)
             # PRAGMA foreign_keys 只能在事务外切换；表重建期间必须关闭，
             # 否则 DROP 父表会触发隐式 DELETE 级联清空子表
             fk_was_on = bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
@@ -361,10 +437,11 @@ def run_migrations(conn):
         cursor.execute("BEGIN")
         try:
             func(conn)
-            cursor.execute(
-                "INSERT INTO schema_version (version, name) VALUES (?, ?)",
-                (version, name),
-            )
+            if not reconcile:
+                cursor.execute(
+                    "INSERT INTO schema_version (version, name) VALUES (?, ?)",
+                    (version, name),
+                )
             cursor.execute("COMMIT")
         except Exception:
             cursor.execute("ROLLBACK")

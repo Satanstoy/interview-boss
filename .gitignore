@@ -27,6 +27,8 @@ backend/data/
 
 # Node
 node_modules/
+# The development dependency wrapper links this path to the data-disk cache.
+frontend/node_modules
 
 # 构建产物
 frontend/dist/
@@ -56,6 +58,7 @@ htmlcov/
 # 脚本临时文件（只忽略临时/报告文件，保留 CLAUDE.md、check_embedding_health.py、backfill_embeddings.py）
 backend/scripts/*
 !backend/scripts/CLAUDE.md
+!backend/scripts/evaluate_import_pair_cases.py
 !backend/scripts/check_embedding_health.py
 !backend/scripts/backfill_embeddings.py
 !backend/scripts/eval_interview_agent.py

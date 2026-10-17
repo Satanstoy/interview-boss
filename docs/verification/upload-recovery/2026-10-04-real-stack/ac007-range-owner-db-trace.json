@@ -1,0 +1,140 @@
+{
+  "attempt_two_jobs": [
+    {
+      "created_by": 2,
+      "id": 2,
+      "job_type": "credential_preflight",
+      "status": "completed",
+      "upload_attempt_id": 2,
+      "work_key": "preflight:credential:v1:user"
+    },
+    {
+      "created_by": 2,
+      "id": 3,
+      "job_type": "submit_import",
+      "status": "completed",
+      "upload_attempt_id": 2,
+      "work_key": "extract:document:v1"
+    },
+    {
+      "created_by": 2,
+      "id": 4,
+      "job_type": "cluster_batch",
+      "status": "completed",
+      "upload_attempt_id": 2,
+      "work_key": "cluster:imp-ac007-owner-retry-real-stack:user:2:agent开发/大模型应用开发/大模型开发:v1"
+    },
+    {
+      "created_by": 2,
+      "id": 5,
+      "job_type": "generate_answer",
+      "status": "completed",
+      "upload_attempt_id": 2,
+      "work_key": "answer:1:v1"
+    }
+  ],
+  "attempts": [
+    {
+      "attempt_no": 1,
+      "id": 1,
+      "requested_by": 2,
+      "status": "failed"
+    },
+    {
+      "attempt_no": 2,
+      "id": 2,
+      "requested_by": 2,
+      "status": "completed"
+    }
+  ],
+  "checkpoint": {
+    "id": 1,
+    "job_id": 1,
+    "output_hash": "b03d9b8092930d52b8a435531fa92fc7b089c1e3329c138b3ac24622b4066869",
+    "status": "succeeded"
+  },
+  "classification_checkpoint": {
+    "error_code": null,
+    "id": 2,
+    "job_id": 3,
+    "output_hash": "a675daf201adaacceb78dc3889c0283b133319c60cef188ddaec2060e987476c",
+    "result_json": "{\"tagged_rows\": [[\"https://ac007.example/recoverable-source\", \"AC007_OWNER_RETRY_REAL_STACK 公司\", \"一面\", \"AC007 checkpoint question: explain database transaction isolation.\", \"B.Agent与LLM应用\", \"B1.Agent架构与范式\", \"Agent架构设计\", \"L2-中等\"]]}",
+    "retryable": 0,
+    "status": "succeeded"
+  },
+  "private_interview": {
+    "id": 3,
+    "owner_id": 2,
+    "publish_status": "published"
+  },
+  "public_contribution_exclusion": {
+    "contribution_request_id": 1,
+    "id": 2,
+    "interview_owner_id": null,
+    "item_status": "failed",
+    "owner_id": null,
+    "queue_status": "failed",
+    "request_status": "failed",
+    "root_import_id": null
+  },
+  "root": {
+    "current_attempt_no": 2,
+    "id": "imp-ac007-owner-retry-real-stack",
+    "interview_id": 3,
+    "requester_id": 2,
+    "status": "completed"
+  },
+  "rootless_retry": {
+    "private_bank_clusters": [
+      {
+        "id": 2,
+        "job_position": "agent开发/大模型应用开发/大模型开发",
+        "original_question_sources": "[{\"question\": \"AC007 rootless retry question: explain an idempotent queue consumer.\", \"sources\": [{\"url\": \"internal://ac007-rootless-retry\", \"company\": \"AC007 rootless private company\", \"round\": \"一面\"}]}]",
+        "original_questions": "[\"AC007 rootless retry question: explain an idempotent queue consumer.\"]",
+        "owner_id": 2,
+        "question": "AC007 rootless retry question: explain an idempotent queue consumer.",
+        "sources": "[{\"url\": \"internal://ac007-rootless-retry\", \"company\": \"AC007 rootless private company\", \"round\": \"一面\"}]"
+      }
+    ],
+    "queue_row": {
+      "detail_import_id": null,
+      "id": 1,
+      "interview_id": 1,
+      "interview_job_position": "agent开发/大模型应用开发/大模型开发",
+      "interview_owner_id": 2,
+      "owner_id": 2,
+      "question": "AC007 rootless retry question: explain an idempotent queue consumer.",
+      "question_detail_id": 1,
+      "root_import_id": null,
+      "status": "done"
+    },
+    "upload_attempts_total": 2,
+    "upload_roots_linked": 0,
+    "worker_jobs": [
+      {
+        "created_by": 2,
+        "id": 6,
+        "root_import_id": null,
+        "status": "completed",
+        "upload_attempt_id": null
+      }
+    ]
+  },
+  "upload_llm_calls": [
+    {
+      "stage": "credential_preflight",
+      "status": "succeeded",
+      "unit_key": "initial:user:attempt:2"
+    },
+    {
+      "stage": "classify",
+      "status": "succeeded",
+      "unit_key": "question-batch"
+    },
+    {
+      "stage": "answer",
+      "status": "succeeded",
+      "unit_key": "question:1"
+    }
+  ]
+}

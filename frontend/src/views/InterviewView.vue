@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto px-2 py-2 custom-scrollbar sm:gap-4 sm:px-4 sm:py-4 md:px-6 md:py-6" style="position: relative;">
+  <div class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto px-2 py-2 pb-24 custom-scrollbar sm:gap-4 sm:px-4 sm:py-4 sm:pb-24 md:px-6 md:py-6 md:pb-24" style="position: relative;">
     <!-- 页头 -->
     <div class="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
       <div class="border-b border-border px-5 py-4">
@@ -8,8 +8,7 @@
             <FileText class="size-5 text-white" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-foreground">面经库</h3>
-            <p class="text-caption text-muted-foreground">浏览和管理面试经验数据</p>
+            <h1 class="text-lg font-bold text-foreground">面经库</h1>
           </div>
         </div>
       </div>
@@ -44,7 +43,14 @@
       </AppTooltip>
     </div>
 
-    <div v-if="filteredInterviewData.length === 0 && !isDataLoading" class="rounded-xl border border-dashed border-border bg-card p-6 text-center">
+    <div v-if="interviewLoadError" role="alert" class="rounded-xl border border-destructive/30 bg-card p-6 text-center">
+      <p class="text-sm text-destructive">面经加载失败：{{ interviewLoadError }}</p>
+      <button @click="retryInterviewPage" class="mt-3 text-sm text-primary hover:underline">重试加载面经</button>
+    </div>
+    <div v-else-if="isInterviewLoading" role="status" class="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+      正在加载面经…
+    </div>
+    <div v-else-if="filteredInterviewData.length === 0" class="rounded-xl border border-dashed border-border bg-card p-6 text-center">
       <FileText class="mx-auto mb-2 size-8 text-muted-foreground/50" />
       <p class="text-sm text-muted-foreground">暂无面经数据</p>
       <router-link to="/import" class="mt-2 inline-block text-sm text-primary hover:underline">去导入面经</router-link>
@@ -52,8 +58,10 @@
 
     <!-- Interview DataTable -->
     <InterviewDataTable
+      v-if="!interviewLoadError && !isInterviewLoading"
       :columns="interviewColumns"
       :rows="filteredInterviewData"
+      :server-total="interviewTotal"
       :selected-count="interviewSelection.selectedCount.value"
       :is-selected="(id) => interviewSelection.selectedIds.value.has(id)"
       :batch-actions="interviewBatchActions"
@@ -63,8 +71,8 @@
       @toggle-select-all="interviewSelection.toggleSelectAll()"
       @invert-selection="interviewSelection.invertSelection()"
       @toggle-item="interviewSelection.toggleItem($event)"
-      @update:current-page="interviewCurrentPage = $event"
-      @update:page-size="interviewPageSize = $event"
+      @update:current-page="onInterviewPageChange($event)"
+      @update:page-size="onInterviewPageSizeChange($event)"
     >
       <template #actions="{ row }">
         <div class="flex items-center justify-center gap-1">
@@ -157,6 +165,7 @@ const InterviewDataTable = DataTable
 const {
   filteredInterviewData, interviewSelection, interviewBatchActions,
   interviewCurrentPage, interviewPageSize,
+  isInterviewLoading, interviewLoadError,
   filterSeason, interviewSortOrder, interviewSeasons,
   highlightInterviewId, displayUser, safeUrl,
   saveField, deleteDataRow, reprocessInterview,
@@ -164,10 +173,27 @@ const {
   reprocessingIds, reprocessProgress,
   returnTab, handleReturn, floatingReturnBtn, floatingBtnStyle,
   returnToPracticeMode, formatDate,
+  interviewTotal,
+  loadInterviewPage,
 } = inject('appData')
 
 const toast = useToast()
 const contributionIds = ref(new Set())
+
+const retryInterviewPage = () => {
+  loadInterviewPage(interviewCurrentPage.value, interviewPageSize.value)
+}
+
+// R13/contracts §4.5：page/pageSize 变化时向服务端拉取对应页（server 模式）
+const onInterviewPageChange = (page) => {
+  interviewCurrentPage.value = page
+  loadInterviewPage(page, interviewPageSize.value)
+}
+const onInterviewPageSizeChange = (pageSize) => {
+  interviewPageSize.value = pageSize
+  interviewCurrentPage.value = 1
+  loadInterviewPage(1, pageSize)
+}
 
 const isOwnPrivateInterview = (row) => (
   row.owner_id != null && Number(row.owner_id) === Number(displayUser?.id)

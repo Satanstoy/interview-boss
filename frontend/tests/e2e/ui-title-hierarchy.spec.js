@@ -1,0 +1,131 @@
+import { expect, test } from '@playwright/test'
+
+async function openPreview(page, path, width = 1280) {
+  await page.setViewportSize({ width, height: 900 })
+  await page.goto(`${path}${path.includes('?') ? '&' : '?'}preview=1`)
+  await page.locator('main').waitFor()
+}
+
+test.describe('页面标题与导航层级', () => {
+  for (const width of [390, 700, 1280]) {
+    test(`面经页在 ${width}px 只显示一个页面主标题`, async ({ page }) => {
+      await openPreview(page, '/interview', width)
+
+      const appHeader = page.locator('main > header')
+      await expect(appHeader.getByText('面经库', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: '面经库', exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+    })
+  }
+
+  test('面经和 JD 页不显示复述页面用途的副标题', async ({ page }) => {
+    await openPreview(page, '/interview')
+    await expect(page.getByText('浏览和管理面试经验数据', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/jd')
+    await expect(page.getByText('管理岗位描述和招聘信息', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/insights/overview')
+    await expect(page.getByText('把岗位、题库和个人练习证据整理成下一步准备任务。', { exact: true })).toHaveCount(0)
+    await expect(page.locator('main > header').getByText('总览', { exact: true })).toHaveCount(0)
+  })
+
+  test('评测结果页不重复渲染侧栏已有的面包屑层级', async ({ page }) => {
+    await openPreview(page, '/admin/evals/results')
+
+    await expect(page.getByRole('heading', { name: '评测结果', exact: true })).toBeVisible()
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+    await expect(page.locator('main > header').getByText('评测结果', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('先看哪些 Case 没达标，再进入评测详情查看执行表现和业务结果。', { exact: true })).toHaveCount(0)
+  })
+
+  for (const width of [390, 700]) {
+    test(`评测结果页在 ${width}px 只显示一个页面主标题`, async ({ page }) => {
+      await openPreview(page, '/admin/evals/results', width)
+
+      await expect(page.getByRole('heading', { name: '评测结果', exact: true })).toBeVisible()
+      await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+      await expect(page.locator('main > header').getByText('评测结果', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
+    })
+  }
+
+  test('评测详情页不显示固定面包屑且返回按钮指向评测结果', async ({ page }) => {
+    await openPreview(page, '/admin/evals/runs/12')
+
+    await expect(page.getByRole('heading', { name: '评测详情 #12', exact: true })).toBeVisible()
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+    await page.getByRole('button', { name: '返回评测结果' }).click()
+    await expect(page).toHaveURL(/\/admin\/evals\/results/)
+  })
+
+  test('测评实验详情页不显示固定面包屑且返回按钮指向测评实验', async ({ page }) => {
+    await openPreview(page, '/admin/evals/experiments/77')
+
+    await expect(page.getByRole('heading', { name: '测评实验 #77', exact: true })).toBeVisible()
+    await expect(page.locator('nav[aria-label="breadcrumb"]')).toHaveCount(0)
+    await page.getByRole('button', { name: '返回测评实验' }).click()
+    await expect(page).toHaveURL(/\/admin\/evals\/experiments(\?|$)/)
+  })
+
+  test('题单管理页不显示练习页专用的全局题单控件', async ({ page }) => {
+    await openPreview(page, '/practice/decks')
+
+    await expect(page.getByRole('heading', { name: '题单管理', exact: true })).toBeVisible()
+    await expect(page.locator('[data-testid="practice-header"]')).toHaveCount(0)
+  })
+
+  test('练习页保留全局题单控件和管理入口', async ({ page }) => {
+    await openPreview(page, '/practice')
+
+    await expect(page.locator('[data-testid="practice-header"]')).toBeVisible()
+    await expect(page.locator('[data-testid="practice-deck-select"]')).toBeVisible()
+  })
+
+  test('没有内容区主标题的题库工作台仍显示顶栏当前位置', async ({ page }) => {
+    await openPreview(page, '/master-bank')
+
+    await expect(page.locator('main > header').getByText('高频题库', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(0)
+  })
+
+  test('移动端设置页不在工具栏重复当前栏目标题', async ({ page }) => {
+    await openPreview(page, '/settings', 390)
+
+    await expect(page.getByRole('heading', { name: '个人信息', exact: true })).toBeVisible()
+    await expect(page.locator('button[aria-label="切换设置菜单"] + span')).toHaveCount(0)
+    await page.getByRole('button', { name: '切换设置菜单' }).click()
+    await expect(page.getByRole('button', { name: /面试偏好/ })).toBeVisible()
+  })
+
+  test('设置栏目不显示复述标题的通用副标题', async ({ page }) => {
+    await openPreview(page, '/settings?section=ai')
+
+    await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toBeVisible()
+    await expect(page.getByText('配置大语言模型 API 连接参数', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/settings?section=admin')
+    await expect(page.getByRole('heading', { name: '管理员设置', exact: true })).toBeVisible()
+    await expect(page.getByText('管理系统级配置（仅管理员可见）', { exact: true })).toHaveCount(0)
+  })
+
+  test('导入页标题下不重复罗列表单已展示的输入方式', async ({ page }) => {
+    await openPreview(page, '/import')
+
+    await expect(page.getByRole('heading', { name: '导入', exact: true })).toBeVisible()
+    await expect(page.getByText('粘贴文本、补充截图或填写来源链接，提交后由后台任务完成提取和归档。', { exact: true })).toHaveCount(0)
+  })
+
+  test('聊天和编码空状态不重复说明开始方式', async ({ page }) => {
+    await openPreview(page, '/chat')
+    await page.getByRole('button', { name: '更多操作' }).first().click()
+    await page.getByRole('menuitem', { name: '删除' }).click()
+    await page.getByRole('button', { name: '确定', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '开始模拟面试', exact: true })).toBeVisible()
+    await expect(page.getByText('选择一种方式开始练习', { exact: true })).toHaveCount(0)
+
+    await openPreview(page, '/coding')
+    await expect(page.getByRole('heading', { name: '开始编码练习', exact: true })).toBeVisible()
+    await expect(page.getByText('从题目列表选择一道题开始练习', { exact: true })).toHaveCount(0)
+  })
+})

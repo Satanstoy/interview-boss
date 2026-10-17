@@ -1,0 +1,244 @@
+# Disposable real-stack smoke environment.
+# It deliberately has no env_file or host database mount: every run owns a
+# fresh SQLite volume and uses the local stub provider below.
+
+x-e2e-environment: &e2e-environment
+  ENV: test
+  DEBUG: "false"
+  JWT_SECRET: real-stack-e2e-jwt-secret-change-me-1234567890
+  OAUTH_SECRET_KEY: real-stack-e2e-oauth-secret-change-me-1234567890
+  ADMIN_USERNAME: real_stack_admin
+  ADMIN_PASSWORD: real-stack-admin-password-123
+  OPENAI_API_KEY: real-stack-e2e-provider-key
+  OPENAI_BASE_URL: http://llm-stub:8080/v1
+  LLM_MODEL_NAME: real-stack-stub
+  LLM_TIMEOUT: "10"
+  REDIS_HOST: redis
+  REDIS_CACHE_HOST: redis-cache
+  REDIS_PASSWORD: real-stack-redis-password
+  EMBEDDING_BACKEND: hash
+  EMBEDDING_OFFLINE: "1"
+  E2E_STUB_PROVIDER: "1"
+  AC022_E2E_AUDIT: "1"
+  CLUSTER_BATCH_SIZE: "1"
+  PYTHONUNBUFFERED: "1"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --save "" --appendonly no
+        --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: real-stack-redis-password
+    networks: [data-network]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  redis-cache:
+    image: redis:7.4-alpine
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --save "" --appendonly no --maxmemory 32mb
+        --maxmemory-policy allkeys-lru --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: real-stack-redis-password
+    networks: [data-network]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  llm-stub:
+    build:
+      context: ./e2e/stub-llm
+      dockerfile: Dockerfile
+    image: interview-boss-llm-stub:real-e2e
+    ports:
+      - "127.0.0.1:${REAL_STACK_STUB_PORT:-18082}:8080"
+    networks: [data-network]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runtime
+      network: host
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [edge-network, data-network]
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  worker:
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "arq", "app.worker.WorkerSettings"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          for f in /proc/[0-9]*/cmdline; do
+            tr '\0' ' ' < "$$f" | grep -q 'arq[ ]app\.worker\.WorkerSettings' && exit 0;
+          done;
+          exit 1
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  worker-ac009-a:
+    profiles: ["ac009-real"]
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "arq", "e2e.worker_settings_ac009.WorkerSettings"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+
+  worker-ac009-b:
+    profiles: ["ac009-real"]
+    image: interview-boss-app:real-e2e
+    environment: *e2e-environment
+    command: ["uv", "run", "arq", "e2e.worker_settings_ac009.WorkerSettings"]
+    volumes:
+      - real-e2e-data:/app/backend/data
+    networks: [data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      llm-stub:
+        condition: service_healthy
+
+  oauth-gateway:
+    build:
+      context: ./oauth-gateway
+      dockerfile: Dockerfile
+    image: interview-boss-oauth-gateway:real-e2e
+    environment:
+      ENV: test
+      OAUTH_SECRET_KEY: real-stack-e2e-oauth-secret-change-me-1234567890
+      INTERVIEW_BOSS_DB: /app/data/interview-boss.db
+      INTERVIEW_BOSS_URL: http://backend:8000
+      GATEWAY_BASE_URL: http://127.0.0.1:18081
+    volumes:
+      - real-e2e-data:/app/data:ro
+      - oauth-gateway-data:/app/oauth-data
+    networks: [edge-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  ac010-proxy:
+    image: interview-boss-app:real-e2e
+    command: ["python", "/app/backend/e2e/ac010_fault_proxy.py"]
+    environment:
+      AC010_CONTROL_TOKEN: real-stack-ac010-control-token
+      AC010_TRUNCATE_DELAY_SECONDS: "4"
+      PYTHONUNBUFFERED: "1"
+    networks: [edge-network, data-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: nginx-runtime
+      network: host
+    image: interview-boss-nginx:real-e2e
+    volumes:
+      - ./nginx/nginx.real-e2e.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${REAL_STACK_PORT:-18081}:8080"
+    networks: [edge-network]
+    depends_on:
+      backend:
+        condition: service_healthy
+      oauth-gateway:
+        condition: service_healthy
+      ac010-proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+networks:
+  edge-network:
+  data-network:
+
+volumes:
+  real-e2e-data:
+  oauth-gateway-data:

@@ -9,15 +9,30 @@
  * - 任务完成/失败时触发回调
  */
 import { ref, readonly } from 'vue'
-import { createSubmitJob, fetchActiveSubmitJobs, retrySubmitJob } from '@/services/dataApi.js'
-import { getSSE } from '@/services/http.js'
+import {
+  createSubmitJob,
+  createSubmitJobWithKey,
+  fetchActiveSubmitJobs,
+  fetchUploadImport,
+  fetchUploadImportByKey,
+  fetchUploadImports,
+  retrySubmitJob,
+  retryUploadImport,
+} from '@/services/dataApi.js'
+import { getSSE, getAuthGeneration, assertAuthGeneration } from '@/services/http.js'
 
 const STORAGE_KEY = 'interviewboss-submit-jobs'
+let _taskUserId = 'anonymous'
 
 // ── 全局状态（跨组件共享） ──
 const activeJobs = ref([])
 const _sseControllers = new Map()  // jobId → AbortController
+const _sseReconnectTimers = new Map()
 let _onJobDone = null
+
+function _scopedStorageKey(base) {
+  return `${base}:${_taskUserId}`
+}
 
 /**
  * 注册任务完成回调（由 App.vue 设置）
@@ -31,7 +46,7 @@ export function setOnJobDone(fn) {
  */
 function _loadStoredJobIds() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(_scopedStorageKey(STORAGE_KEY))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
@@ -44,9 +59,9 @@ function _persistJobIds() {
     .filter(j => j.status === 'pending' || j.status === 'queued' || j.status === 'running' || j.status === 'failed')
     .map(j => j.id)
   if (ids.length > 0) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
+    localStorage.setItem(_scopedStorageKey(STORAGE_KEY), JSON.stringify(ids))
   } else {
-    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(_scopedStorageKey(STORAGE_KEY))
   }
 }
 
@@ -100,6 +115,11 @@ function _removeJob(jobId) {
   if (ctrl) {
     try { ctrl.abort() } catch {}
     _sseControllers.delete(jobId)
+  }
+  const timer = _sseReconnectTimers.get(jobId)
+  if (timer) {
+    clearTimeout(timer)
+    _sseReconnectTimers.delete(jobId)
   }
   activeJobs.value = activeJobs.value.filter(j => j.id !== jobId)
   _persistJobIds()
@@ -167,7 +187,13 @@ function _subscribeJobSSE(jobId) {
     // 如果任务还在 pending/running，3 秒后尝试重连
     const currentJob = activeJobs.value.find(j => j.id === jobId)
     if (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending' || currentJob.status === 'queued')) {
-      setTimeout(() => _subscribeJobSSE(jobId), 3000)
+      const oldTimer = _sseReconnectTimers.get(jobId)
+      if (oldTimer) clearTimeout(oldTimer)
+      const timer = setTimeout(() => {
+        _sseReconnectTimers.delete(jobId)
+        if (activeJobs.value.some(j => j.id === jobId)) _subscribeJobSSE(jobId)
+      }, 3000)
+      _sseReconnectTimers.set(jobId, timer)
     }
   })
 }
@@ -292,4 +318,205 @@ export function useSubmitJobs() {
     retryJob,
     setOnJobDone,
   }
+}
+
+
+// ── 上传恢复 v2：幂等提交与 import_id 任务视图（AC-010/021/022） ──
+
+const DRAFT_KEY_PREFIX = 'interviewboss-submit-draft:'
+const TASK_STORAGE_KEY = 'interviewboss-upload-tasks'
+function _draftStorageKey(draftId) {
+  return `${DRAFT_KEY_PREFIX}${_taskUserId}:${draftId}`
+}
+export const TERMINAL_STATUSES = new Set([
+  'completed',
+  'failed',
+  'partial_failed',
+  'needs_action',
+  'waiting_review',
+])
+
+export function isTerminalStatus(status) {
+  return TERMINAL_STATUSES.has(status)
+}
+
+export function createIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `key-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+/** 一次提交 = 一个幂等键；草稿重发必须复用同一把键 */
+export function rememberDraftKey(draftId, key) {
+  if (!draftId) return
+  try {
+    localStorage.setItem(_draftStorageKey(draftId), key)
+  } catch { /* 隐私模式等场景忽略 */ }
+}
+
+export function getDraftKey(draftId) {
+  if (!draftId) return null
+  try {
+    return localStorage.getItem(_draftStorageKey(draftId))
+  } catch {
+    return null
+  }
+}
+
+export function clearDraftKey(draftId) {
+  if (!draftId) return
+  try {
+    localStorage.removeItem(_draftStorageKey(draftId))
+    localStorage.removeItem(`${_draftStorageKey(draftId)}:payload`)
+  } catch { /* 忽略 */ }
+}
+
+/**
+ * 幂等提交：同键同内容返回同一根任务；响应丢失先 by-key 查询，绝不直接新建。
+ * 返回 { ...importSnapshot, created, idempotency_key }。
+ */
+function announceUploadAccepted(result) {
+  if (result?.import_id || result?.job_id) window.dispatchEvent(new Event('upload-task-accepted'))
+}
+
+async function draftFingerprint(formData) {
+  if (!globalThis.crypto?.subtle) return null
+  const entries = []
+  for (const [name, value] of formData.entries()) {
+    if (typeof value === 'string') entries.push([name, value])
+    else {
+      const digest = await crypto.subtle.digest('SHA-256', await value.arrayBuffer())
+      entries.push([name, value.name, value.type, Array.from(new Uint8Array(digest))])
+    }
+  }
+  entries.sort(([first], [second]) => first.localeCompare(second))
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(entries)))
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function readDraftFingerprint(draftId, key) {
+  if (!draftId) return null
+  try {
+    const stored = JSON.parse(localStorage.getItem(`${_draftStorageKey(draftId)}:payload`) || 'null')
+    return stored?.key === key ? stored.hash : null
+  } catch { return null }
+}
+
+function saveDraftFingerprint(draftId, key, hash) {
+  if (!draftId || !hash) return
+  try {
+    localStorage.setItem(`${_draftStorageKey(draftId)}:payload`, JSON.stringify({ key, hash }))
+  } catch { /* Without storage, the server must validate the repeated payload. */ }
+}
+
+export async function submitUploadWithIdempotency(formData, { draftId } = {}) {
+  const generation = getAuthGeneration()
+  const userScope = _taskUserId
+  const assertContext = () => {
+    assertAuthGeneration(generation)
+    if (_taskUserId !== userScope) {
+      const error = new Error('登录身份已变化，请重新提交')
+      error.code = 'AUTH_CONTEXT_CHANGED'
+      throw error
+    }
+  }
+  const key = getDraftKey(draftId) || createIdempotencyKey()
+  rememberDraftKey(draftId, key)
+  const hash = await draftFingerprint(formData)
+  assertContext()
+  const previousHash = readDraftFingerprint(draftId, key)
+  let canRecover = Boolean(hash && previousHash === hash)
+
+  // 1) 先按幂等键查已有任务（网络重发/响应丢失恢复）
+  try {
+    const existing = await fetchUploadImportByKey(key)
+    assertContext()
+    if (existing?.import_id && hash && previousHash === hash) {
+      announceUploadAccepted(existing)
+      return { ...existing, created: false, idempotency_key: key }
+    }
+  } catch (error) {
+    assertContext()
+    if (error.code === 'AUTH_CONTEXT_CHANGED') throw error
+    if (error.status === 404) canRecover = Boolean(hash)
+    // 404 = 查无记录，继续提交
+  }
+
+  // Keep the first attempted payload fingerprint across ambiguous responses.
+  // An edited or unproven draft must reach the server's hash/conflict check.
+  const currentHash = readDraftFingerprint(draftId, key)
+  if (currentHash && currentHash !== hash) canRecover = false
+  if (!currentHash && canRecover) saveDraftFingerprint(draftId, key, hash)
+  try {
+    const result = await createSubmitJobWithKey(formData, key)
+    assertContext()
+    saveDraftFingerprint(draftId, key, hash)
+    announceUploadAccepted(result)
+    return { ...result, idempotency_key: key }
+  } catch (err) {
+    assertContext()
+    if (err.status === 409 || err.code === 'AUTH_CONTEXT_CHANGED') throw err
+    // 2) 响应可能已到达服务端：再查一次 by-key，绝不重复创建
+    try {
+      const recovered = await fetchUploadImportByKey(key)
+      assertContext()
+      if (recovered?.import_id && canRecover && hash && readDraftFingerprint(draftId, key) === hash) {
+        announceUploadAccepted(recovered)
+        return { ...recovered, created: false, idempotency_key: key }
+      }
+    } catch (error) {
+      assertContext()
+      if (error.code === 'AUTH_CONTEXT_CHANGED') throw error
+    }
+    throw err
+  }
+}
+
+/** 任务中心列表：本人任务分页 */
+export async function loadUploadTasks({ status, page = 1, pageSize = 20 } = {}) {
+  const params = { page, page_size: pageSize }
+  if (status) params.status = status
+  return fetchUploadImports(params)
+}
+
+export async function getUploadTask(importId) {
+  return fetchUploadImport(importId)
+}
+
+/** 恢复剩余工作：只补失败步骤，服务端保证幂等 */
+export async function retryUploadTask(importId) {
+  return retryUploadImport(importId)
+}
+
+/** 退出登录：断开全部 SSE、清计时器与本地缓存（不删除服务端任务） */
+export function abortAllTaskConnections() {
+  for (const controller of _sseControllers.values()) {
+    try {
+      controller.abort()
+    } catch { /* 忽略 */ }
+  }
+  _sseControllers.clear()
+  for (const timer of _sseReconnectTimers.values()) clearTimeout(timer)
+  _sseReconnectTimers.clear()
+  try {
+    localStorage.removeItem(_scopedStorageKey(STORAGE_KEY))
+    localStorage.removeItem(_scopedStorageKey(TASK_STORAGE_KEY))
+    // Remove the old unscoped cache once; it could otherwise cross accounts.
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(TASK_STORAGE_KEY)
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(`${DRAFT_KEY_PREFIX}${_taskUserId}:`) ||
+          (key.startsWith(DRAFT_KEY_PREFIX) && !key.slice(DRAFT_KEY_PREFIX.length).includes(':'))) {
+        localStorage.removeItem(key)
+      }
+    }
+  } catch { /* 忽略 */ }
+  activeJobs.value = []
+}
+
+/** Switch account namespace and discard the previous account's in-memory tasks. */
+export function setTaskUserScope(userId) {
+  const nextUserId = userId == null ? 'anonymous' : String(userId)
+  if (nextUserId === _taskUserId) return
+  abortAllTaskConnections()
+  _taskUserId = nextUserId
 }

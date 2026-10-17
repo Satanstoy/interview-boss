@@ -3,7 +3,11 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_current_user, get_admin_user
-from app.core.outbound_url import OutboundURLBlocked, validate_outbound_url_syntax
+from app.core.outbound_url import (
+    OutboundURLBlocked,
+    build_pinned_http_transport_async,
+    validate_outbound_url_syntax,
+)
 from app.db.connection import get_db_connection, run_db
 from app.services.encryption import encrypt_value, decrypt_value
 
@@ -239,6 +243,7 @@ async def list_available_models(user: dict = Depends(get_current_user)):
 
     from app.core.config import get_user_llm_config
     from app.services.llm import _detect_provider
+    from app.services.llm_protocol import _models_list_url
 
     cfg = get_user_llm_config(user["id"])
     if not cfg or not cfg.get("api_key"):
@@ -260,18 +265,17 @@ async def list_available_models(user: dict = Depends(get_current_user)):
             url = "https://api.anthropic.com/v1/models"
         else:
             headers = {"Authorization": f"Bearer {api_key}"}
-            base = base_url.rstrip("/")
-            # base_url 可能已含 /v1 后缀（OpenAI 兼容 API 的标准做法），避免拼成 /v1/v1/models
-            if base.endswith("/v1"):
-                url = f"{base}/models"
-            else:
-                url = f"{base}/v1/models"
+            # 可能含 /v1 或文档给的完整端点后缀（.../v1/chat/completions），
+            # 统一交给 _models_list_url 归一再拼 /models
+            url = _models_list_url(base_url)
 
-        if provider != "anthropic":
-            from app.core.outbound_url import assert_safe_outbound_url
-
-            await assert_safe_outbound_url(url, resolve=True)
-        async with httpx.AsyncClient(timeout=10) as http_client:
+        transport = await build_pinned_http_transport_async(url)
+        async with httpx.AsyncClient(
+            timeout=10,
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+        ) as http_client:
             response = await http_client.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()

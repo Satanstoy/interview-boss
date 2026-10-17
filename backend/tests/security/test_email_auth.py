@@ -7,6 +7,15 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """邮箱服务直接读写验证码表，必须注入内存测试库而非生产库。"""
+
+    return app_db_isolation
+
+
+
+
 
 class TestVerificationCodeGeneration:
     """验证码生成逻辑"""

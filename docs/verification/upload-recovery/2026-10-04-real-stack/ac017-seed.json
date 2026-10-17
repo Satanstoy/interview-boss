@@ -1,0 +1,28 @@
+{
+  "import_id": "imp-ac017-cross-generation-retry",
+  "owner_id": 2,
+  "owner_username": "ac017_owner",
+  "attempt_ids": {
+    "1": 1,
+    "2": 2,
+    "3": 3
+  },
+  "job_ids": {
+    "A": 1,
+    "B": 2,
+    "C": 3
+  },
+  "question_ids": [
+    1,
+    2
+  ],
+  "questions": [
+    "AC017_PARALLEL_ANSWER_A: explain optimistic locking.",
+    "AC017_PARALLEL_ANSWER_B: explain queue idempotency."
+  ],
+  "expected_answers": [
+    "AC017_PARALLEL_ANSWER_A_RESULT",
+    "AC017_PARALLEL_ANSWER_B_RESULT"
+  ],
+  "success_checkpoint_hash": "0b6e8dee5d24758a7c7e154c8309f5df0982a4c27e64d59c43d1b78f04cd2f68"
+}

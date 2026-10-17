@@ -213,6 +213,9 @@ services:
       - test-data:/app/backend/data
       # frontend-contract 结构测试需要读取 frontend/src 源码(经 /app/frontend 相对路径)
       - ./frontend:/app/frontend:ro
+      - ./scripts:/app/scripts:ro
+      # schema 文档新鲜度测试需要读取仓库 docs/（否则容器只看到镜像内旧副本）
+      - ./docs:/app/docs:ro
       - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network
@@ -239,7 +242,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 15s
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:8081:8080"
     mem_limit: 64m
     cpus: 0.25
     networks:
@@ -249,6 +252,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging: *default-logging
 
   # ── OAuth Gateway（ChatGPT MCP 连接器 OAuth 2.1 网关）──
@@ -277,6 +286,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging: *default-logging
 
 networks:

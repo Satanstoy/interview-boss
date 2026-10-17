@@ -1,0 +1,55 @@
+{
+  "import_id": "imp-ac017-cross-generation-retry",
+  "job_ids": {
+    "A": 1,
+    "B": 2,
+    "C": 3
+  },
+  "old_id_retries": [
+    {
+      "source": "A",
+      "status": 200,
+      "job_id": 3,
+      "created": false
+    },
+    {
+      "source": "B",
+      "status": 200,
+      "job_id": 3,
+      "created": false
+    }
+  ],
+  "concurrent_root_retries": [
+    {
+      "status": 200,
+      "attempt_no": 3,
+      "created_attempt": false
+    },
+    {
+      "status": 200,
+      "attempt_no": 3,
+      "created_attempt": false
+    }
+  ],
+  "task_center_retry": {
+    "status": 200,
+    "attempt_no": 3,
+    "created_attempt": false,
+    "message": "已有恢复任务正在继续处理未完成步骤"
+  },
+  "retries_while_two_workers_in_provider": [
+    {
+      "status": 200,
+      "import_id": "imp-ac017-cross-generation-retry",
+      "attempt_no": 3,
+      "created_attempt": false
+    },
+    {
+      "status": 200,
+      "import_id": "imp-ac017-cross-generation-retry",
+      "attempt_no": 3,
+      "created_attempt": false
+    }
+  ],
+  "final_root_status": "partial_failed"
+}

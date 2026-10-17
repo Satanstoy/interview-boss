@@ -21,9 +21,12 @@ def make_done_event(doc_type: str, target: str, saved_data: dict) -> dict:
     return {"type": "done", "doc_type": doc_type, "target": target, "saved_data": saved_data}
 
 
-def make_error_event(message: str) -> dict:
-    """构建 error 事件"""
-    return {"type": "error", "message": message}
+def make_error_event(message: str, error_code: str | None = None) -> dict:
+    """构建 error 事件，保留可选的契约错误码以便 worker 正确聚合。"""
+    event = {"type": "error", "message": message}
+    if error_code:
+        event["error_code"] = error_code
+    return event
 
 
 def format_sse(event: dict) -> str:

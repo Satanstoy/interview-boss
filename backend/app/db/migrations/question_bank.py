@@ -1,4 +1,4 @@
-"""Question bank domain migrations: 001, 002, 004, 005, 006, 007, 063."""
+"""Question bank domain migrations: 001, 002, 004, 005, 006, 007, 063, 118."""
 
 import json
 import logging
@@ -612,3 +612,12 @@ def _migration_063_answer_sources(conn):
         cursor.execute(
             "ALTER TABLE question_bank ADD COLUMN answer_sources TEXT DEFAULT NULL"
         )
+
+
+def _migration_118_jd_bonus(conn):
+    """Add the JD bonus field required by the current insert/read paths."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('jd')").fetchall()
+    }
+    if "bonus" not in columns:
+        conn.execute("ALTER TABLE jd ADD COLUMN bonus TEXT DEFAULT ''")

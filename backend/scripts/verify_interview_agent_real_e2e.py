@@ -112,9 +112,7 @@ class CandidateAgent:
         ]
 
     def respond(self, interviewer_text: str) -> str:
-        self.messages.append(
-            {"role": "user", "content": f"面试官：{interviewer_text.strip()}"}
-        )
+        self.messages.append({"role": "user", "content": f"面试官：{interviewer_text.strip()}"})
         reply = _call_openai_compatible_chat(
             self.config,
             self.messages,
@@ -168,6 +166,12 @@ def _call_openai_compatible_chat(
     temperature: float,
     max_tokens: int,
 ) -> str:
+    from app.services.llm_protocol import (
+        _normalise_llm_base_url,
+        _opencode_session_headers,
+    )
+
+    base_url = _normalise_llm_base_url(config.base_url) or config.base_url
     data = json.dumps(
         {
             "model": config.model,
@@ -177,12 +181,14 @@ def _call_openai_compatible_chat(
         }
     ).encode("utf-8")
     req = urllib.request.Request(
-        f"{config.base_url}/chat/completions",
+        f"{base_url}/chat/completions",
         data=data,
         method="POST",
         headers={
             "Authorization": f"Bearer {config.api_key}",
             "Content-Type": "application/json",
+            # OpenCode Go 等网关要求稳定 session id；其它端点返回空字典
+            **_opencode_session_headers(config.base_url, config.api_key),
         },
     )
     with urllib.request.urlopen(req, timeout=config.timeout) as resp:
@@ -235,9 +241,13 @@ def _ensure_internal_e2e_token(internal_username: str) -> str:
 
     fallback_username = "__interview_agent_e2e__"
     with get_db_connection() as conn:
-        row = conn.execute("SELECT id FROM users WHERE username = ?", (internal_username,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM users WHERE username = ?", (internal_username,)
+        ).fetchone()
         if not row:
-            row = conn.execute("SELECT id FROM users WHERE username = ?", (fallback_username,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM users WHERE username = ?", (fallback_username,)
+            ).fetchone()
         if row:
             user_id = int(row["id"] if hasattr(row, "keys") else row[0])
         else:
@@ -281,18 +291,24 @@ def _create_conversation(
     return str(conversation_id), str(opening)
 
 
-def _delete_conversation(base_url: str, token: str, conversation_id: str, max_retries: int = 3) -> None:
+def _delete_conversation(
+    base_url: str, token: str, conversation_id: str, max_retries: int = 3
+) -> None:
     """Delete a conversation with retry logic."""
     last_exc = None
     for attempt in range(max_retries):
         try:
-            _json_request("DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token)
+            _json_request(
+                "DELETE", f"{base_url}/api/chat/conversations/{conversation_id}", token=token
+            )
             return
         except Exception as exc:
             last_exc = exc
             if attempt < max_retries - 1:
                 time.sleep(1)
-    raise RuntimeError(f"Failed to delete conversation {conversation_id} after {max_retries} attempts: {last_exc}")
+    raise RuntimeError(
+        f"Failed to delete conversation {conversation_id} after {max_retries} attempts: {last_exc}"
+    )
 
 
 def _iter_sse_events(
@@ -360,7 +376,9 @@ def _extract_turn_result(
     events: list[dict[str, Any]],
 ) -> TurnResult:
     chunks: list[str] = []
-    result = TurnResult(index=index, candidate_text=candidate_text, assistant_text="", events=events)
+    result = TurnResult(
+        index=index, candidate_text=candidate_text, assistant_text="", events=events
+    )
     for event in events:
         event_type = event.get("type")
         if event_type == "chunk":
@@ -391,7 +409,9 @@ def _extract_turn_result(
         elif event_type == "error":
             result.errors.append(str(event.get("message") or event))
     result.assistant_text = "".join(chunks)
-    result.internal_marker_leaked = any(marker in result.assistant_text for marker in INTERNAL_MARKERS)
+    result.internal_marker_leaked = any(
+        marker in result.assistant_text for marker in INTERNAL_MARKERS
+    )
     return result
 
 
@@ -488,7 +508,10 @@ def _run_interview(args: argparse.Namespace) -> tuple[list[TurnResult], str | No
             turn = _extract_turn_result(index, candidate_text, events)
             turns.append(turn)
             interviewer_text = turn.assistant_text
-            if any(keyword in interviewer_text for keyword in ("模拟面试就到这里", "面试结束", "感谢你的时间")):
+            if any(
+                keyword in interviewer_text
+                for keyword in ("模拟面试就到这里", "面试结束", "感谢你的时间")
+            ):
                 break
         judge_summary = _judge_with_llm(candidate_config, turns) if args.judge_with_llm else None
         return turns, judge_summary, conversation_id
@@ -500,7 +523,10 @@ def _run_interview(args: argparse.Namespace) -> tuple[list[TurnResult], str | No
                 _delete_conversation(args.base_url, token, conversation_id)
                 print(f"\nConversation deleted: {conversation_id}")
             except Exception as exc:
-                print(f"\nERROR: Failed to delete conversation {conversation_id}: {exc}", file=sys.stderr)
+                print(
+                    f"\nERROR: Failed to delete conversation {conversation_id}: {exc}",
+                    file=sys.stderr,
+                )
 
 
 def _print_report(turns: list[TurnResult], report: InterviewReport) -> None:

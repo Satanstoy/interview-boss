@@ -1,0 +1,61 @@
+{
+  "baseline": "8693f2fb",
+  "branch": "codex/frontend-ui-hierarchy-cleanup",
+  "product_commit": "7357d2a8",
+  "images": {
+    "app": "4816d599deec",
+    "nginx": "cddc665a6b01",
+    "model_stub": "ce4e9486ab22",
+    "gateway": "0b6f8b652e43"
+  },
+  "production_deployed": false,
+  "pushed": false,
+  "model": "local deterministic HTTP stub",
+  "tests": {
+    "affected_backend": {
+      "passed": 196,
+      "seconds": 169.8,
+      "exit_code": 0,
+      "log": "/tmp/remaining-spec-final-boundaries.log"
+    },
+    "upload_regression": {
+      "passed": 469,
+      "seconds": 290.67,
+      "exit_code": 0,
+      "log": "/tmp/remaining-spec-upload-latest.log"
+    },
+    "frontend_mock_api": {
+      "passed": 49,
+      "exit_code": 0,
+      "log": "/tmp/remaining-spec-ui-regression.log"
+    },
+    "ac010_real_stack": {
+      "passed": 1,
+      "seconds": 37.8,
+      "sql_assertions": true,
+      "exit_code": 0,
+      "project": "interview-boss-real-e2e-1149220-1791523434"
+    },
+    "ac024_real_stack": {
+      "passed": 1,
+      "seconds": 26.2,
+      "sql_assertions": true,
+      "exit_code": 0,
+      "project": "interview-boss-real-e2e-1180275-1791523769"
+    },
+    "bank_authz_regression": {
+      "passed": 360,
+      "seconds": 197.82,
+      "exit_code": 0,
+      "log": "/tmp/remaining-spec-authz-latest.log"
+    },
+    "ac029_real_stack": {
+      "passed": 1,
+      "duration": "13.7m",
+      "sql_assertions": true,
+      "exit_code": 0,
+      "project": "interview-boss-real-e2e-1238084-1791524454",
+      "log": "/tmp/remaining-spec-ac029-complete.log"
+    }
+  }
+}

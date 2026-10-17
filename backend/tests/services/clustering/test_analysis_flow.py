@@ -78,7 +78,7 @@ class TestBug003SSEEventsIncludeDetails:
     def test_bug003_tag_event_has_details_field(self):
         """修复后：标注完成事件应包含 details 字段"""
         import inspect
-        from app.worker import interview_reprocess_task
+        from app.worker_cluster_tasks import interview_reprocess_task
 
         source = inspect.getsource(interview_reprocess_task)
 
@@ -91,7 +91,7 @@ class TestBug003SSEEventsIncludeDetails:
     def test_bug003_tag_event_has_details_field(self):
         """修复后：标注完成事件应包含 details 字段（新架构保留了此特性）"""
         import inspect
-        from app.worker import interview_reprocess_task
+        from app.worker_cluster_tasks import interview_reprocess_task
 
         source = inspect.getsource(interview_reprocess_task)
 
@@ -260,7 +260,7 @@ class TestBug001ResumeLogic:
     async def test_bug001_state_saved_after_tagging(self):
         """修复后：标注完成后应保存中间状态"""
         import inspect
-        from app.worker import interview_reprocess_task
+        from app.worker_cluster_tasks import interview_reprocess_task
 
         source = inspect.getsource(interview_reprocess_task)
 

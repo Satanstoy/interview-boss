@@ -42,6 +42,7 @@ docs/
 - MiMo/DeepSeek reasoning 相关实施计划需明确区分 `reasoning_content` 原始模型推理、公开摘要 fallback、以及前端“面试官推理”展示语义。
 - **开发活动记录** → 放 `dev-log/`
 - **agent 协作/分析材料** → 放 `agents/` 或 `analysis/`
+- 上传恢复改造的最新代码对账见 `analysis/2026-09-30-upload-recovery-spec-reconciliation.md`；原 20 项问题状态见 `.tech-audit/work/2026-09-30/reconciliation.tsv`。服务 helper 单测通过不能替代实际 worker/前端链路验收，当前状态以 `verification/upload-recovery/README.md` 的 2026-09-30 复审表为准。
 
 ## 命名规范
 

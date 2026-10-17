@@ -1,0 +1,39 @@
+{
+  "project": "interview-boss-real-e2e-466258-1791478576",
+  "product_backend_checkpoint": "ad562589",
+  "harness_checkpoint": "02aa843b",
+  "frontend_fixture_checkpoint": "36d0d27b",
+  "command": "REAL_STACK_PORT=18141 REAL_STACK_STUB_PORT=18142 REAL_STACK_CAPTURE_FAILURE_DB=1 REAL_STACK_REUSE_BUILT_IMAGES=1 bash scripts/real_stack_smoke.sh",
+  "exit_code": 0,
+  "browser_tests_passed": 9,
+  "model_provider": "isolated local HTTP stub",
+  "images": {
+    "app": "f8323beac0ab",
+    "nginx": "3bb5c6b4076f",
+    "stub": "ce4e9486ab22"
+  },
+  "artifacts_sha256": {
+    "ac001-ac002-browser-result.json": "a6e256e3a5221810eb72e33b351fcf1e20246f52ba366d0409da6a2ba3d8d4e6",
+    "ac001-ac002-browser-result.json.responses.json": "2277b567d6c6c5c0607a9064742466c3f0b2531b3979c6bb77a9611e7365eefe",
+    "ac001-ac002-db-trace.json": "e9da288341d0ff6d60c1037a08103125fc2d5afb816ef0e3e7d1d27bae663734",
+    "ac007-browser-result.json": "4784e053f71579a790210eb42dba314dd576aec3bea9fcf90f2e47c52fcfad1b",
+    "ac007-db-trace.json": "126d9343413af9cea4d369a4e1557f7991d2dba7a6936d474b2065a6abd88b5c",
+    "ac007-seed.json": "2c8e90cd3be1cab8a8344a44847386313a36586534b490fdf7238f1da514bc02",
+    "ac009-browser-result.json": "748c87886df597dbd1d30c791cb4c2c893efc78c921f1b0d61962fb43b07d354",
+    "ac009-db-trace.json": "8181569d8fde9b34db8b5f6e6b8e0188a4cedb854e088a2bf415f8981fad75a1",
+    "ac009-provider-overlap.json": "172053bae2604023e9d33400f163b31e7728290c7ac19150c1233463026eaeab",
+    "ac009-same-second.json": "cc0010b1e9e7e68f56a01a7ce710c2729dcb0a7a427d9d461b59a3d25f2667ce",
+    "ac011-browser-result.json": "edaa42c4d809d59b6a79934f86561a0653f1d0776176589dde7ab72c01b61c21",
+    "ac011-final-db-trace.json": "51d954ba3aed874af487b7f65eba92ba53e03e1571d1f6dd404b8b80feae8aa3",
+    "ac011-first-pass-db-trace.json": "d4a84e6960d138aa601bfdec54fb173db777fa50b14a4edba622613dd91901b0",
+    "ac011-seed.json": "c61bf84356e6515f7bbed29fc7e90b0a58266cf835edd090742b33f0fbb58ad3",
+    "ac011-trace-assertion.json": "6afc26033f0609d3a5c5e3460f6d0de7b9f774c4f9d932cd4054cbab740b3c12",
+    "ac022-browser-result.json": "d2d5d1037b2bc09fbd743548f1a77a55b3adba4f411361706dfe7873dcfcf6de",
+    "ac022-db-trace.json": "44fede6e724964b808e9e9cf4b825b5e23a2c4c62f9f801bf68c4682dd5784f7",
+    "ac028-browser-result.json": "5b7fbbc46292e588b04d14ac205a150d7dd1bb46e777f40d5226de80eb46b3f8",
+    "ac029-browser-result.json": "0f1cf7b2ff6c37a28a37efd476f55025ce36631ac8a7357a6e48ac596a69d83e",
+    "ac029-db-trace.json": "c6baca7f9b7abc505f73601fd61094d5b80a663b8ea541535e2e9a01d7236594",
+    "ac029-first-pass-resolutions.json": "5d999ffa36d78e66fb3fa590dba23fde139d7aee9838ba89a19247502155a6a2"
+  },
+  "log_sha256": "ebe0c3c8089ca4dfc3ff1b5aca799da87db1d5d38d6d10bc3864f841e1316870"
+}

@@ -1,0 +1,2 @@
+# severity	dimension	location	title	suggested-fix	effort	confidence
+🟡	D3	backend/tests/integration/test_upload_question_data_flow_worker.py	AC-029 public share/admin review is not exercised through live Redis/ARQ/browser	Add a disposable-stack share → admin review → public worker stop/restart/retry browser flow; preserve existing canonical and assert private isolation.	2-4 days	certain

@@ -18,7 +18,6 @@ function startInterview() {
     <header>
       <p class="text-sm text-muted-foreground">目标岗位：{{ props.snapshot.target_position.name }}</p>
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">面试复盘</h1>
-      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">回看最近的模拟面试场次，把下一次训练接起来。</p>
     </header>
 
     <Card v-if="props.snapshot.reviews.items.length">

@@ -1,0 +1,31 @@
+{
+  "interview_id": 4,
+  "private_question_bank_id": 74,
+  "queue_id": 74,
+  "queue_row": {
+    "import_id": null,
+    "interview_id": 4,
+    "interview_owner_id": 2,
+    "owner_id": 2,
+    "question": "AC007 rootless reconciler recovery after committed retry",
+    "root_import_id": null,
+    "status": "done"
+  },
+  "reconcile_report": {
+    "buckets": 0,
+    "jobs_created": 0,
+    "orphans_blocked": 0,
+    "rootless_personal_job_scheduled": true,
+    "rootless_personal_owner_id": 2
+  },
+  "recovered_job": {
+    "id": 147,
+    "root_import_id": null,
+    "status": "completed",
+    "upload_attempt_id": null
+  },
+  "retry_committed_without_job": true,
+  "upload_attempts_after": 0,
+  "upload_attempts_before": 0,
+  "upload_roots_linked": 0
+}

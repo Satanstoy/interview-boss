@@ -2,7 +2,7 @@
   <div class="w-full min-w-0">
     <BatchActionPanel
       :selected-count="selectedCount"
-      :total-count="rows.length"
+      :total-count="serverTotal ?? rows.length"
       :actions="batchActions"
       @toggle-select-all="$emit('toggle-select-all')"
       @invert-selection="$emit('invert-selection')"
@@ -127,12 +127,12 @@
       as="div"
       class="mt-4 flex w-full flex-col items-stretch gap-3 px-1 sm:flex-row sm:items-center sm:justify-between"
       :items-per-page="pageSize"
-      :total="rows.length"
+      :total="serverTotal ?? rows.length"
       :page="currentPage"
       @update:page="(p) => emit('update:currentPage', p)"
     >
       <div class="text-xs text-muted-foreground tabular-nums">
-        共 {{ rows.length }} 条，第 {{ currentPage }}/{{ totalPages }} 页
+        共 {{ serverTotal ?? rows.length }} 条，第 {{ currentPage }}/{{ totalPages }} 页
       </div>
       <PaginationContent v-slot="{ items }" class="justify-center">
         <PaginationPrevious />
@@ -181,7 +181,8 @@ const props = defineProps({
   batchActions: { type: Array, default: () => [] },
   currentPage: { type: Number, default: 1 },
   pageSize: { type: Number, default: 20 },
-  highlightId: { type: Number, default: null }
+  highlightId: { type: Number, default: null },
+  serverTotal: { type: Number, default: null }
 })
 const emit = defineEmits(['toggle-select-all', 'invert-selection', 'toggle-item', 'update:currentPage', 'update:pageSize'])
 
@@ -190,13 +191,21 @@ const isDesktop = ref(true)
 let desktopMediaQuery = null
 let removeDesktopMediaListener = () => {}
 
-const totalPages = computed(() => Math.max(1, Math.ceil(props.rows.length / props.pageSize)))
+const totalPages = computed(() => {
+  // server 模式（contracts §4.5）：total 以服务端为准，前端不再 slice
+  const total = props.serverTotal ?? props.rows.length
+  return Math.max(1, Math.ceil(total / props.pageSize))
+})
 
 const primaryColumn = computed(() => props.columns[0] || null)
 
 const secondaryColumns = computed(() => props.columns.slice(1))
 
 const paginatedRows = computed(() => {
+  // server 模式：rows 即为当前页数据（由父组件按页请求），不再本地 slice
+  if (props.serverTotal !== null && props.serverTotal !== undefined) {
+    return props.rows
+  }
   const start = (props.currentPage - 1) * props.pageSize
   return props.rows.slice(start, start + props.pageSize)
 })

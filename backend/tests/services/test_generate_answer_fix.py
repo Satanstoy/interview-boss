@@ -6,6 +6,13 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """这些用例会触达数据库连接，必须落在内存测试库。"""
+
+    return app_db_isolation
+
+
 class TestBug010GenerateAnswerFix:
     """BUG-010: generate_master_answer 使用过度严格的查询条件"""
 

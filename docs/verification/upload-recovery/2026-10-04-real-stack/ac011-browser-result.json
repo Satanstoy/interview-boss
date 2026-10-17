@@ -1,0 +1,167 @@
+{
+  "import_id": "imp-ac011-partial-answer-real-stack",
+  "interview_id": 1,
+  "login_status": 200,
+  "first_snapshot": {
+    "import_id": "imp-ac011-partial-answer-real-stack",
+    "revision": 29,
+    "status": "partial_failed",
+    "target_intent": "private",
+    "attempt_no": 1,
+    "review_status": null,
+    "stage": "answer",
+    "progress": {
+      "unit": "questions",
+      "completed": 10,
+      "total": 10
+    },
+    "counts": {
+      "extracted": 10,
+      "retained": 10,
+      "excluded": 0,
+      "needs_review": 0,
+      "resolved": 10,
+      "answered": 8,
+      "failed": 2,
+      "total": 10
+    },
+    "result": {
+      "interview_id": 1,
+      "position_id": 1,
+      "question_ids": [],
+      "contribution_request_id": null
+    },
+    "result_target": {
+      "entity_type": "interview",
+      "entity_id": 1,
+      "scope": "private"
+    },
+    "error": {
+      "code": "UPSTREAM_UNAVAILABLE",
+      "message": "UPSTREAM_UNAVAILABLE",
+      "retryable": true,
+      "action": "auto_retry",
+      "scope": "system"
+    },
+    "allowed_actions": [
+      "open_result",
+      "retry_failed_steps"
+    ],
+    "recovery_available": true,
+    "recovery_message": null,
+    "updated_at": "2026-10-05 11:37:43",
+    "position_id": 1,
+    "position_name": "agent开发/大模型应用开发/大模型开发",
+    "source_type": "interview",
+    "resolved_type": "interview",
+    "input_version": 1,
+    "pipeline_version": "upload-pipeline-v1",
+    "contribution_request_id": null,
+    "created_at": "2026-10-05 11:36:08",
+    "completed_at": "2026-10-05 11:37:43"
+  },
+  "first_sse_snapshot": {
+    "import_id": "imp-ac011-partial-answer-real-stack",
+    "revision": 29,
+    "status": "partial_failed",
+    "target_intent": "private",
+    "attempt_no": 1,
+    "review_status": null,
+    "stage": "answer",
+    "progress": {
+      "unit": "questions",
+      "completed": 10,
+      "total": 10
+    },
+    "counts": {
+      "extracted": 10,
+      "retained": 10,
+      "excluded": 0,
+      "needs_review": 0,
+      "resolved": 10,
+      "answered": 8,
+      "failed": 2,
+      "total": 10
+    },
+    "result": {
+      "interview_id": 1,
+      "position_id": 1,
+      "question_ids": [],
+      "contribution_request_id": null
+    },
+    "result_target": {
+      "entity_type": "interview",
+      "entity_id": 1,
+      "scope": "private"
+    },
+    "error": {
+      "code": "UPSTREAM_UNAVAILABLE",
+      "message": "UPSTREAM_UNAVAILABLE",
+      "retryable": true,
+      "action": "auto_retry",
+      "scope": "system"
+    },
+    "allowed_actions": [
+      "open_result",
+      "retry_failed_steps"
+    ],
+    "recovery_available": true,
+    "recovery_message": null,
+    "updated_at": "2026-10-05 11:37:43"
+  },
+  "retry_http_status": 200,
+  "retry_created_attempt": true,
+  "final_snapshot": {
+    "import_id": "imp-ac011-partial-answer-real-stack",
+    "revision": 35,
+    "status": "completed",
+    "target_intent": "private",
+    "attempt_no": 2,
+    "review_status": null,
+    "stage": "resolve",
+    "progress": {
+      "unit": "questions",
+      "completed": 10,
+      "total": 10
+    },
+    "counts": {
+      "extracted": 10,
+      "retained": 10,
+      "excluded": 0,
+      "needs_review": 0,
+      "resolved": 10,
+      "answered": 10,
+      "failed": 0,
+      "total": 10
+    },
+    "result": {
+      "interview_id": 1,
+      "position_id": 1,
+      "question_ids": [],
+      "contribution_request_id": null
+    },
+    "result_target": {
+      "entity_type": "interview",
+      "entity_id": 1,
+      "scope": "private"
+    },
+    "error": null,
+    "allowed_actions": [
+      "open_result"
+    ],
+    "recovery_available": true,
+    "recovery_message": null,
+    "updated_at": "2026-10-05 11:37:59",
+    "position_id": 1,
+    "position_name": "agent开发/大模型应用开发/大模型开发",
+    "source_type": "interview",
+    "resolved_type": "interview",
+    "input_version": 1,
+    "pipeline_version": "upload-pipeline-v1",
+    "contribution_request_id": null,
+    "created_at": "2026-10-05 11:36:08",
+    "completed_at": "2026-10-05 11:37:59"
+  },
+  "result_opened_after_partial_failure": true,
+  "result_reopened_after_completed_wait_ms": 6000
+}

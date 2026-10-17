@@ -1,5 +1,12 @@
+import pytest
 """P2 聚类标签摘要：migration 066 + matcher 展示 + 标签生成"""
 
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
 
 def test_migration_066_adds_cluster_label_column(test_db):
     """迁移 066：question_bank 加 cluster_label 列"""

@@ -156,6 +156,9 @@
 
         <!-- View answer mode -->
         <div v-else>
+            <p v-if="localQuestion.answer_review_status === 'needs_review'" class="mb-3 text-xs text-amber-600" role="status">
+              参考答案待复核<span v-if="localQuestion.answer_review_issues?.[0]?.problem">：{{ localQuestion.answer_review_issues[0].problem }}</span>
+            </p>
             <div v-if="displayAnswer && !isFailedAnswer(displayAnswer)" class="relative group/answer">
             <div v-if="isAdmin" class="absolute top-0 right-0 flex gap-1 z-10">
               <button @click="localQuestion._isEditingAnswer = true; localQuestion._editAnswer = displayAnswer" class="rounded-md bg-white/80 px-2.5 py-1 text-caption text-muted-foreground opacity-100 transition-all duration-200 hover:bg-muted sm:opacity-0 sm:group-hover/answer:opacity-100 sm:focus-visible:opacity-100 dark:bg-muted/60 dark:hover:bg-muted">
@@ -303,12 +306,16 @@ async function loadFullAnswer() {
     const detail = await get(`/api/master-bank/${localQuestion.id}/detail`)
     fullAnswer.value = detail.ai_answer || ''
     if (Array.isArray(detail.answer_sources)) localQuestion.answer_sources = detail.answer_sources
+    localQuestion.answer_review_status = detail.answer_review_status
+    localQuestion.answer_review_issues = detail.answer_review_issues || []
     answerDetailLoaded.value = true
     // Emit to parent so it updates the question object too
     emit('update-answer', {
       id: localQuestion.id,
       ai_answer: detail.ai_answer,
       answer_sources: detail.answer_sources,
+      answer_review_status: detail.answer_review_status,
+      answer_review_issues: detail.answer_review_issues,
     })
   } catch (e) {
     console.warn('Failed to load answer detail:', e)

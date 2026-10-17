@@ -230,6 +230,14 @@ def claim_original_question_owner(conn, question: str, question_bank_id: int) ->
     primary-key claim table closes the race between two concurrent writers.
     """
 
+    # The matcher contract carries IDs as strings, while SQLite returns the
+    # registry IDs as integers. Normalize at the ownership boundary so the
+    # same cluster does not conflict with itself after a claim is inserted.
+    try:
+        question_bank_id = int(question_bank_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("question_bank_id must be an integer") from exc
+
     normalized = normalize_original_question(question)
     if not normalized:
         return normalized

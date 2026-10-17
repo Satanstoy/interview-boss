@@ -28,11 +28,14 @@ def _duplicate_signature_groups(conn, table: str) -> list:
         row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
     }:
         return []
+    # 发布门槛（AC-015/README §5.3）：未 published 的公共面经不参与来源健康统计
+    publish_clause = "AND publish_status = 'published'" if table == "interview" else ""
     rows = conn.execute(
         f"""
         SELECT url_signature, COUNT(*) AS n, MIN(id) AS min_id, MAX(id) AS max_id
         FROM {table}
         WHERE deleted_at IS NULL AND url_signature != '' AND owner_id IS NULL
+        {publish_clause}
         GROUP BY url_signature
         HAVING COUNT(*) > 1
         ORDER BY n DESC

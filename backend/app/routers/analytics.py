@@ -1,14 +1,124 @@
+import hashlib
+import hmac
 import logging
-from datetime import datetime, timedelta
+import secrets
+import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 from collections import Counter, defaultdict
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.auth import get_current_user, get_admin_user
+from structlog.contextvars import get_contextvars
+from app.core.auth import SECRET_KEY, get_current_user, get_admin_user
 from app.db.connection import get_db_connection, run_db, get_user_job_position
 from app.services.utils import normalize_category
 
 logger = logging.getLogger("interview-boss")
 
 router = APIRouter()
+
+_CLEAR_DB_CONFIRM_TTL_SECONDS = 300
+
+
+def _create_clear_db_token(admin_id: int, now: float | None = None) -> str:
+    """Create a short-lived, admin-bound confirmation token."""
+    issued_at = int(time.time() if now is None else now)
+    nonce = secrets.token_urlsafe(24)
+    payload = f"clear-db:{admin_id}:{issued_at}:{nonce}"
+    signature = hmac.new(
+        SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"{issued_at}.{nonce}.{signature}"
+
+
+def _is_valid_clear_db_token(
+    token: str, admin_id: int, now: float | None = None
+) -> bool:
+    """Verify token integrity, audience and expiry without server-side state."""
+    try:
+        issued_text, nonce, signature = token.split(".", 2)
+        issued_at = int(issued_text)
+    except (AttributeError, ValueError):
+        return False
+
+    current_time = time.time() if now is None else now
+    if issued_at > current_time + 30 or current_time - issued_at > _CLEAR_DB_CONFIRM_TTL_SECONDS:
+        return False
+    payload = f"clear-db:{admin_id}:{issued_at}:{nonce}"
+    expected = hmac.new(
+        SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+def _clear_db_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _claim_clear_db_token(token: str, admin_id: int, now: float | None = None) -> bool:
+    """Atomically consume a valid token digest so it cannot be replayed."""
+    consumed_at = int(time.time() if now is None else now)
+    token_hash = _clear_db_token_hash(token)
+    with get_db_connection() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO clear_db_confirmations (token_hash, admin_id, consumed_at) "
+                "VALUES (?, ?, datetime(?, 'unixepoch'))",
+                (token_hash, admin_id, consumed_at),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _backup_sqlite_online(db_path: str, backup_path: str) -> None:
+    """Create a consistent SQLite snapshot, including committed WAL frames."""
+    source = sqlite3.connect(db_path, timeout=30)
+    destination = sqlite3.connect(backup_path)
+    try:
+        with destination:
+            source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+
+
+async def _record_clear_db_audit(
+    status: str,
+    admin: dict,
+    *,
+    event_type: str = "clear_db",
+    metadata: dict | None = None,
+) -> bool:
+    """Persist clear-db evidence and report whether it was durable."""
+    try:
+        from app.services.admin_audit import record_admin_audit
+
+        await run_db(
+            lambda: record_admin_audit(
+                event_type,
+                status,
+                actor_id=admin.get("id"),
+                metadata=metadata,
+            )
+        )
+        return True
+    except Exception:
+        logger.exception("无法写入 clear-db 审计记录")
+        return False
 
 
 def _build_analytics_bank_filter(user: dict):
@@ -72,7 +182,7 @@ async def get_analytics(user: dict = Depends(get_current_user)):
 
             # 过滤 questions_detail 数据（通过关联 interview 表，all 口径）
             qd_position_filter = "(qd.job_position = ? OR qd.job_position = '' OR qd.job_position IS NULL)"
-            qd_where = f"WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?) AND {qd_position_filter}"
+            qd_where = f"WHERE qd.deleted_at IS NULL AND ((iv.owner_id IS NULL AND iv.status = 'approved') OR iv.owner_id = ?) AND (iv.owner_id IS NOT NULL OR iv.publish_status = 'published') AND {qd_position_filter}"
             qd_params = (uid, current_pos)
 
             for r in conn.execute(
@@ -252,7 +362,9 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
 
                     _retype_distribution_details_txn(cursor, [r["id"]])
                     updated_detail += 1
-            rows = cursor.execute("SELECT id, cat1, cat2 FROM question_bank").fetchall()
+            rows = cursor.execute(
+                "SELECT id, cat1, cat2 FROM question_bank WHERE owner_id IS NULL"
+            ).fetchall()
             for r in rows:
                 new_cat1 = normalize_category(r["cat1"])
                 new_cat2 = normalize_category(r["cat2"])
@@ -284,10 +396,6 @@ async def normalize_categories(admin: dict = Depends(get_admin_user)):
 @router.post("/api/analytics/clear-db/preview")
 async def preview_clear_db(admin: dict = Depends(get_admin_user)):
     """预览将删除的数据统计"""
-    import hashlib
-    import os
-    import time
-
     def _query():
         stats = {}
         tables = [
@@ -311,10 +419,7 @@ async def preview_clear_db(admin: dict = Depends(get_admin_user)):
 
     stats = await run_db(_query)
 
-    secret = os.getenv("JWT_SECRET", "")
-    token = hashlib.sha256(
-        f"{secret}:{time.time()}".encode()
-    ).hexdigest()
+    token = _create_clear_db_token(admin["id"])
 
     return {"stats": stats, "confirm_token": token}
 
@@ -323,26 +428,112 @@ async def preview_clear_db(admin: dict = Depends(get_admin_user)):
 async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_admin_user)):
     """清空所有数据库表（需要确认 token，执行前自动创建备份）"""
     import os
-    import shutil
     from app.core.config import DB_PATH
 
     if not confirm_token:
+        audit_ok = await _record_clear_db_audit(
+            "rejected",
+            admin,
+            event_type="clear_db_confirmation",
+            metadata={"reason": "missing"},
+        )
+        if not audit_ok:
+            raise HTTPException(status_code=503, detail="审计服务不可用，操作已拒绝")
         raise HTTPException(status_code=400, detail="需要确认 token")
 
-    if len(confirm_token) < 64:
+    if not _is_valid_clear_db_token(confirm_token, admin["id"]):
+        audit_ok = await _record_clear_db_audit(
+            "rejected",
+            admin,
+            event_type="clear_db_confirmation",
+            metadata={"reason": "invalid"},
+        )
+        if not audit_ok:
+            raise HTTPException(status_code=503, detail="审计服务不可用，操作已拒绝")
         raise HTTPException(status_code=400, detail="无效的确认 token")
 
+    token_hash = _clear_db_token_hash(confirm_token)
+    claimed = await run_db(lambda: _claim_clear_db_token(confirm_token, admin["id"]))
+    if not claimed:
+        audit_ok = await _record_clear_db_audit(
+            "rejected",
+            admin,
+            event_type="clear_db_confirmation",
+            metadata={"reason": "replay", "confirmation_id": token_hash[:16]},
+        )
+        if not audit_ok:
+            raise HTTPException(status_code=503, detail="审计服务不可用，操作已拒绝")
+        raise HTTPException(status_code=400, detail="确认 token 已使用")
+
+    request_id = get_contextvars().get("request_id")
+    operation_metadata = {
+        "confirmation_id": token_hash[:16],
+        "request_id": request_id,
+        "target_scope": "all_database_tables",
+        "started_at": _utc_timestamp(),
+    }
     backup_path = f"{DB_PATH}.bak.{int(__import__('time').time())}"
+    audit_ok = await _record_clear_db_audit(
+        "started",
+        admin,
+        metadata={
+            **operation_metadata,
+            "phase": "backup",
+            "backup_file": os.path.basename(backup_path),
+        },
+    )
+    if not audit_ok:
+        raise HTTPException(status_code=503, detail="审计服务不可用，操作已中止")
     try:
-        shutil.copy2(DB_PATH, backup_path)
+        await run_db(lambda: _backup_sqlite_online(DB_PATH, backup_path))
         logger.info(f"清空前已创建数据库备份: {backup_path}")
     except Exception as e:
+        audit_ok = await _record_clear_db_audit(
+            "failure",
+            admin,
+            metadata={
+                **operation_metadata,
+                "phase": "backup",
+                "completed_at": _utc_timestamp(),
+                "error_type": type(e).__name__,
+            },
+        )
+        if not audit_ok:
+            logger.error("备份失败且无法写入 clear-db failure 审计")
         logger.error(f"创建备份失败，拒绝清空操作: {e}")
         raise HTTPException(status_code=500, detail="备份创建失败，清空操作已中止")
+
+    try:
+        backup_sha256 = await run_db(lambda: _sha256_file(backup_path))
+    except Exception as e:
+        audit_ok = await _record_clear_db_audit(
+            "failure",
+            admin,
+            metadata={
+                **operation_metadata,
+                "phase": "backup_verification",
+                "completed_at": _utc_timestamp(),
+                "error_type": type(e).__name__,
+            },
+        )
+        if not audit_ok:
+            logger.error("备份校验失败且无法写入 clear-db failure 审计")
+        raise HTTPException(status_code=500, detail="备份校验失败，清空操作已中止")
 
     def _clear():
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            affected_rows = {}
+
+            def _delete(table: str, *, optional: bool = False):
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                    if cursor.rowcount > 0:
+                        affected_rows[table] = cursor.rowcount
+                except Exception:
+                    if not optional:
+                        raise
+
             try:
                 from app.services.interview_distribution import (
                     mark_distribution_refresh,
@@ -355,44 +546,63 @@ async def clear_db(confirm_token: str | None = None, admin: dict = Depends(get_a
                     mark_distribution_refresh(cursor, row["job_position"] or "")
             except Exception:
                 pass
-            try:
-                cursor.execute("DELETE FROM analysis_queue")
-            except Exception:
-                pass
-            try:
-                cursor.execute("DELETE FROM login_failures")
-            except Exception:
-                pass
-            try:
-                cursor.execute("DELETE FROM invalidated_families")
-            except Exception:
-                pass
-            try:
-                cursor.execute("DELETE FROM email_verification_codes")
-            except Exception:
-                pass
-            cursor.execute("DELETE FROM jd")
-            cursor.execute("DELETE FROM interview")
-            cursor.execute("DELETE FROM questions_detail")
-            cursor.execute("DELETE FROM question_bank")
-            cursor.execute("DELETE FROM user_practice_history")
-            cursor.execute("DELETE FROM user_question_view")
-            cursor.execute("DELETE FROM question_position")
+            _delete("analysis_queue", optional=True)
+            _delete("login_failures", optional=True)
+            _delete("invalidated_families", optional=True)
+            _delete("email_verification_codes", optional=True)
+            _delete("jd")
+            _delete("interview")
+            _delete("questions_detail")
+            _delete("question_bank")
+            _delete("user_practice_history")
+            _delete("user_question_view")
+            _delete("question_position")
             try:
                 cursor.execute("DELETE FROM schema_version")
             except Exception:
                 pass
             cursor.execute("DELETE FROM sqlite_sequence")
+            from app.services.admin_audit import append_admin_audit
+
+            completed_at = _utc_timestamp()
+            success_metadata = {
+                **operation_metadata,
+                "phase": "clear",
+                "completed_at": completed_at,
+                "backup_file": os.path.basename(backup_path),
+                "backup_sha256": backup_sha256,
+                "affected_rows": affected_rows,
+            }
+            append_admin_audit(
+                conn,
+                "clear_db",
+                "success",
+                actor_id=admin.get("id"),
+                metadata=success_metadata,
+            )
             conn.commit()
+            return success_metadata
 
     try:
         await run_db(_clear)
-        return {
-            "status": "success",
-            "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）",
-        }
-    except Exception:
+    except Exception as exc:
+        audit_ok = await _record_clear_db_audit(
+            "failure",
+            admin,
+            metadata={
+                **operation_metadata,
+                "phase": "clear",
+                "completed_at": _utc_timestamp(),
+                "error_type": type(exc).__name__,
+            },
+        )
+        if not audit_ok:
+            logger.error("清空失败且无法写入 clear-db failure 审计")
         raise HTTPException(status_code=500, detail="清空失败，请查看服务端日志")
+    return {
+        "status": "success",
+        "message": f"已清空所有数据库表（备份已保存至 {os.path.basename(backup_path)}）",
+    }
 
 
 @router.post("/api/sync-db")

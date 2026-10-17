@@ -2,12 +2,9 @@ import json
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.auth import get_admin_user
+from app.routers.questions_pkg.permissions import assert_question_writable
 from app.db.connection import get_db_connection, run_db
-from app.services.question_bank_integrity import (
-    canonicalize_question_bank_payload,
-    claim_public_original_questions,
-    sync_question_bank_projections,
-)
+
 
 logger = logging.getLogger("interview-boss")
 router = APIRouter(prefix="/api/master-bank")
@@ -17,17 +14,28 @@ router = APIRouter(prefix="/api/master-bank")
 async def analysis_status(user: dict = Depends(get_admin_user)):
     """检查面经分析完整性：返回已分析和未分析的面经数量及详情。"""
 
+    visible_scope = (
+        "(i.owner_id = ? OR (i.owner_id IS NULL AND i.status = 'approved' "
+        "AND i.publish_status = 'published'))"
+    )
+
     def _check():
         with get_db_connection() as conn:
             # 已分析：有 detail 记录的面经
             analyzed = conn.execute(
                 "SELECT i.id, i.company, i.round FROM interview i "
-                "WHERE i.deleted_at IS NULL AND EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
+                f"WHERE i.deleted_at IS NULL AND {visible_scope} "
+                "AND EXISTS (SELECT 1 FROM questions_detail qd "
+                "WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)",
+                (user["id"],),
             ).fetchall()
             # 未分析：没有 detail 记录的面经
             unanalyzed = conn.execute(
                 "SELECT i.id, i.company, i.round, LENGTH(i.questions_list) as ql_len FROM interview i "
-                "WHERE i.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM questions_detail qd WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)"
+                f"WHERE i.deleted_at IS NULL AND {visible_scope} "
+                "AND NOT EXISTS (SELECT 1 FROM questions_detail qd "
+                "WHERE qd.interview_id = i.id AND qd.deleted_at IS NULL)",
+                (user["id"],),
             ).fetchall()
             return {
                 "analyzed_count": len(analyzed),
@@ -55,7 +63,7 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
             rows = conn.execute(
                 "SELECT qb.id, qb.question, qb.cat1, qb.cat2, qb.tags, qb.difficulty, qb.created_at, u.username as submitted_by_name "
                 "FROM question_bank qb LEFT JOIN users u ON qb.submitted_by = u.id "
-                "WHERE qb.owner_id IS NULL AND qb.status = 'pending' ORDER BY qb.created_at DESC"
+                "WHERE qb.owner_id IS NULL AND qb.status = 'pending' AND qb.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM question_promotion_requests p WHERE p.pending_question_id=qb.id AND p.status!='pending') ORDER BY qb.created_at DESC"
             ).fetchall()
             return [dict(r) for r in rows]
 
@@ -63,132 +71,39 @@ async def get_pending_questions(admin: dict = Depends(get_admin_user)):
     return {"items": items, "total": len(items)}
 
 
-def _approve_cleanup_private_copy(conn, pending_id: int) -> None:
-    """审核批准后清理：删除分享者同题的私有副本（分享时保留的）。
+@router.get("/pending/{question_id}/preview")
+async def preview_pending_question(question_id: int, admin: dict = Depends(get_admin_user)):
+    from app.services.question_promotions import build_question_promotion_projection
 
-    匹配条件：owner_id = pending.submitted_by 且归一化文本相同。
-    """
-    pending = conn.execute(
-        "SELECT id, question, submitted_by FROM question_bank WHERE id = ?",
-        (pending_id,),
-    ).fetchone()
-    if not pending or not pending["submitted_by"]:
-        return
-    from app.routers.questions_pkg.share import _normalize_question_text
+    def _preview():
+        with get_db_connection() as conn:
+            conn.execute("BEGIN")
+            row = conn.execute(
+                "SELECT * FROM question_bank WHERE id=? AND owner_id IS NULL AND status='pending' AND deleted_at IS NULL",
+                (question_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            promotion = conn.execute(
+                "SELECT status,snapshot_json FROM question_promotion_requests WHERE pending_question_id=?", (question_id,)
+            ).fetchone()
+            if promotion and promotion["status"] != "pending":
+                raise HTTPException(status_code=404, detail="未找到该待审核题目")
+            snapshot = json.loads(promotion["snapshot_json"]) if promotion else dict(row)
+            projection, *_ = build_question_promotion_projection(snapshot, question_id)
+            return {"projection": projection}
 
-    target_norm = _normalize_question_text(pending["question"])
-    if not target_norm:
-        return
-    rows = conn.execute(
-        "SELECT id, question FROM question_bank "
-        "WHERE owner_id = ? AND deleted_at IS NULL",
-        (pending["submitted_by"],),
-    ).fetchall()
-    for r in rows:
-        if _normalize_question_text(r["question"]) == target_norm:
-            conn.execute(
-                "UPDATE question_bank SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (r["id"],),
-            )
-            sync_question_bank_projections(conn.cursor(), r["id"], [], [], [])
-            break
+    return await run_db(_preview)
 
 
 @router.post("/approve/{question_id}")
 async def approve_question(question_id: int, admin: dict = Depends(get_admin_user)):
-    """审核通过题目（批准后清理分享者的私有副本，duplicate_of 镜像机制已废除）"""
+    """批准明确提交的快照，不根据文本推断私人来源。"""
+    from app.services.question_promotions import review_question_promotion
 
     def _approve():
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT id, question, status, cat2, job_position, submitted_by, sources, "
-                "original_questions, original_question_sources, owner_id "
-                "FROM question_bank WHERE id = ? AND owner_id IS NULL",
-                (question_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="未找到该待审核题目")
-
-            # Idempotent approval: do not re-merge an already approved row into
-            # itself when an administrator retries the request.
-            if row["status"] == "approved":
-                return dict(row)
-
-            from app.routers.questions_pkg.share import find_matching_public_question
-
-            matching_id = find_matching_public_question(
-                conn, row["question"], row["cat2"], row["job_position"]
-            )
-            if matching_id and matching_id != question_id:
-                # A second pending contribution for an already approved
-                # question is a source contribution, not a new question card.
-                from app.routers.questions_pkg.share import _merge_private_into_public
-
-                _merge_private_into_public(conn, matching_id, row)
-                conn.execute(
-                    "UPDATE question_bank SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (question_id,),
-                )
-                if row["submitted_by"]:
-                    _approve_cleanup_private_copy(conn, question_id)
-                conn.commit()
-                return dict(row)
-
-            sources, original_questions, original_question_sources = (
-                canonicalize_question_bank_payload(
-                    json.loads(row["sources"] or "[]"),
-                    json.loads(row["original_questions"] or "[]"),
-                    json.loads(row["original_question_sources"] or "[]"),
-                )
-            )
-            if row["question"] and not original_questions:
-                original_questions = [row["question"]]
-                original_question_sources = [
-                    {"question": row["question"], "sources": sources}
-                ]
-                sources, original_questions, original_question_sources = (
-                    canonicalize_question_bank_payload(
-                        sources, original_questions, original_question_sources
-                    )
-                )
-            conn.execute(
-                "UPDATE question_bank SET status = 'approved', frequency = ?, sources = ?, "
-                "original_questions = ?, original_question_sources = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ?",
-                (
-                    len(original_questions),
-                    json.dumps(sources, ensure_ascii=False),
-                    json.dumps(original_questions, ensure_ascii=False),
-                    json.dumps(original_question_sources, ensure_ascii=False),
-                    question_id,
-                ),
-            )
-            conn.execute(
-                "UPDATE question_bank SET cluster_id = ? WHERE id = ? AND cluster_id IS NULL",
-                (question_id, question_id),
-            )
-            claim_public_original_questions(
-                conn,
-                question_id,
-                row["owner_id"],
-                "approved",
-                original_questions,
-            )
-            sync_question_bank_projections(
-                conn.cursor(),
-                question_id,
-                sources,
-                original_questions,
-                original_question_sources,
-            )
-            from app.services.cluster_review_lifecycle import mark_cluster_review_pending
-
-            mark_cluster_review_pending(conn, question_id, "public_question_approved")
-            # 分享链路：批准后删除分享者保留的私有副本
-            if row["submitted_by"]:
-                _approve_cleanup_private_copy(conn, question_id)
-            conn.commit()
-            return dict(row)
+            review_question_promotion(conn, question_id, admin["id"], approve=True)
 
     await run_db(_approve)
     return {"status": "success", "message": "已通过审核"}
@@ -196,21 +111,11 @@ async def approve_question(question_id: int, admin: dict = Depends(get_admin_use
 
 @router.post("/reject/{question_id}")
 async def reject_question(question_id: int, admin: dict = Depends(get_admin_user)):
-    """拒绝题目"""
+    from app.services.question_promotions import review_question_promotion
 
     def _reject():
         with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT id, status FROM question_bank WHERE id = ? AND owner_id IS NULL",
-                (question_id,),
-            ).fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="未找到该待审核题目")
-            conn.execute(
-                "UPDATE question_bank SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (question_id,),
-            )
-            conn.commit()
+            review_question_promotion(conn, question_id, admin["id"], approve=False)
 
     await run_db(_reject)
     return {"status": "success", "message": "已拒绝"}
@@ -231,7 +136,11 @@ async def get_merge_history(
 
     def _query():
         with get_db_connection() as conn:
-            where = ["1=1"]
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN")
+            register_history_visibility(conn, admin["id"])
+            where = ["merge_history_visible(mh.survivor_id,mh.merged_ids,mh.pre_snapshot,mh.post_snapshot)=1"]
             params = []
             if cat2:
                 where.append("mh.cat2 = ?")
@@ -285,6 +194,10 @@ async def get_merge_history_detail(
 
     def _query():
         with get_db_connection() as conn:
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN")
+            register_history_visibility(conn, admin["id"])
             row = conn.execute(
                 "SELECT mh.*, qb.question as survivor_question, "
                 "u.username as operator_name, "
@@ -293,7 +206,7 @@ async def get_merge_history_detail(
                 "LEFT JOIN question_bank qb ON mh.survivor_id = qb.id "
                 "LEFT JOIN users u ON mh.operator_id = u.id "
                 "LEFT JOIN users rb ON mh.rolled_back_by = rb.id "
-                "WHERE mh.id = ?",
+                "WHERE mh.id = ? AND merge_history_visible(mh.survivor_id,mh.merged_ids,mh.pre_snapshot,mh.post_snapshot)=1",
                 (history_id,),
             ).fetchone()
             if not row:
@@ -330,22 +243,54 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
 
     def _rollback():
         with get_db_connection() as conn:
+            from app.services.merge_history_visibility import register_history_visibility
+
+            conn.execute("BEGIN IMMEDIATE")
+            register_history_visibility(conn, admin["id"])
+            # Read and authorize under the same write transaction as restoration.
             # 获取合并历史
             mh = conn.execute(
-                "SELECT * FROM merge_history WHERE id = ?", (history_id,)
+                "SELECT * FROM merge_history WHERE id = ? AND merge_history_visible(survivor_id,merged_ids,pre_snapshot,post_snapshot)=1", (history_id,)
             ).fetchone()
             if not mh:
                 raise HTTPException(status_code=404, detail="未找到该合并记录")
-            if mh["is_rolled_back"]:
-                raise HTTPException(status_code=400, detail="该合并已经回滚过了")
-
             pre_snapshot = json.loads(mh["pre_snapshot"]) if mh["pre_snapshot"] else {}
             merged_ids = json.loads(mh["merged_ids"]) if mh["merged_ids"] else []
             merged_questions = (
                 json.loads(mh["merged_questions"]) if mh["merged_questions"] else []
             )
 
-            conn.execute("BEGIN")
+            # Rollback must not mutate another user's surviving private cluster.
+            affected_ids = [mh["survivor_id"], *merged_ids]
+            placeholders = ",".join("?" * len(affected_ids))
+            for row in conn.execute(
+                f"SELECT owner_id FROM question_bank WHERE id IN ({placeholders})",
+                affected_ids,
+            ).fetchall():
+                assert_question_writable(row["owner_id"], admin, not_found="未找到该合并记录")
+            if pre_snapshot.get("owner_id") is not None:
+                assert_question_writable(
+                    pre_snapshot["owner_id"], admin, not_found="未找到该合并记录"
+                )
+
+            participant_owners = {}
+            for snapshot_json in (mh["pre_snapshot"], mh["post_snapshot"]):
+                participant_owners.update(json.loads(snapshot_json or "{}").get("participant_owners", {}))
+            survivor = conn.execute("SELECT owner_id FROM question_bank WHERE id=?", (mh["survivor_id"],)).fetchone()
+            if survivor is None:
+                raise HTTPException(status_code=404, detail="未找到该合并记录")
+            if "owner_id" in pre_snapshot and pre_snapshot["owner_id"] != survivor["owner_id"]:
+                raise HTTPException(status_code=409, detail="历史题库作用域已变化，不能跨作用域回滚")
+            for current in conn.execute(
+                f"SELECT id,owner_id FROM question_bank WHERE id IN ({placeholders})", affected_ids
+            ).fetchall():
+                key = str(current["id"])
+                if key in participant_owners and participant_owners[key] != current["owner_id"]:
+                    raise HTTPException(status_code=409, detail="历史题库作用域已变化，不能跨作用域回滚")
+
+            if mh["is_rolled_back"]:
+                raise HTTPException(status_code=400, detail="该合并已经回滚过了")
+
             try:
                 survivor_id = mh["survivor_id"]
 
@@ -382,15 +327,20 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                     q_text = merged_questions[i] if i < len(merged_questions) else ""
                     # 检查该 ID 是否已被重建
                     existing = conn.execute(
-                        "SELECT id FROM question_bank WHERE id = ?", (mid,)
+                        "SELECT id,deleted_at FROM question_bank WHERE id = ?", (mid,)
                     ).fetchone()
+                    if existing and existing["deleted_at"] is not None:
+                        conn.execute(
+                            "UPDATE question_bank SET deleted_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                            (mid,),
+                        )
                     if not existing:
                         conn.execute(
                             "INSERT INTO question_bank "
                             "(id, question, cat1, cat2, frequency, status, "
                             "sources, original_questions, original_question_sources, "
-                            "job_position, created_at, updated_at) "
-                            "VALUES (?, ?, ?, ?, 1, 'approved', '[]', '[]', '[]', ?, "
+                            "job_position, owner_id, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, 1, 'approved', '[]', '[]', '[]', ?, ?, "
                             "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                             (
                                 mid,
@@ -398,7 +348,36 @@ async def rollback_merge(history_id: int, admin: dict = Depends(get_admin_user))
                                 pre_snapshot.get("cat1", ""),
                                 pre_snapshot.get("cat2", ""),
                                 pre_snapshot.get("job_position", ""),
+                                participant_owners[str(mid)],
                             ),
+                        )
+
+                # Restore lineage and public variant ownership in the same
+                # transaction as the JSON snapshots and retained canonicals.
+                from app.services.question_bank_integrity import (
+                    claim_public_original_questions,
+                    sync_question_bank_projections,
+                )
+
+                restored_rows = conn.execute(
+                    f"SELECT id,owner_id,status,deleted_at,sources,original_questions,"
+                    f"original_question_sources FROM question_bank WHERE id IN ({placeholders})",
+                    affected_ids,
+                ).fetchall()
+                conn.execute(
+                    f"DELETE FROM question_variant_owners WHERE question_bank_id IN ({placeholders})",
+                    affected_ids,
+                )
+                for restored in restored_rows:
+                    sources = json.loads(restored["sources"] or "[]")
+                    originals = json.loads(restored["original_questions"] or "[]")
+                    original_sources = json.loads(restored["original_question_sources"] or "[]")
+                    sync_question_bank_projections(
+                        conn.cursor(), restored["id"], sources, originals, original_sources
+                    )
+                    if restored["deleted_at"] is None:
+                        claim_public_original_questions(
+                            conn, restored["id"], restored["owner_id"], restored["status"], originals
                         )
 
                 from app.services.cluster_review_lifecycle import mark_clusters_review_pending
@@ -567,6 +546,7 @@ async def clustering_maintenance(
                 conn,
                 execute=not dry_run,
                 merge_exact_duplicates=merge_exact_duplicates,
+                public_only=True,
             )
 
     return await run_db(_run)
@@ -597,7 +577,7 @@ async def fix_lone_islands(
     def _fix():
         with get_db_connection() as conn:
             if dry_run:
-                audit = audit_clustering_state(conn)
+                audit = audit_clustering_state(conn, public_only=True)
                 return {
                     "mode": "dry_run",
                     "message": "embedding 阈值不再用于自动合并；这里只返回确定性候选",
@@ -609,7 +589,7 @@ async def fix_lone_islands(
                     "merged": 0,
                 }
             return run_clustering_maintenance(
-                conn, execute=True, merge_exact_duplicates=True
+                conn, execute=True, merge_exact_duplicates=True, public_only=True
             )
 
     return await run_db(_fix)

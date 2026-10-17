@@ -16,7 +16,10 @@ from typing import Dict, List, Tuple
 import httpx
 import numpy as np
 
-from app.core.outbound_url import assert_safe_outbound_url_sync
+from app.core.outbound_url import (
+    assert_safe_outbound_url_sync,
+    build_pinned_http_transport,
+)
 
 logger = logging.getLogger("interview-boss")
 
@@ -178,11 +181,16 @@ def _get_siliconflow_client():
     if cached is not None:
         return cached
     assert_safe_outbound_url_sync(_SILICONFLOW_BASE_URL)
+    transport = build_pinned_http_transport(_SILICONFLOW_BASE_URL)
     client = OpenAI(
         api_key=_SILICONFLOW_API_KEY,
         base_url=_SILICONFLOW_BASE_URL,
         timeout=float(os.environ.get("EMBEDDING_API_TIMEOUT", "60")),
-        http_client=httpx.Client(follow_redirects=False),
+        http_client=httpx.Client(
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+        ),
     )
     _SILICONFLOW_CLIENTS[key] = client
     return client
@@ -297,7 +305,13 @@ def encode_texts(texts: List[str]) -> np.ndarray:
             logger.warning(
                 "ONNX embedding unavailable, trying fallback backends: %s", exc
             )
-    if backend in {"auto"} and _SILICONFLOW_API_KEY:
+    # Offline mode is an explicit no-network contract: auto must go straight
+    # from unavailable ONNX to the deterministic local hash fallback.
+    if (
+        backend in {"auto"}
+        and _SILICONFLOW_API_KEY
+        and os.environ.get("EMBEDDING_OFFLINE", "0") != "1"
+    ):
         try:
             return _encode_texts_siliconflow(texts)
         except Exception as exc:

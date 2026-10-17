@@ -108,34 +108,7 @@
 
       <!-- Empty state: no conversation selected at all -->
       <div v-if="!activeConversationId" class="flex-1 flex flex-col">
-        <div
-          v-motion
-          :initial="{ opacity: 0, y: 16 }"
-          :enter="{ opacity: 1, y: 0, transition: { duration: 400, easing: [0.25, 0.46, 0.45, 0.94] } }"
-          class="mx-auto flex max-w-2xl flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6"
-        >
-          <div class="mx-auto mb-4 flex size-16 items-center justify-center rounded-xl bg-primary/10 sm:mb-6 sm:size-20">
-            <MessageSquare :size="40" class="text-primary" />
-          </div>
-          <h2 class="mb-2 text-center text-2xl font-bold text-foreground sm:mb-3 sm:text-3xl">开始模拟面试</h2>
-          <p class="mb-5 text-center text-sm text-muted-foreground sm:mb-8 sm:text-lg">选择一种方式开始练习</p>
-          <div class="grid w-full max-w-lg grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-4">
-            <button
-              v-for="suggestion in promptSuggestions"
-              :key="suggestion.text"
-              @click="startWithSuggestion(suggestion)"
-              class="group flex min-h-16 items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-all hover:border-border hover:bg-accent/50 sm:p-4"
-            >
-              <div class="size-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                <component :is="suggestion.icon" :size="20" class="text-primary" />
-              </div>
-              <div>
-                <div class="text-sm font-semibold text-foreground">{{ suggestion.title }}</div>
-                <div class="text-xs text-muted-foreground mt-1">{{ suggestion.description }}</div>
-              </div>
-            </button>
-          </div>
-        </div>
+        <ChatEmptyState @select="startWithSuggestion" />
       </div>
 
       <!-- Pending or Active chat -->
@@ -423,9 +396,9 @@ import { useModelGuard } from '@/composables/useModelGuard.js'
 import { renderSafeMarkdown } from '@/utils/markdown.js'
 import { formatGroupTime, formatRelativeTime, createClientRequestId } from '@/utils/chatFormat.js'
 import { useChatFormat } from '@/composables/useChatFormat.js'
-import { promptSuggestions } from '@/constants/chatSuggestions.js'
+import { useChatAttachments } from '@/composables/useChatAttachments.js'
+import { useThinkingTimer } from '@/composables/useThinkingTimer.js'
 import { useChatInput } from '@/composables/useChatInput.js'
-import { upload } from '@/services/http.js'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -456,6 +429,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import ChatMessage from './ChatMessage.vue'
+import ChatEmptyState from './ChatEmptyState.vue'
 import ReasoningTimeline from './ReasoningTimeline.vue'
 import TurnRunCard from './TurnRunCard.vue'
 import NewChatModal from './NewChatModal.vue'
@@ -488,8 +462,6 @@ const conversations = ref([])
 const activeConversationId = ref(null)
 const messages = ref([])
 const inputText = ref('')
-const attachmentInput = ref(null)
-const attachmentLoading = ref(false)
 const isSending = ref(false)
 // Lock immediately on submit, including the async model check and delayed
 // conversation creation window where isSending has not started yet.
@@ -527,37 +499,6 @@ const headerTitleInput = ref(null)
 const pendingNewConversation = ref(null)
 const openingMessageText = ref('')
 
-async function handleAttachmentChange(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  if (!isPdf) {
-    toastError('目前仅支持 PDF 附件')
-    return
-  }
-
-  attachmentLoading.value = true
-  try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const response = await upload('/api/chat/extract-pdf', formData)
-    const extractedText = String(response?.text || '').trim()
-    if (!extractedText) throw new Error('PDF 中没有可读取的文本')
-
-    const prefix = inputText.value.trim()
-    inputText.value = `${prefix ? `${prefix}\n\n` : ''}[附件：${file.name}]\n${extractedText}`
-    toastSuccess(`已读取 ${file.name}，发送前可以继续编辑`)
-    await nextTick()
-    autoResize()
-  } catch (error) {
-    toastError(error?.message || '附件读取失败，请重试')
-  } finally {
-    attachmentLoading.value = false
-  }
-}
-
 // Rename dialog state
 const showRenameDialog = ref(false)
 const renameDialogTitle = ref('')
@@ -568,8 +509,6 @@ const renameDialogCallback = ref(null)
 const isThinking = ref(false)
 const thinkingContent = ref('')
 const thinkingDuration = ref(0)
-const liveThinkingSeconds = ref(0)
-let thinkingTimer = null
 let activeRequestContext = null
 const activeTurnRun = ref(null)
 const editingTurnId = ref(null)
@@ -597,6 +536,7 @@ const activeConversationMode = computed(() =>
   activeConversation.value?.mode === 'jd_resume' ? 'JD 定制面试' : '自由练习'
 )
 
+const { liveThinkingSeconds, startThinkingTimer, stopThinkingTimer } = useThinkingTimer()
 const { renderStreamingContent, waitingText, displayThinkingDuration } = useChatFormat({
   streamingContent,
   processingSteps,
@@ -605,24 +545,6 @@ const { renderStreamingContent, waitingText, displayThinkingDuration } = useChat
   renderSafeMarkdown,
 })
 
-
-
-
-function startThinkingTimer() {
-  stopThinkingTimer()
-  liveThinkingSeconds.value = 0
-  const startedAt = Date.now()
-  thinkingTimer = window.setInterval(() => {
-    liveThinkingSeconds.value = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
-  }, 250)
-}
-
-function stopThinkingTimer() {
-  if (thinkingTimer) {
-    window.clearInterval(thinkingTimer)
-    thinkingTimer = null
-  }
-}
 
 // Message grouping by time
 const groupedMessages = computed(() => {
@@ -1484,6 +1406,10 @@ const { autoResize, resetInputHeight, onInputKeydown } = useChatInput({
   inputRef,
   onSend: handleSend,
 })
+const { attachmentInput, attachmentLoading, handleAttachmentChange } = useChatAttachments({
+  inputText,
+  autoResize,
+})
 
 
 
@@ -1561,94 +1487,4 @@ onActivated(async () => {
 })
 </script>
 
-<style scoped>
-/* Step transition animations */
-.step-enter-active {
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-.step-leave-active {
-  transition: all 0.2s ease-out;
-}
-.step-enter-from {
-  opacity: 0;
-  transform: translateY(-8px) scale(0.95);
-}
-.step-leave-to {
-  opacity: 0;
-  transform: translateY(8px) scale(0.95);
-}
-
-/* Sidebar animation */
-.sidebar-container {
-  transition: width 380ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@media (max-width: 767px) {
-  .sidebar-container {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: min(82vw, 256px) !important;
-    max-width: calc(100vw - 24px);
-    box-shadow: 18px 0 40px rgba(0, 0, 0, 0.12);
-    transform: translateX(0);
-    transition: transform 220ms ease-out;
-  }
-
-  .sidebar-container.sidebar-collapsed {
-    transform: translateX(-100%);
-    pointer-events: none;
-  }
-}
-
-.sidebar-content {
-  transition: opacity 200ms ease-out;
-}
-
-.sidebar-collapsed .sidebar-content {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.sidebar-expand-buttons {
-  animation: sidebarExpandButtons 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both;
-}
-
-@keyframes sidebarExpandButtons {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-/* Shimmer animation */
-.animate-shimmer {
-  background: linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--primary) 40%, transparent) 50%, transparent 100%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Chat input textarea — strip all browser defaults, blend with container */
-.chat-input-area textarea {
-  background-color: transparent !important;
-  border: none !important;
-  outline: none !important;
-  box-shadow: none !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  font-family: inherit;
-  color: var(--foreground);
-}
-.chat-input-area textarea:focus,
-.chat-input-area textarea:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-}
-.chat-input-area textarea:disabled {
-  opacity: 0.5;
-}
-.chat-input-area textarea::placeholder {
-  color: var(--muted-foreground);
-}
-</style>
+<style scoped src="./ChatView.css"></style>

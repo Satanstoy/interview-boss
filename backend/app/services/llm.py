@@ -24,7 +24,10 @@ from tenacity import (
     retry_if_exception_type,
 )
 from app.core.config import LLM_MODEL, LLM_TIMEOUT
-from app.core.outbound_url import assert_safe_outbound_url_sync
+from app.core.outbound_url import (
+    assert_safe_outbound_url_sync,
+    build_pinned_async_http_transport,
+)
 from app.services.llm_usage import normalize_cache_usage
 
 logger = logging.getLogger("interview-boss")
@@ -43,374 +46,87 @@ _RETRYABLE_EXCEPTIONS = (
 # 全局默认 client（openai 或 anthropic 类型）
 client = None
 
-_SUPPORTED_API_FORMATS = ("chat", "responses", "anthropic")
-_API_FORMAT_CACHE_TTL = 600
-_api_format_cache: dict[tuple, tuple[str, float]] = {}
+from app.services.llm_protocol import (
+    _PROBE_TIMEOUT,
+    _SUPPORTED_API_FORMATS,
+    _api_format_override,
+    _detect_provider,
+    _endpoint_api_format_hint,
+    _explicit_api_format,
+    _has_named_provider_capability,
+    _is_endpoint_mismatch,
+    _is_opencode_host,
+    _normalise_api_format,
+    _normalise_llm_base_url,
+    _opencode_session_headers,
+    _probe_api_format,
+    _provider_for_api_format,
+    _provider_hostname,
+    clear_api_format_cache,
+    get_provider_capabilities,
+    get_provider_formats,
+    llm_config_fingerprint,
+    resolve_api_format,
+    resolve_api_format_async,
+)
 
 
 # --------------- 提供商检测 ---------------
 
 
-def _detect_provider(base_url: str) -> str:
-    """根据 base_url 判断 LLM 提供商类型：'anthropic' 或 'openai'"""
-    if not base_url:
-        return "openai"
-    lower = base_url.lower()
-    hostname = _provider_hostname(base_url)
-    path = urlsplit(lower if "://" in lower else f"//{lower}").path
-    if hostname == "api.anthropic.com" or "/anthropic" in path:
-        return "anthropic"
-    return "openai"
-
-
-def _provider_for_api_format(api_format: str | None) -> str | None:
-    """将协议格式映射为 SDK provider；OpenAI 的两种格式共用一个 SDK。"""
-    if api_format == "anthropic":
-        return "anthropic"
-    if api_format in ("chat", "responses"):
-        return "openai"
-    return None
-
-
-def _normalise_api_format(value: str | None) -> str:
-    value = (value or "auto").strip().lower()
-    return value if value in ("auto", *_SUPPORTED_API_FORMATS) else "auto"
-
-
-def _endpoint_api_format_hint(base_url: str | None, model: str | None = None) -> str | None:
-    """仅从明确的 endpoint/provider 线索推断格式，不把普通域名当作事实。"""
-    lower = (base_url or "").lower().rstrip("/")
-    path = urlsplit(lower if "://" in lower else f"//{lower}").path
-    if _provider_hostname(base_url) == "api.anthropic.com" or "/anthropic" in path or "/messages" in path:
-        return "anthropic"
-    if "/responses" in path:
-        return "responses"
-    if "/chat/completions" in path:
-        return "chat"
-    return None
-
-
-def _explicit_api_format(
-    base_url: str | None = None, user_id: int | None = None, llm_scope: str = "user"
-) -> str | None:
-    """返回用户/环境明确指定的格式；auto 和无效值返回 None。"""
-    if user_id is not None and llm_scope != "global":
-        try:
-            from app.core.config import get_user_llm_config
-
-            configured = _normalise_api_format(
-                (get_user_llm_config(user_id) or {}).get("api_format")
-            )
-            if configured != "auto":
-                return configured
-        except Exception:
-            pass
-    override = _normalise_api_format(_api_format_override())
-    return override if override != "auto" else None
-
-
-def llm_config_fingerprint(cfg: dict | None) -> tuple:
-    """生成会影响连通性/协议选择的配置指纹。"""
-    cfg = cfg or {}
-    return (
-        cfg.get("api_key"),
-        cfg.get("base_url"),
-        cfg.get("model"),
-        _normalise_api_format(cfg.get("api_format")),
-    )
-
-
-def clear_api_format_cache(base_url: str | None = None, model: str | None = None):
-    """清理自动协议探测缓存；传 endpoint/model 时只清理匹配项。"""
-    if base_url is None and model is None:
-        _api_format_cache.clear()
-        return
-    for key in list(_api_format_cache):
-        if (base_url is None or key[1] == base_url) and (
-            model is None or key[2] == model
-        ):
-            _api_format_cache.pop(key, None)
-
-
 def _is_mimo(base_url: str | None) -> bool:
-    """判断是否为 mimo（小米）OpenAI 兼容端点：默认开启深度思考且不支持自定义
-    temperature；关闭思考可显著提速并让 temperature 真正生效。"""
+    """是否为 xiaomimimo 官方 OpenAI 兼容端点（该端点自带 thinking 参数）。"""
     return bool(base_url and "mimo" in base_url.lower())
 
 
-# --------------- 供应商能力矩阵 ---------------
-#
-# 兼容层：部分 OpenAI 兼容端点（如 mimo Token Plan）的 json_object 模式
-# 输出会被服务端截断（2026-08-06 实测：只返回 '```json\n['）。调用方保持
-# 声明式传参（response_format={"type": "json_object"}），由本层按 base_url
-# 前缀匹配能力决定是否下发。供应商修复后把对应前缀 json_mode 改回 True 即恢复。
-# 应急开关：LLM_JSON_MODE_OVERRIDE=force-on/force-off/auto
-
-_PROVIDER_CAPABILITIES: list[tuple[str, dict]] = [
-    # mimo Token Plan：json_object 2026-08-06 曾截断 → 降级 prompt 指令；支持 chat + responses
-    (
-        "token-plan-cn.xiaomimimo.com",
-        {
-            "json_mode": False,
-            "max_output_tokens": 4096,
-            "api_formats": ["chat", "responses"],
-            "prompt_cache_key": False,
-        },
-    ),
-    # SiliconFlow：json_object 正常；responses 未实测，保守只声明 chat
-    (
-        "api.siliconflow.cn",
-        {"json_mode": True, "max_output_tokens": 4096, "api_formats": ["chat"]},
-    ),
-    (
-        "api.openai.com",
-        {
-            "json_mode": True,
-            "max_output_tokens": 4096,
-            "api_formats": ["chat", "responses"],
-            "prompt_cache_key": True,
-        },
-    ),
-    (
-        "api.anthropic.com",
-        {
-            "json_mode": False,
-            "max_output_tokens": 8192,
-            "api_formats": ["anthropic"],
-            "prompt_cache_control": True,
-        },
-    ),
-    ("*", {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}),
-]
-
-_DEFAULT_CAPS = {"json_mode": False, "max_output_tokens": 4096, "api_formats": ["chat"]}
+# zen/go 上实测确认「接受 thinking.disabled」的模型前缀（2026-09-28）。
+_THINKING_DISABLE_MODEL_PREFIXES = ("mimo-", "kimi-", "minimax-", "deepseek-v4-pro")
 
 
-def _provider_hostname(base_url: str | None) -> str:
-    """Extract a normalized hostname for exact provider capability matching."""
-    raw = str(base_url or "").strip()
-    if not raw:
-        return ""
-    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
-    return (parsed.hostname or "").lower().rstrip(".")
+def _supports_thinking_disable(base_url: str | None, model: str | None) -> bool:
+    """该端点+模型能否用 thinking 参数关闭深度思考。
 
+    只认两类确证信号：
 
-def get_provider_capabilities(base_url: str = None) -> dict:
-    """按 base_url 前缀匹配供应商能力。
+    1. 端点自带该参数（xiaomimimo 官方端点）。
+    2. OpenCode Go 上实测接受该参数的模型前缀。
 
-    Returns: {"json_mode": bool, "max_output_tokens": int, "api_formats": list[str]}
-    api_formats 取值：chat（OpenAI Chat Completions）/ responses（OpenAI Responses）/
-    anthropic（Anthropic Messages）。缓存能力只声明已知 provider 的安全参数；未匹配
-    到具名供应商时回退 "*" 保守默认，不向兼容端点发送未知字段。
+    刻意**不**按「模型是否产出 reasoning」推断 —— 两者是独立维度：
+    ``glm-5.3-flash``/``glm-5.1`` 默认 reasoning_tokens=256（确实在用深度思考），
+    但传本参数会 400 ``invalid_request_error: thinking``。若按"有 thinking 就发"，
+    探测到 reasoning 后的下一次调用必然硬失败，而 BadRequestError 不在重试白名单里。
+
+    未知一律不发：宁可多想一会儿，也不要 400。
     """
-    if not base_url:
-        return dict(_DEFAULT_CAPS)
-    hostname = _provider_hostname(base_url)
-    for prefix, caps in _PROVIDER_CAPABILITIES:
-        if prefix == "*" or hostname == prefix:
-            return dict(caps)
-    return dict(_DEFAULT_CAPS)
-
-
-def _has_named_provider_capability(base_url: str | None) -> bool:
-    hostname = _provider_hostname(base_url)
-    return any(
-        prefix != "*" and hostname == prefix
-        for prefix, _caps in _PROVIDER_CAPABILITIES
-    )
-
-
-def get_provider_formats(base_url: str = None) -> list[str]:
-    """返回端点支持的接口格式列表（chat / responses / anthropic）。"""
-    return list(get_provider_capabilities(base_url).get("api_formats", ["chat"]))
-
-
-def _api_format_override() -> str:
-    """接口格式应急开关：chat / responses / anthropic / auto（默认）"""
-    return os.environ.get("LLM_API_FORMAT", "auto").strip().lower()
-
-
-def _api_format_cache_key(
-    api_key: str | None, base_url: str | None, model: str | None
-) -> tuple:
-    return (api_key or "", base_url or "", model or "")
-
-
-def _cache_api_format(
-    api_key: str | None, base_url: str | None, model: str | None, api_format: str
-):
-    _api_format_cache[_api_format_cache_key(api_key, base_url, model)] = (
-        api_format,
-        time.time(),
-    )
-
-
-def _cached_api_format(
-    api_key: str | None, base_url: str | None, model: str | None
-) -> str | None:
-    cached = _api_format_cache.get(_api_format_cache_key(api_key, base_url, model))
-    if not cached:
-        return None
-    if time.time() - cached[1] >= _API_FORMAT_CACHE_TTL:
-        _api_format_cache.pop(_api_format_cache_key(api_key, base_url, model), None)
-        return None
-    return cached[0]
-
-
-def _is_endpoint_mismatch(exc: Exception) -> bool:
-    """只有明确的路由不存在错误才允许探测下一个协议。"""
-    status_code = getattr(exc, "status_code", None)
-    if status_code not in (404, 405, 415):
+    if _is_mimo(base_url):
+        return True
+    if not _is_opencode_host(base_url):
         return False
+    name = (model or "").strip().lower()
+    return any(name.startswith(prefix) for prefix in _THINKING_DISABLE_MODEL_PREFIXES)
 
-    # SDK 异常通常把上游 JSON 放在 body；模型不存在是 404，但不是协议错配。
-    # 没有 body 的兼容网关一般只返回裸 404/405/415，保留探测下一个协议的行为。
-    body = getattr(exc, "body", None)
-    if body is None:
-        response = getattr(exc, "response", None)
-        body = getattr(response, "text", None) if response is not None else None
-    body_text = str(body or "").lower()
-    model_not_found = "model" in body_text and any(
-        marker in body_text
-        for marker in ("not found", "not_found", "does not exist", "doesn't exist", "unknown", "invalid")
-    )
-    if model_not_found:
+
+def _resolve_thinking(
+    user_id: int | None = None, thinking: bool | None = None, llm_scope: str = "user"
+) -> bool:
+    """解析本次调用是否保留深度思考。
+
+    优先级：显式 ``thinking`` → global scope 恒关 → 用户配置 ``llm_thinking``
+    → 任何异常兜底关闭（宁可快，不要因为读配置失败就卡住思考）。
+    """
+    if thinking is not None:
+        return bool(thinking)
+    try:
+        # user_id 为 None 时 get_user_llm_config 查不到行（user_id IS NULL 不匹配）
+        # 恒返回 None → False，直接短路等价且不必把 None 塞进 int 参数。
+        if llm_scope == "global" or user_id is None:
+            return False
+        from app.core.config import get_user_llm_config
+
+        user_cfg = get_user_llm_config(user_id)
+        return bool((user_cfg or {}).get("thinking"))
+    except Exception:
         return False
-    return True
-
-
-async def _probe_api_format(client, model: str, timeout: float, api_format: str):
-    """用不带工具/提示词的最小请求验证单一协议。"""
-    wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
-    if api_format == "anthropic":
-        request = client.messages.create(
-            model=model,
-            max_tokens=1,
-            messages=[{"role": "user", "content": "ping"}],
-        )
-    elif api_format == "responses":
-        request = client.responses.create(
-            model=model,
-            input="ping",
-            max_output_tokens=1,
-        )
-    else:
-        request = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-    return await asyncio.wait_for(request, timeout=wait_for)
-
-
-async def resolve_api_format_async(
-    client,
-    model: str,
-    timeout: float,
-    base_url: str | None,
-    provider: str,
-    *,
-    api_key: str | None = None,
-    user_id: int | None = None,
-    llm_scope: str = "user",
-    _return_probe_error: bool = False,
-) -> str | tuple[str, Exception | None, bool]:
-    """解析协议：显式配置 → 缓存 → 明确 endpoint hint → 最小探测 → Chat。
-
-    探测只在无法从配置/endpoint 确定协议时执行，且只有 404/405/415 才会尝试
-    下一个协议；认证、限流、超时和参数错误直接抛出，避免重复计费或掩盖故障。
-    """
-    def result(
-        api_format: str,
-        probe_error: Exception | None = None,
-        probed: bool = False,
-    ):
-        if _return_probe_error:
-            return api_format, probe_error, probed
-        return api_format
-
-    explicit = _explicit_api_format(base_url, user_id, llm_scope)
-    if explicit:
-        return result(explicit)
-
-    if api_key is None and user_id is not None and llm_scope != "global":
-        try:
-            from app.core.config import get_user_llm_config
-
-            api_key = (get_user_llm_config(user_id) or {}).get("api_key")
-        except Exception:
-            pass
-
-    cached = _cached_api_format(api_key, base_url, model)
-    if cached:
-        return result(cached)
-
-    hint = _endpoint_api_format_hint(base_url, model)
-    if hint:
-        _cache_api_format(api_key, base_url, model, hint)
-        return result(hint)
-
-    static_formats = get_provider_formats(base_url)
-    if _has_named_provider_capability(base_url) and len(static_formats) == 1:
-        detected = static_formats[0]
-        _cache_api_format(api_key, base_url, model, detected)
-        return result(detected)
-
-    # 已知同时支持 Chat/Responses 的官方或网关端点保持历史稳定默认值；
-    # 只有未知端点才需要实际探测，避免每个请求额外消耗一次 token。
-    if _has_named_provider_capability(base_url) and "chat" in static_formats:
-        _cache_api_format(api_key, base_url, model, "chat")
-        return result("chat")
-
-    candidates = ["chat", "responses"]
-    if provider == "anthropic":
-        candidates = ["anthropic"]
-    last_mismatch = None
-    for candidate in candidates:
-        try:
-            await _probe_api_format(client, model, timeout, candidate)
-        except Exception as exc:
-            if _is_endpoint_mismatch(exc):
-                last_mismatch = exc
-                continue
-            raise
-        _cache_api_format(api_key, base_url, model, candidate)
-        return result(candidate, probed=True)
-
-    if last_mismatch:
-        logger.warning("LLM endpoint did not advertise a supported protocol; falling back to chat")
-    _cache_api_format(api_key, base_url, model, "chat")
-    return result("chat", last_mismatch, probed=last_mismatch is not None)
-
-
-def resolve_api_format(
-    base_url: str = None, user_id: int = None, llm_scope: str = "user"
-) -> str:
-    """解析应使用的接口格式。
-
-    优先级：用户配置的 api_format（非 auto）→ LLM_API_FORMAT（应急开关）→
-    端点能力（anthropic 端点用 anthropic；responses-only 端点用 responses；
-    其余默认 chat）。
-    """
-    explicit = _explicit_api_format(base_url, user_id, llm_scope)
-    if explicit:
-        return explicit
-    if base_url is None:
-        from app.core.config import LLM_BASE_URL
-
-        base_url = LLM_BASE_URL
-    cached = _cached_api_format(None, base_url, None)
-    if cached:
-        return cached
-    hint = _endpoint_api_format_hint(base_url)
-    if hint:
-        return hint
-    formats = get_provider_formats(base_url)
-    if "anthropic" in formats:
-        return "anthropic"
-    if "responses" in formats and "chat" not in formats:
-        return "responses"
-    return "chat"
 
 
 def _json_mode_override() -> str:
@@ -438,30 +154,72 @@ def _should_use_response_format(base_url: str = None) -> bool:
     return get_provider_capabilities(base_url)["json_mode"]
 
 
+def build_bare_client(
+    api_key: str,
+    base_url: str,
+    timeout: float = 15,
+    provider: str = "openai",
+    api_format: str | None = None,
+):
+    """供凭据预检（R01）等独立探测路径解析到的明文凭据建裸 client。
+
+    与 ``_make_client`` 同构，但公开导出且参数显式（不读用户/全局缓存）。
+    """
+
+    return _make_client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        provider=provider,
+        api_format=api_format,
+    )
+
+
 def _make_client(
     api_key: str,
     base_url: str,
     timeout: float,
     provider: str = "openai",
     api_format: str | None = None,
+    *,
+    max_retries: int | None = None,
 ):
     """根据 provider 创建对应的 LLM 客户端。"""
     provider = _provider_for_api_format(api_format) or provider
+    # 会话头必须按原始 base_url 计算：归一化会改变 URL，导致同一端点的
+    # 两种粘贴形式得到不同 session id，丢失路由与 prompt cache。
+    default_headers = _opencode_session_headers(base_url, api_key)
+    normalised = _normalise_llm_base_url(
+        base_url, "anthropic" if provider == "anthropic" else "openai"
+    )
+    if normalised is not None:
+        base_url = normalised
+    transport = None
     if base_url:
         assert_safe_outbound_url_sync(base_url)
-    http_client = httpx.AsyncClient(follow_redirects=False)
+        transport = build_pinned_async_http_transport(base_url)
+    http_client = httpx.AsyncClient(
+        transport=transport,
+        follow_redirects=False,
+        trust_env=False,
+    )
+    retry_option = {} if max_retries is None else {"max_retries": max_retries}
     if provider == "anthropic":
         return AsyncAnthropic(
             api_key=api_key or None,
             base_url=base_url or None,
             timeout=timeout,
             http_client=http_client,
+            default_headers=default_headers or None,
+            **retry_option,
         )
     return AsyncOpenAI(
         api_key=api_key or None,
         base_url=base_url or None,
         timeout=timeout,
         http_client=http_client,
+        default_headers=default_headers or None,
+        **retry_option,
     )
 
 
@@ -517,6 +275,43 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     Raises:
         HTTPException: 用户未配置 LLM 密钥
     """
+    from app.services.upload_llm_accounting import current_upload_llm_context
+    upload_context = current_upload_llm_context()
+    if upload_context is not None:
+        from app.services.upload_credentials import resolve_upload_credentials
+
+        # Upload policy and its successful preflight own the credential scope.
+        # Legacy helpers often omit llm_scope or user_id; in an upload context
+        # those defaults must never select a different payer/configuration.
+        resolved = resolve_upload_credentials(
+            credential_scope=upload_context.credential_scope,
+            user_id=(
+                upload_context.user_id
+                if upload_context.credential_scope == "user"
+                else None
+            ),
+            stage=upload_context.stage,
+            unit_key=upload_context.unit_key,
+        )
+        upload_context.credential = resolved
+        scoped_client = _make_client(
+            resolved.api_key,
+            resolved.base_url,
+            resolved.timeout,
+            resolved.provider,
+            api_format=resolved.api_format,
+            # The upload ledger must reserve once for every physical request.
+            # SDK retries bypass the ledger and multiply the stage budget.
+            max_retries=0,
+        )
+        return (
+            scoped_client,
+            resolved.model,
+            resolved.timeout,
+            resolved.base_url,
+            resolved.provider,
+        )
+
     from app.core.config import get_user_llm_config
     from fastapi import HTTPException
 
@@ -527,9 +322,7 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     else:
         cfg = get_user_llm_config(user_id)
     if not cfg:
-        raise HTTPException(
-            status_code=400, detail="请先在设置中配置 LLM 密钥才能使用 AI 功能"
-        )
+        raise HTTPException(status_code=400, detail="请先在设置中配置 LLM 密钥才能使用 AI 功能")
 
     api_key = cfg["api_key"]
     base_url = cfg["base_url"]
@@ -540,7 +333,9 @@ def get_llm_client_for_user(user_id: int, llm_scope: str = "user") -> tuple:
     client_api_format = (
         configured_format
         if configured_format != "auto"
-        else override_format if override_format != "auto" else None
+        else override_format
+        if override_format != "auto"
+        else None
     )
     provider = _provider_for_api_format(client_api_format) or _detect_provider(base_url)
 
@@ -600,319 +395,31 @@ def clear_user_client_cache(user_id: int = None):
         _user_client_cache.clear()
 
 
-# --------------- 模型可用性状态探测 ---------------
-
-_LLM_STATUS_CACHE_TTL = 120  # 探测结果缓存秒数
-_llm_status_cache: dict[
-    int, tuple
-] = {}  # user_id -> (配置指纹, connected, error, 探测时间戳)
-
-_PROBE_TIMEOUT = 15  # 单次探测最大秒数
-
-
-def clear_llm_status_cache(user_id: int = None):
-    """清除用户模型状态探测缓存（配置更新后调用）"""
-    if user_id is not None:
-        _llm_status_cache.pop(user_id, None)
-    else:
-        _llm_status_cache.clear()
-
-
-def _classify_probe_error(exc: Exception) -> str:
-    """把探测异常归类为用户可读的错误信息"""
-    status_code = getattr(exc, "status_code", None)
-    if status_code in (401, 403):
-        return "认证失败：请检查 API Key 是否正确"
-    if status_code == 429:
-        return "请求过于频繁：请稍后重试"
-    if isinstance(exc, AuthenticationError) or isinstance(
-        exc, anthropic_mod.AuthenticationError
-    ):
-        return "认证失败：请检查 API Key 是否正确"
-    if isinstance(exc, RateLimitError) or isinstance(exc, anthropic_mod.RateLimitError):
-        return "请求过于频繁：请稍后重试"
-    if (
-        isinstance(exc, APITimeoutError)
-        or isinstance(exc, anthropic_mod.APITimeoutError)
-        or isinstance(exc, asyncio.TimeoutError)
-    ):
-        return "模型服务响应超时：请稍后重试"
-    if isinstance(exc, APIConnectionError) or isinstance(
-        exc, anthropic_mod.APIConnectionError
-    ):
-        return "无法连接模型服务：请检查 Base URL"
-    if status_code == 404:
-        return "模型服务未找到：请检查 Base URL 和模型名称"
-    if status_code in (405, 415):
-        return "接口不支持当前请求格式：请检查 Base URL 和接口类型"
-    if status_code and status_code >= 500:
-        return "模型服务暂时不可用：请稍后重试"
-    return "模型服务异常：请检查 Base URL、模型名称和 API Key"
-
-
-def _api_format_label(api_format: str) -> str:
-    return {
-        "chat": "Chat Completions",
-        "responses": "Responses",
-        "anthropic": "Anthropic Messages",
-    }.get(api_format, api_format)
-
-
-def _validation_candidates(base_url: str, requested_format: str) -> list[str]:
-    """生成保存前探测顺序：用户选择优先，路由错配时再尝试其它协议。"""
-    requested = _normalise_api_format(requested_format)
-    hint = _endpoint_api_format_hint(base_url)
-    candidates: list[str] = []
-    preferred = [requested] if requested != "auto" else []
-    preferred.extend([hint] if hint else [])
-    if requested == "auto":
-        preferred.extend(get_provider_formats(base_url))
-    else:
-        # 能力矩阵只用于排序，不阻止自定义网关的实际探测。
-        preferred.extend(get_provider_formats(base_url))
-    preferred.extend(_SUPPORTED_API_FORMATS)
-    for candidate in preferred:
-        if candidate in _SUPPORTED_API_FORMATS and candidate not in candidates:
-            candidates.append(candidate)
-    return candidates
-
-
-async def validate_llm_api_format(
-    *,
-    api_key: str,
-    base_url: str,
-    model: str,
-    timeout: float = 120,
-    requested_format: str = "auto",
-) -> dict:
-    """探测未保存的 LLM 配置，并报告用户选择是否匹配真实协议。
-
-    该函数不读取用户已保存的协议缓存，也不写入配置或自动探测缓存。只有
-    404/405/415 才会继续尝试下一个协议；认证、限流、超时等错误立即返回，
-    防止一次保存操作造成重复请求或重复计费。
-    """
-    requested = _normalise_api_format(requested_format)
-    candidates = _validation_candidates(base_url, requested)
-    last_mismatch: Exception | None = None
-
-    for candidate in candidates:
-        probe_client = None
-        try:
-            provider = _provider_for_api_format(candidate) or _detect_provider(base_url)
-            probe_client = _make_client(
-                api_key=api_key,
-                base_url=base_url,
-                timeout=timeout,
-                provider=provider,
-                api_format=candidate,
-            )
-            await _probe_api_format(probe_client, model, timeout, candidate)
-        except Exception as exc:
-            if _is_endpoint_mismatch(exc):
-                last_mismatch = exc
-                continue
-            logger.warning("LLM configuration validation failed: %s", exc)
-            return {
-                "connected": False,
-                "compatible": False,
-                "requested_format": requested,
-                "detected_format": None,
-                "suggested_format": None,
-                "model": model,
-                "message": None,
-                "error": _classify_probe_error(exc),
-            }
-        finally:
-            if probe_client is not None:
-                close = getattr(probe_client, "close", None)
-                if close:
-                    try:
-                        close_result = close()
-                        if inspect.isawaitable(close_result):
-                            await close_result
-                    except Exception as close_exc:
-                        logger.warning("Failed to close temporary LLM client: %s", close_exc)
-
-        compatible = requested == "auto" or requested == candidate
-        if compatible:
-            message = f"接口格式校验成功：{_api_format_label(candidate)}"
-            suggested = None
-        else:
-            message = (
-                f"检测到实际接口格式为 {_api_format_label(candidate)}，"
-                "已为你切换建议格式，请再次保存确认"
-            )
-            suggested = candidate
-        return {
-            "connected": True,
-            "compatible": compatible,
-            "requested_format": requested,
-            "detected_format": candidate,
-            "suggested_format": suggested,
-            "model": model,
-            "message": message,
-            "error": None,
-        }
-
-    mismatch_detail = "未检测到可用的 Chat / Responses / Anthropic 接口"
-    if last_mismatch:
-        logger.warning(
-            "LLM configuration validation found no compatible protocol: %s",
-            last_mismatch,
-        )
-    return {
-        "connected": False,
-        "compatible": False,
-        "requested_format": requested,
-        "detected_format": None,
-        "suggested_format": None,
-        "model": model,
-        "message": mismatch_detail,
-        "error": mismatch_detail,
-    }
-
-
-async def _probe_resolved(client, model, timeout, base_url, provider, user_id=None) -> tuple:
-    """向给定的 client/model 发最小请求验证可用性，返回 (connected, error)。"""
-    wait_for = max(5, min(int(timeout or _PROBE_TIMEOUT), _PROBE_TIMEOUT))
-    try:
-        api_format, probe_error, probed = await resolve_api_format_async(
-            client,
-            model=model,
-            timeout=timeout,
-            base_url=base_url,
-            provider=provider,
-            user_id=user_id,
-            _return_probe_error=True,
-        )
-        if probe_error is not None:
-            return False, _classify_probe_error(probe_error)
-        if probed:
-            return True, None
-        if api_format == "anthropic":
-            await asyncio.wait_for(
-                client.messages.create(
-                    model=model,
-                    max_tokens=1,
-                    messages=[{"role": "user", "content": "ping"}],
-                ),
-                timeout=wait_for,
-            )
-        elif api_format == "responses":
-            await asyncio.wait_for(
-                client.responses.create(
-                    model=model,
-                    input=[
-                        {
-                            "type": "message",
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": "ping"}],
-                        }
-                    ],
-                    max_output_tokens=1,
-                ),
-                timeout=wait_for,
-            )
-        else:
-            await asyncio.wait_for(
-                client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": "ping"}],
-                    max_tokens=1,
-                ),
-                timeout=wait_for,
-            )
-        return True, None
-    except Exception as exc:
-        return False, _classify_probe_error(exc)
-
-
-async def _probe_llm(user_id: int) -> tuple:
-    """向用户配置的模型发最小请求验证可用性，返回 (connected, error)。"""
-    resolved_client, model, timeout, base_url, provider = get_llm_client_for_user(
-        user_id
-    )
-    return await _probe_resolved(resolved_client, model, timeout, base_url, provider, user_id)
-
-
-async def check_global_llm_status() -> dict:
-    """用全局 LLM 配置探测连通性（管理员「测试连接」用，绕过缓存）。"""
-    from app.core.config import _get_global_llm_config
-
-    cfg = _get_global_llm_config()
-    if not cfg or not cfg.get("api_key"):
-        return {"configured": False, "connected": False, "error": None, "model": None}
-
-    model = cfg.get("model")
-    timeout = cfg.get("timeout") or 120
-    base_url = cfg.get("base_url")
-    configured_format = _normalise_api_format(cfg.get("api_format"))
-    override_format = _normalise_api_format(_api_format_override())
-    api_format = (
-        configured_format
-        if configured_format != "auto"
-        else override_format if override_format != "auto" else None
-    )
-    provider = _provider_for_api_format(api_format) or _detect_provider(base_url)
-    client = _make_client(
-        cfg["api_key"],
-        base_url,
-        timeout,
-        provider,
-        api_format=api_format,
-    )
-    connected, error = await _probe_resolved(client, model, timeout, base_url, provider)
-    return {"configured": True, "connected": connected, "error": error, "model": model}
-
-
-async def check_llm_status(user_id: int, force_probe: bool = False) -> dict:
-    """检查用户的 LLM 模型是否可提供服务。
-
-    返回 dict：
-    - configured: 是否已配置（用户配置或全局默认）
-    - connected: 最小请求探测是否成功（未配置时为 False）
-    - error: 探测失败的用户可读原因（成功或未配置时为 None）
-    - model: 当前生效的模型名（未配置时为 None）
-    """
-    from app.core.config import get_user_llm_config
-
-    cfg = get_user_llm_config(user_id)
-    if not cfg or not cfg.get("api_key"):
-        return {
-            "configured": False,
-            "connected": False,
-            "error": None,
-            "model": None,
-        }
-
-    fingerprint = llm_config_fingerprint(cfg)
-    now = time.time()
-    cached = _llm_status_cache.get(user_id)
-    if (
-        not force_probe
-        and cached
-        and cached[0] == fingerprint
-        and (now - cached[3]) < _LLM_STATUS_CACHE_TTL
-    ):
-        return {
-            "configured": True,
-            "connected": cached[1],
-            "error": cached[2],
-            "model": fingerprint[2],
-        }
-
-    connected, error = await _probe_llm(user_id)
-    _llm_status_cache[user_id] = (fingerprint, connected, error, now)
-    return {
-        "configured": True,
-        "connected": connected,
-        "error": error,
-        "model": fingerprint[2],
-    }
+from app.services.llm_status import (
+    _LLM_STATUS_CACHE_TTL,
+    _llm_status_cache,
+    _api_format_label,
+    _classify_probe_error,
+    _probe_llm,
+    _probe_resolved,
+    _validation_candidates,
+    check_global_llm_status,
+    check_llm_status,
+    clear_llm_status_cache,
+    validate_llm_api_format,
+)
 
 
 def _resolve_client_and_model(user_id: int = None, llm_scope: str = "user"):
     """解析 LLM 客户端和模型。user_id 有值时使用用户配置，否则使用全局配置。"""
+    from app.services.upload_llm_accounting import current_upload_llm_context
+
+    upload_context = current_upload_llm_context()
+    if upload_context is not None:
+        return get_llm_client_for_user(
+            upload_context.user_id,
+            llm_scope=upload_context.credential_scope,
+        )
     if user_id is not None or llm_scope == "global":
         return get_llm_client_for_user(user_id, llm_scope=llm_scope)
     from app.core.config import LLM_BASE_URL
@@ -933,6 +440,7 @@ from app.services.llm_converters import (
     make_tool_result_message,
 )
 
+
 async def _llm_with_tools_call(
     resolved_client,
     model,
@@ -949,6 +457,7 @@ async def _llm_with_tools_call(
     prompt_cache_key=None,
     prompt_cache_options=None,
     api_format: str | None = None,
+    thinking: bool = False,
 ) -> dict:
     """带重试的 tool calling LLM 调用（内部函数）。"""
     api_format = api_format or resolve_api_format(base_url, user_id)
@@ -969,7 +478,13 @@ async def _llm_with_tools_call(
             "prompt_cache_control", False
         ):
             call_kwargs["cache_control"] = cache_control or {"type": "ephemeral"}
-        response = await resolved_client.messages.create(**call_kwargs)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.messages.create(**call_kwargs),
+            model=model,
+            provider="anthropic",
+        )
 
         tool_calls = _extract_tool_calls(response, "anthropic")
         text_content = _extract_anthropic_text(response)
@@ -995,9 +510,7 @@ async def _llm_with_tools_call(
         caps = get_provider_capabilities(base_url)
         if not system_text:
             system_text = "\n\n".join(
-                str(msg.get("content") or "")
-                for msg in messages
-                if msg.get("role") == "system"
+                str(msg.get("content") or "") for msg in messages if msg.get("role") == "system"
             )
         input_items = _convert_messages_to_responses_input(messages, system_text)
         call_kwargs = dict(
@@ -1017,7 +530,16 @@ async def _llm_with_tools_call(
             call_kwargs["prompt_cache_key"] = prompt_cache_key
         if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
             call_kwargs["prompt_cache_options"] = prompt_cache_options
-        response = await resolved_client.responses.create(**call_kwargs)
+        if not thinking and _supports_thinking_disable(base_url, model):
+            # 与 raw_llm_call 对齐：mimo 关思考 → reasoning.effort=none
+            call_kwargs["reasoning"] = {"effort": "none"}
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**call_kwargs),
+            model=model,
+            provider=provider,
+        )
 
         tool_calls = _extract_responses_tool_calls(response)
         text_content = _extract_responses_text(response)
@@ -1050,7 +572,17 @@ async def _llm_with_tools_call(
         call_kwargs["prompt_cache_key"] = prompt_cache_key
     if prompt_cache_options is not None and caps.get("prompt_cache_key", False):
         call_kwargs["prompt_cache_options"] = prompt_cache_options
-    response = await resolved_client.chat.completions.create(**call_kwargs)
+    if not thinking and _supports_thinking_disable(base_url, model):
+        # mimo 默认开启深度思考：关掉才能提速并让 temperature 真正生效，
+        # 否则 reasoning 会吃光 max_tokens 预算（与 _call_llm_with_retry 对齐）。
+        call_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**call_kwargs),
+        model=model,
+        provider=provider,
+    )
 
     msg = response.choices[0].message
     tool_calls = _extract_tool_calls(response, "openai")
@@ -1084,9 +616,13 @@ async def llm_with_tools(
             "usage": {"input_tokens": int | None, ...},  # token/cache usage
         }
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    llm_scope = kwargs.pop("llm_scope", "user")
+    if llm_scope == "user":
+        resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
+    else:
+        resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id, llm_scope=llm_scope
+        )
     model = kwargs.pop("model", None) or model
     api_format = await resolve_api_format_async(
         resolved_client,
@@ -1095,19 +631,23 @@ async def llm_with_tools(
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
-    max_tokens = kwargs.get("max_tokens", 4096)
+    # 能力矩阵作为默认值，而不是硬编码 4096 —— ReAct 主循环不传 max_tokens，
+    # 思考开启时 4096 预算会被 reasoning 吃光导致截断/空响应。
+    max_tokens = kwargs.get("max_tokens", get_provider_capabilities(base_url)["max_output_tokens"])
     temperature = kwargs.get("temperature", 0.7)
     tool_choice = kwargs.get("tool_choice")
     cache_control = kwargs.get("cache_control")
     prompt_cache_key = kwargs.get("prompt_cache_key")
     prompt_cache_options = kwargs.get("prompt_cache_options")
+    # ReAct 主循环不传 thinking → 按用户 llm_thinking 配置解析（默认关闭），
+    # 让"关闭深度思考"开关对 agent 主链路同样生效。
+    thinking = _resolve_thinking(user_id, kwargs.get("thinking"), llm_scope)
 
     # Anthropic 需要预先转换消息格式
     if api_format == "anthropic":
-        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(
-            messages
-        )
+        system_text, anthropic_msgs = _convert_messages_with_tools_to_anthropic(messages)
         return await _llm_with_tools_call(
             resolved_client,
             model,
@@ -1124,6 +664,7 @@ async def llm_with_tools(
             prompt_cache_key=prompt_cache_key,
             prompt_cache_options=prompt_cache_options,
             api_format=api_format,
+            thinking=thinking,
         )
 
     return await _llm_with_tools_call(
@@ -1142,6 +683,7 @@ async def llm_with_tools(
         prompt_cache_key=prompt_cache_key,
         prompt_cache_options=prompt_cache_options,
         api_format=api_format,
+        thinking=thinking,
     )
 
 
@@ -1202,9 +744,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
     for msg in messages:
         if msg["role"] == "system":
             system_text += (
-                msg["content"]
-                if isinstance(msg["content"], str)
-                else str(msg["content"])
+                msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
             ) + "\n"
         elif msg["role"] in ("user", "assistant"):
             content = msg["content"]
@@ -1216,11 +756,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
                         anthropic_blocks.append({"type": "text", "text": block["text"]})
                     elif block.get("type") == "image_url":
                         url_data = block.get("image_url", {})
-                        url = (
-                            url_data.get("url", "")
-                            if isinstance(url_data, dict)
-                            else url_data
-                        )
+                        url = url_data.get("url", "") if isinstance(url_data, dict) else url_data
                         if url.startswith("data:"):
                             # data URI：解析 media_type 和 base64
                             header, b64data = url.split(",", 1)
@@ -1237,9 +773,7 @@ def _convert_openai_messages_to_anthropic(messages: list) -> tuple[str, list]:
                             )
                         else:
                             # 普通 URL（Anthropic 不直接支持 URL，转为 text 提示）
-                            anthropic_blocks.append(
-                                {"type": "text", "text": f"[图片链接: {url}]"}
-                            )
+                            anthropic_blocks.append({"type": "text", "text": f"[图片链接: {url}]"})
                 content = anthropic_blocks
             anthropic_messages.append({"role": msg["role"], "content": content})
     return system_text.strip(), anthropic_messages
@@ -1260,9 +794,7 @@ async def _call_anthropic(
     # 如果需要 JSON 输出，在 system 提示中追加指令（Anthropic 不支持 response_format）
     effective_system = system_msg
     if response_format and response_format.get("type") == "json_object":
-        effective_system += (
-            "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-        )
+        effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
 
     body = dict(
         model=model,
@@ -1282,7 +814,13 @@ async def _call_anthropic(
     ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
-    response = await anthropic_client.messages.create(**body)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: anthropic_client.messages.create(**body),
+        model=model,
+        provider="anthropic",
+    )
     return _extract_anthropic_text(response)
 
 
@@ -1350,9 +888,7 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
             for block in content:
                 block_type = block.get("type")
                 if block_type in ("text", "input_text"):
-                    response_content.append(
-                        {"type": "input_text", "text": block.get("text", "")}
-                    )
+                    response_content.append({"type": "input_text", "text": block.get("text", "")})
                 elif block_type in ("image_url", "input_image"):
                     image = block.get("image_url") or block.get("url")
                     detail = block.get("detail")
@@ -1365,9 +901,7 @@ def _convert_messages_to_responses_input(messages: list, system_text: str = "") 
                     response_content.append(image_item)
                 else:
                     # 保留未知内容的可读文本，避免静默丢失用户输入。
-                    response_content.append(
-                        {"type": "input_text", "text": str(block)}
-                    )
+                    response_content.append({"type": "input_text", "text": str(block)})
         items.append(
             {
                 "type": "message",
@@ -1441,7 +975,11 @@ async def _call_responses(
     ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
-    response = await client.responses.create(**body)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: client.responses.create(**body), model=model, provider="openai"
+    )
     return _extract_responses_text(response)
 
 
@@ -1466,10 +1004,11 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
     """统一的原始 LLM 调用接口，自动适配 OpenAI / Anthropic。
 
     kwargs 使用 OpenAI 格式（model, messages, temperature, response_format 等）。
-    返回 LLM 输出文本。
+    返回 LLM 输出文本。``llm_scope`` 透传 R01 节点级凭据 scope。
     """
+    llm_scope = kwargs.pop("llm_scope", "user")
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
+        user_id, llm_scope=llm_scope
     )
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
@@ -1479,6 +1018,7 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
 
     # 处理 model=None 的情况，使用默认模型
@@ -1559,17 +1099,20 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
         ):
             if key in kwargs and kwargs[key] is not None:
                 body[key] = kwargs[key]
-        if (
-            kwargs.get("response_format")
-            and kwargs["response_format"].get("type") == "json_object"
-        ):
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
             body["text"] = {"format": {"type": "json_object"}}
-        if _is_mimo(base_url) and not kwargs.get("thinking"):
+        if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
             body["reasoning"] = {"effort": "none"}
-        response = await resolved_client.responses.create(**body)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**body),
+            model=kwargs["model"],
+            provider=provider,
+        )
         return _extract_responses_text(response)
 
-    if _is_mimo(base_url) and not kwargs.get("thinking"):
+    if _supports_thinking_disable(base_url, kwargs.get("model")) and not kwargs.get("thinking"):
         # mimo 默认开启深度思考：长输出任务（rerank/结构化）会被思考吃光
         # max_tokens 预算导致空响应（2026-08-06 实测）→ 默认关闭，与 _call_llm_with_retry 对齐
         extra_body = dict(kwargs.get("extra_body") or {})
@@ -1578,20 +1121,86 @@ async def raw_llm_call(user_id: int, **kwargs) -> str:
 
     kwargs.setdefault("max_tokens", caps["max_output_tokens"])
 
-    response = await resolved_client.chat.completions.create(**kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**kwargs),
+        model=kwargs["model"],
+        provider=provider,
+    )
     return response.choices[0].message.content.strip()
 
 
 # --------------- LLM 调用 ---------------
 
 
+_DEFAULT_LLM_STOP = stop_after_attempt(4) | stop_after_delay(60)
+_DEFAULT_LLM_WAIT = wait_exponential(multiplier=2, min=3, max=15)
+
+
+def _active_upload_llm_context():
+    from app.services.upload_llm_accounting import current_upload_llm_context
+
+    return current_upload_llm_context()
+
+
+def _llm_retry_stop(retry_state) -> bool:
+    # Upload requests share one physical-call budget across Tenacity retries
+    # and any additional format-repair request in the same stage context.
+    # Preserve historical non-upload policy.
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        budget = upload_context.retry_budget
+        return (
+            budget.exhausted
+            if budget is not None
+            else retry_state.attempt_number >= 3
+        )
+    return _DEFAULT_LLM_STOP(retry_state)
+
+
+def _llm_retry_wait(retry_state) -> float:
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        attempts = (
+            upload_context.retry_budget.physical_attempts
+            if upload_context.retry_budget is not None
+            else retry_state.attempt_number
+        )
+        return 30 if attempts <= 1 else 60
+    return _DEFAULT_LLM_WAIT(retry_state)
+
+
+def _log_llm_retry(retry_state) -> None:
+    """Correlate upload retries without logging prompts or provider responses."""
+
+    error = retry_state.outcome.exception()
+    upload_context = _active_upload_llm_context()
+    if upload_context is not None:
+        from app.services.upload_retry_budget import normalize_upload_error_code
+
+        logger.warning(
+            "upload LLM retry import_id=%s stage=%s attempt=%s exception_type=%s code=%s",
+            upload_context.root_import_id,
+            upload_context.stage,
+            retry_state.attempt_number,
+            type(error).__name__,
+            normalize_upload_error_code(error),
+        )
+        return
+
+    logger.warning(
+        "LLM 调用失败，第 %s 次重试: %s",
+        retry_state.attempt_number,
+        error,
+    )
+
+
 @retry(
-    stop=stop_after_attempt(4) | stop_after_delay(60),
-    wait=wait_exponential(multiplier=2, min=3, max=15),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
-    before_sleep=lambda retry_state: logger.warning(
-        f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
-    ),
+    before_sleep=_log_llm_retry,
 )
 async def _call_llm_with_retry(
     prompt: str,
@@ -1611,14 +1220,14 @@ async def _call_llm_with_retry(
               传 True 保留思考；None（默认）时按用户配置的 llm_thinking 决定。
     """
     if llm_scope == "global":
-        resolved_client, resolved_model, timeout, base_url, provider = (
-            _resolve_client_and_model(user_id, llm_scope="global")
+        resolved_client, resolved_model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id, llm_scope="global"
         )
     else:
         # Preserve the historical one-argument resolver contract for all
         # ordinary user-scoped callers and their test doubles.
-        resolved_client, resolved_model, timeout, base_url, provider = (
-            _resolve_client_and_model(user_id)
+        resolved_client, resolved_model, timeout, base_url, provider = _resolve_client_and_model(
+            user_id
         )
     if model:
         resolved_model = model
@@ -1644,17 +1253,7 @@ async def _call_llm_with_retry(
             response_format=response_format,
         )
 
-    if thinking is None:
-        try:
-            if llm_scope == "global":
-                thinking = False
-            else:
-                from app.core.config import get_user_llm_config
-
-                user_cfg = get_user_llm_config(user_id)
-                thinking = bool((user_cfg or {}).get("thinking"))
-        except Exception:
-            thinking = False
+    thinking = _resolve_thinking(user_id, thinking, llm_scope)
 
     if api_format == "responses":
         caps = get_provider_capabilities(base_url)
@@ -1671,9 +1270,7 @@ async def _call_llm_with_retry(
         # json_mode=false 时降级：prompt 指令 + 无 text.format
         effective_system = system_msg
         if response_format and response_format.get("type") == "json_object":
-            effective_system += (
-                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-            )
+            effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         return await _call_responses(
             resolved_client,
             resolved_model,
@@ -1700,28 +1297,33 @@ async def _call_llm_with_retry(
             kwargs["messages"][0]["content"] = (
                 f"{system_msg}\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
             )
-    if not thinking and _is_mimo(base_url):
+    if not thinking and _supports_thinking_disable(base_url, resolved_model):
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     kwargs["max_tokens"] = caps["max_output_tokens"]
 
-    response = await resolved_client.chat.completions.create(**kwargs)
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(**kwargs),
+        model=resolved_model,
+        provider=provider,
+    )
     return response.choices[0].message.content.strip()
 
 
 @retry(
-    stop=stop_after_attempt(4) | stop_after_delay(60),
-    wait=wait_exponential(multiplier=2, min=3, max=15),
+    stop=_llm_retry_stop,
+    wait=_llm_retry_wait,
     retry=retry_if_exception_type(_RETRYABLE_EXCEPTIONS),
-    before_sleep=lambda retry_state: logger.warning(
-        f"LLM 调用失败，第 {retry_state.attempt_number} 次重试: {retry_state.outcome.exception()}"
-    ),
+    before_sleep=_log_llm_retry,
 )
-async def _call_llm_with_retry_messages(
-    messages: list, user_id: int = None, **kwargs
-) -> str:
+async def _call_llm_with_retry_messages(messages: list, user_id: int = None, **kwargs) -> str:
     """带重试的 LLM 调用，支持 multimodal messages（图片+文本），自动适配 OpenAI / Anthropic"""
+    # R01：节点按 state.credential_scope 传入 llm_scope（"global"→系统配置，
+    # "user"→本人配置），缺省保持旧行为。
+    llm_scope = kwargs.pop("llm_scope", "user")
     resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
+        user_id, llm_scope=llm_scope
     )
     requested_model = kwargs.get("model") or model
     api_format = await resolve_api_format_async(
@@ -1731,6 +1333,7 @@ async def _call_llm_with_retry_messages(
         base_url=base_url,
         provider=provider,
         user_id=user_id,
+        llm_scope=llm_scope,
     )
 
     if api_format == "anthropic":
@@ -1776,23 +1379,26 @@ async def _call_llm_with_retry_messages(
         input_items = _convert_messages_to_responses_input(messages, system_text)
         kwargs.pop("messages", None)
         kwargs["input"] = input_items or " "
-        kwargs["instructions"] = (
-            kwargs.get("instructions") or system_text.strip() or None
-        )
-        kwargs["max_output_tokens"] = kwargs.pop(
-            "max_tokens", caps["max_output_tokens"]
-        )
-        if (
-            kwargs.get("response_format")
-            and kwargs["response_format"].get("type") == "json_object"
-        ):
+        kwargs["instructions"] = kwargs.get("instructions") or system_text.strip() or None
+        kwargs["max_output_tokens"] = kwargs.pop("max_tokens", caps["max_output_tokens"])
+        if kwargs.get("response_format") and kwargs["response_format"].get("type") == "json_object":
             kwargs["text"] = {"format": {"type": "json_object"}}
         kwargs.pop("response_format", None)
-        response = await resolved_client.responses.create(**kwargs)
+        from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+        response = await call_provider_with_upload_ledger(
+            lambda: resolved_client.responses.create(**kwargs),
+            model=kwargs["model"],
+            provider=provider,
+        )
         return _extract_responses_text(response)
 
-    response = await resolved_client.chat.completions.create(
-        messages=messages, **kwargs
+    from app.services.upload_llm_accounting import call_provider_with_upload_ledger
+
+    response = await call_provider_with_upload_ledger(
+        lambda: resolved_client.chat.completions.create(messages=messages, **kwargs),
+        model=kwargs["model"],
+        provider=provider,
     )
     return response.choices[0].message.content.strip()
 
@@ -1807,9 +1413,7 @@ async def stream_llm_messages(
                        用于支持 DeepSeek 等模型的 reasoning_content。默认 False（向后兼容，yield str）。
         model: 可选，覆盖用户默认模型。
     """
-    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(
-        user_id
-    )
+    resolved_client, model, timeout, base_url, provider = _resolve_client_and_model(user_id)
     if kwargs.get("model"):
         model = kwargs.pop("model")
     api_format = await resolve_api_format_async(
@@ -1827,16 +1431,12 @@ async def stream_llm_messages(
         response_format = kwargs.get("response_format")
         effective_system = system_text or "你是一个后端和算法面试指导专家。"
         if response_format and response_format.get("type") == "json_object":
-            effective_system += (
-                "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
-            )
+            effective_system += "\n请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 代码块。"
         stream_kwargs = dict(
             model=model,
             system=effective_system,
             messages=anthropic_msgs,
-            max_tokens=kwargs.get(
-                "max_tokens", kwargs.get("max_output_tokens", 4096)
-            ),
+            max_tokens=kwargs.get("max_tokens", kwargs.get("max_output_tokens", 4096)),
             temperature=kwargs.get("temperature", 0.7),
         )
         for key in (
@@ -1898,9 +1498,9 @@ async def stream_llm_messages(
             if msg.get("role") in ("system", "developer")
         ).strip()
         kwargs.pop("messages", None)
-        kwargs["input"] = kwargs.pop(
-            "input", None
-        ) or _convert_messages_to_responses_input(messages, "")
+        kwargs["input"] = kwargs.pop("input", None) or _convert_messages_to_responses_input(
+            messages, ""
+        )
         kwargs.setdefault("instructions", system_text or None)
         kwargs["max_output_tokens"] = kwargs.pop(
             "max_output_tokens", kwargs.pop("max_tokens", caps["max_output_tokens"])

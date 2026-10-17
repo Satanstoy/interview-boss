@@ -52,11 +52,14 @@ def list_duplicate_groups(conn, table: str = "interview") -> list:
     """
     if table not in ("interview", "jd"):
         raise HTTPException(status_code=400, detail=f"不支持的表类型: {table}")
+    # 发布门槛（AC-015/README §5.3）：未 published 的公共面经不进入重复来源组
+    publish_clause = "AND publish_status = 'published'" if table == "interview" else ""
     rows = conn.execute(
         f"""
         SELECT url_signature, COUNT(*) AS n, MIN(id) AS min_id
         FROM {table}
         WHERE deleted_at IS NULL AND url_signature != '' AND owner_id IS NULL
+        {publish_clause}
         GROUP BY url_signature
         HAVING COUNT(*) > 1
         ORDER BY n DESC

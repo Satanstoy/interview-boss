@@ -25,7 +25,7 @@ def test_asgi_startup_syncs_embedding_config():
 
 def test_worker_startup_syncs_embedding_config():
     """worker startup 应在 _reload_from_db() 之后调用 reload_embedding_config()。"""
-    src = _read("worker.py")
+    src = _read("worker_cluster_tasks.py")
     assert "def startup" in src
     assert "_reload_from_db()" in src
     assert "reload_embedding_config" in src

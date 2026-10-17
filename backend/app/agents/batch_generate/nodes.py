@@ -1,5 +1,6 @@
 """Batch-Generate-Answers 流程的 LangGraph 节点函数"""
 import time
+import json
 import logging
 import asyncio
 
@@ -101,12 +102,14 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
                 user_id=state.get("user_id"),
                 llm_scope=state.get("llm_scope", "user"),
             )
-            answer, _ = await refine_answer(
+            if not answer or not answer.strip():
+                raise ValueError("模型返回空答案")
+            answer, review_issues = await refine_answer(
                 prompt,
                 answer,
                 search_sources,
                 user_id=state.get("user_id"),
-                max_rounds=2,
+                max_rounds=1,
                 llm_scope=state.get("llm_scope", "user"),
             )
             elapsed = time.monotonic() - start
@@ -118,6 +121,10 @@ async def generate_answer_node(state: BatchGenerateState) -> dict:
                 conn.execute(
                     "UPDATE question_bank SET ai_answer = ?, answer_sources = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (answer, sources_json(search_sources), qid),
+                )
+                conn.execute(
+                    "UPDATE question_bank SET answer_review_status = ?, answer_review_issues = ? WHERE id = ?",
+                    ("needs_review" if review_issues else "passed", json.dumps(review_issues, ensure_ascii=False), qid),
                 )
                 conn.commit()
             await run_db(_save)

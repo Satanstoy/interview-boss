@@ -1,0 +1,13 @@
+severity	issue_id	evidence	requirement	status_2026_09_30_final	fixed_by
+3	D10	backend/app/services/upload_lifecycle.py:346	R01 配置预检未探测模型且实际节点未使用显式scope	fixed	credential_preflight.py: accept同事务建preflight job，worker真实provider探测（401/404/超时），失败needs_action阻塞提取，修复后恢复重开预检清除阻塞
+3	D4	backend/app/worker.py:566	R02 worker丢失分享审核意图和持久策略	fixed	worker从upload_imports.policy_json读完整policy（request_public_review/credential_scope/write_scope），input_state贯穿；share完成后建公共化申请
+3	D14	backend/app/services/upload_lifecycle.py:202	R03 恢复只创建attempt而未重建工作且graph仍秒级ID	fixed	restore同root重建可派发submit job+重新预检；旧retry解析root绑定attempt；graph thread_id用build_thread_id(import,attempt,job)；成功阶段检查点持久化完整结果，恢复后新attempt读取检查点短路复用（extract/tag不重跑LLM、persist幂等复用明细）
+3	D15	backend/app/routers/upload_imports.py:28	R04 根状态未聚合且GET与SSE任务快照不一致	fixed	finalize_attempt_and_aggregate_root持久化聚合根状态/revision/error/result；GET/SSE/by-key/retry共用snapshot_from_parts+allowed_actions
+3	D9	backend/app/agents/submit/persist_personal.py:107	R05 实际逐题流程未使用resolution三态匹配和提取schema	fixed	extract节点用normalize_extracted_questions（schema拒绝/ordinal归一）；persist节点link_details_to_import写import_id/source_ordinal+resolution（matched/created/failed），匹配失败不造新题
+3	D14	backend/app/services/upload_queue.py:94	R06 队列补单类型未被派发且实际领取未接租约隔离	fixed	enqueue_questions回填root_import_id；ensure_bucket_job改发已注册cluster_batch类型；对账扫描真实上传队列；worker用claim_job_with_generation领取，根聚合强制lease_generation并assert_job_fence（旧代次写入拒绝）
+3	D5	backend/app/routers/bank_build.py:33	R07 管理员通用任务流仍可读他人私人正文	fixed	/api/jobs/{id}与stream全改owner专属（非本人404/首事件error，响应体无marker）；admin运维收敛到upload-operations白名单
+3	D15	frontend/src/components/business/StagingPanel.vue:239	R08 实际提交仍走旧job入口且未使用草稿幂等恢复	fixed	提交走submitUploadWithIdempotency（by-key先查、草稿键持久化、needs_action/失败保留草稿）
+3	D15	frontend/src/composables/useMasterBankData.js:75	R09 面经页面仍截断100条且定位岗位名称被当数值ID	fixed	fetchInterviewData传page/page_size/sort/season/position_id/scope（与location同协议），以服务端total循环取满；布局按当前岗位同步position_id
+3	D14	backend/app/services/public_contributions.py:1173	R10 公共发布仍按队列完成而非resolution且同URL物化无合并	fixed	retry_failed_public_items重试后显式派发cluster_batch job；v2物化同URL公共面经复用；publish_items_with_resolutions按resolution判定（rejected跳过）
+3	D14	backend/app/services/public_contributions.py:629	R11 v2审批把JD当面经且丢失源元数据和岗位	fixed	approve按source_type分派（JD只写jd）；build_review_projection真实snapshot source层级继承；岗位从源冻结
+3	D3	backend/tests/integration/test_upload_question_data_flow.py:192	R12 逐题E2E手工填结果未运行实际上传worker链路	fixed	test_upload_recovery_fullstack.py：隔离全栈（accept→预检→真实worker graph→落库→审核→公共化→恢复），实体全部由代码产生；AC-028/029真实worker腿仍受UPLOAD_TEST_*环境门禁

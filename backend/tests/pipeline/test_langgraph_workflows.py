@@ -149,6 +149,8 @@ def create_test_db():
             owner_id INTEGER DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
+            locked_until TEXT,
+            contribution_request_id INTEGER,
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
         CREATE TABLE user_practice_history (
@@ -334,7 +336,7 @@ TEST_SYSTEM_TAXONOMY = {
 
 
 def _mock_tag_batch(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     """与 test_pipeline_e2e.py 一致的 mock tag"""
     results = []
@@ -357,7 +359,7 @@ def _mock_tag_batch(
 
 
 def _mock_tag_batch_low_quality(
-    url, company, round_, questions, taxonomy_config=None, user_id=None
+    url, company, round_, questions, taxonomy_config=None, user_id=None, llm_scope="user"
 ):
     """返回低质量分类结果（有效但错误的分类）"""
     return [
@@ -613,7 +615,7 @@ class TestSubmitNodes:
         assert len(result["extracted_data"]["具体题目清单"]) == 3
         assert result["extraction_quality"] >= 7.0
 
-    def test_extract_node_blacklist_filter(self, mock_db):
+    def test_extract_node_keeps_marked_questions(self, mock_db):
         """验证提取黑名单过滤（精确匹配）"""
         from app.agents.submit.extract import extract_node
 
@@ -653,10 +655,16 @@ class TestSubmitNodes:
             }
             result = asyncio.run(extract_node(state))
 
+        # AC-019：黑名单只标记不丢题，完整清单必须保留（含技术题与 HR 题）
         questions = result["extracted_data"]["具体题目清单"]
-        assert "自我介绍" not in questions  # 精确匹配黑名单
-        assert "反问" not in questions  # 精确匹配黑名单
+        assert "自我介绍" in questions
+        assert "反问" in questions
         assert "Redis持久化" in questions
+        marks = result["extracted_data"]["题目标记"]
+        assert marks, "HR 类表述应带待确认标记"
+        counts = result["extracted_data"]["提取计数"]
+        assert counts["retained"] == len(questions)
+        assert counts["retained"] + counts["excluded"] == counts["extracted"]
 
     def test_classify_node_calls_tag_questions_batch(self, mock_db):
         """验证 classify_node 调用与原始 tag_questions_batch 相同的接口"""
@@ -705,8 +713,8 @@ class TestSubmitNodes:
 
         with (
             patch(
-                "app.services.clustering.match_new_questions",
-                AsyncMock(return_value={"matched": [], "unmatched": []}),
+                "app.services.clustering.match_outcomes",
+                AsyncMock(return_value={"results": []}),
             ),
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
@@ -1166,7 +1174,7 @@ class TestSubmitGraphE2E:
 
         mock_llm = AsyncMock(return_value=MOCK_EXTRACT_RESPONSE)
         mock_tag = AsyncMock(side_effect=_mock_tag_batch)
-        mock_match = AsyncMock(return_value={"matched": [], "unmatched": []})
+        mock_match = AsyncMock(return_value={"results": []})
 
         with (
             patch("app.services.llm._call_llm_with_retry_messages", mock_llm),
@@ -1176,7 +1184,7 @@ class TestSubmitGraphE2E:
                 return_value=(MagicMock(), "model", 30, "", "openai"),
             ),
             patch("app.services.submit_service.tag_questions_batch", mock_tag),
-            patch("app.services.clustering.match_new_questions", mock_match),
+            patch("app.services.clustering.match_outcomes", mock_match),
             patch(
                 "app.db.connection.get_current_job_position", return_value="后端开发"
             ),

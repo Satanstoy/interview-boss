@@ -139,6 +139,8 @@ def create_test_db():
             owner_id INTEGER DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             processed_at TIMESTAMP,
+            locked_until TEXT,
+            contribution_request_id INTEGER,
             FOREIGN KEY (interview_id) REFERENCES interview(id)
         );
     """)

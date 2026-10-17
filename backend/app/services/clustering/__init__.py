@@ -31,6 +31,7 @@ from app.services.clustering.clusterer import (
 from app.services.clustering.matcher import (
     process_incremental_batch,
     match_new_questions,
+    match_outcomes,
     generate_unified_question,
     calculate_dynamic_recent_days,
     _match_and_cluster_cat2,
@@ -74,6 +75,7 @@ __all__ = [
     # matcher
     "process_incremental_batch",
     "match_new_questions",
+    "match_outcomes",
     "generate_unified_question",
     "calculate_dynamic_recent_days",
     "_match_and_cluster_cat2",

@@ -1,0 +1,46 @@
+{
+  "import_id": "imp-ac007-owner-retry-real-stack",
+  "owner_id": 2,
+  "initially_allowed_actions": [
+    "retry_failed_steps"
+  ],
+  "owner_retries": [
+    {
+      "status": 200,
+      "attempt_no": 2,
+      "created_attempt": true
+    },
+    {
+      "status": 200,
+      "attempt_no": 2,
+      "created_attempt": false
+    }
+  ],
+  "other_owner_retry_status": 404,
+  "admin_retry_status": 404,
+  "final_status": "completed",
+  "result_interview_id": 3,
+  "recovered_private_result_opened": true,
+  "rootless_queue_id": 1,
+  "rootless_owner_retries": [
+    {
+      "status": 200,
+      "created": false
+    },
+    {
+      "status": 202,
+      "created": true
+    }
+  ],
+  "rootless_other_owner_retry_status": 404,
+  "rootless_admin_retry_status": 404,
+  "rootless_queue_removed_from_failed_list_after_retry": true,
+  "public_contribution_queue_id": 2,
+  "public_contribution_question_excluded_from_owner_list": true,
+  "owner_retry_public_contribution_status": 404,
+  "loaded_queue_refresh_status": 200,
+  "loaded_queue_refresh_queue_ids": [
+    1
+  ],
+  "worker_restarted_after_retry": true
+}

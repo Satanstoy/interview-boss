@@ -33,6 +33,7 @@ SYSTEM_TAXONOMIES = {
             "模型评估", "Agent评估", "幻觉应对", "安全防护", "微调/SFT", "AI Coding", "代码沙箱",
             "模型选型", "Agent框架对比", "Java并发", "Redis", "Spring/AOP", "分布式事务",
             "高并发限流", "MySQL", "Linux/网络", "算法手撕", "系统设计",
+            "Python基础", "数据类型", "对象身份与相等性",
         ],
     ),
     "后端开发": _taxonomy(

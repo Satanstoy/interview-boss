@@ -5,17 +5,21 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.core.auth import get_admin_user, get_current_user
 from app.db.connection import get_db_connection, run_db
+from app.models.upload_contracts import ReviewFieldError
 from app.services.public_contributions import (
+    StateConflict,
     create_public_contribution_request,
     finalize_public_contribution_approval,
     get_public_contribution_request,
     list_public_contribution_requests,
+    preview_public_contribution,
     reject_public_contribution,
-    withdraw_public_contribution,
+    retry_failed_public_items,
+    withdraw_public_contribution_v2,
 )
 
 
@@ -27,6 +31,7 @@ class ContributionCreateRequest(BaseModel):
 class ContributionApproveRequest(BaseModel):
     excluded_item_ids: list[int] = Field(default_factory=list)
     review_fields: dict = Field(default_factory=dict)
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ContributionRejectRequest(BaseModel):
@@ -92,10 +97,16 @@ async def get_my_contribution(request_id: int, user: dict = Depends(get_current_
 async def withdraw_contribution(request_id: int, user: dict = Depends(get_current_user)):
     def _withdraw():
         with get_db_connection() as conn:
-            return withdraw_public_contribution(conn, request_id, user["id"])
+            return withdraw_public_contribution_v2(
+                conn,
+                request_id=request_id,
+                requester_id=user["id"],
+            )
 
     try:
         return await run_db(_withdraw)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)
 
@@ -124,13 +135,19 @@ async def list_admin_contributions(
                         "qb.difficulty, qb.created_at, u.username AS submitted_by_name "
                         "FROM question_bank qb LEFT JOIN users u ON qb.submitted_by = u.id "
                         "WHERE qb.owner_id IS NULL AND qb.status = 'pending' "
-                        "AND qb.deleted_at IS NULL ORDER BY qb.created_at DESC"
+                        "AND qb.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM question_promotion_requests p WHERE p.pending_question_id=qb.id AND p.status!='pending') ORDER BY qb.created_at DESC"
                     ).fetchall()
                 ]
             return items, legacy
 
     items, legacy = await run_db(_list)
-    return {"items": items, "total": len(items) + len(legacy)}
+    legacy_items = [{
+        **row, "source_type": "interview", "legacy": True, "status": "pending_review",
+        "summary": {"company": "", "round": "", "job_title": "", "item_count": 1,
+                    "question_previews": [{"question": row["question"]}]},
+    } for row in legacy]
+    combined = items + legacy_items
+    return {"items": combined, "total": len(combined)}
 
 
 @router.get("/api/admin/public-contributions/{request_id}")
@@ -145,6 +162,29 @@ async def get_admin_contribution(request_id: int, admin: dict = Depends(get_admi
         raise HTTPException(status_code=404, detail=str(error))
 
 
+@router.post("/api/admin/public-contributions/{request_id}/preview")
+async def preview_contribution(
+    request_id: int,
+    request: ContributionApproveRequest,
+    admin: dict = Depends(get_admin_user),
+):
+    if request.expected_revision is None:
+        raise HTTPException(status_code=422, detail="预览必须提供 expected_revision")
+
+    def _preview():
+        with get_db_connection() as conn:
+            return preview_public_contribution(conn, request_id, admin["id"], request.model_dump())
+
+    try:
+        return await run_db(_preview)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except (ReviewFieldError, ValidationError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    except ValueError as error:
+        _bad_request(error)
+
+
 @router.post("/api/admin/public-contributions/{request_id}/approve")
 async def approve_contribution(
     request_id: int,
@@ -157,7 +197,12 @@ async def approve_contribution(
             admin["id"],
             excluded_item_ids=request.excluded_item_ids,
             review_fields=request.review_fields,
+            expected_revision=request.expected_revision,
         )
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    except ReviewFieldError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)
 
@@ -174,5 +219,24 @@ async def reject_contribution(
 
     try:
         return await run_db(_reject)
+    except ValueError as error:
+        _bad_request(error)
+
+
+@router.post("/api/admin/public-contributions/{request_id}/retry")
+async def retry_contribution(
+    request_id: int,
+    admin: dict = Depends(get_admin_user),
+):
+    """重试已批准申请的失败公共子项（AC-015）：复用同一投影，不改审核状态。"""
+
+    def _retry():
+        with get_db_connection() as conn:
+            return retry_failed_public_items(conn, request_id=request_id, admin_id=admin["id"])
+
+    try:
+        return await run_db(_retry)
+    except StateConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
     except ValueError as error:
         _bad_request(error)

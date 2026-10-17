@@ -1,3 +1,4 @@
+import pytest
 """
 自动化测试 — 针对 BUG-001, BUG-002, BUG-003
 设置面板岗位切换 bug 的验证
@@ -8,6 +9,12 @@
 2. 系统 taxonomy 在岗位切换后可稳定读取
 3. 连续读取返回一致数据（不存在竞态）
 """
+@pytest.fixture(autouse=True)
+def _isolated_app_db(app_db_isolation):
+    """本文件会触达数据库连接，必须落在内存测试库（不能连生产库）。"""
+
+    return app_db_isolation
+
 class TestPositionSwitchDBContract:
     """验证岗位切换的数据库契约"""
 

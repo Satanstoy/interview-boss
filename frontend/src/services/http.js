@@ -44,12 +44,28 @@ export function invalidateCache(pattern) {
 
 // ── Access Token 内存存储（比 localStorage 更安全，XSS 无法直接读取）──
 let _accessToken = ''
+let _authGeneration = 0
 
 /**
  * 设置 access token（登录成功后由前端调用）
  */
 export function setAuthToken(token) {
-  _accessToken = token || ''
+  const nextToken = token || ''
+  if (nextToken === _accessToken) return
+  _accessToken = nextToken
+  _authGeneration++
+  invalidateCache()
+}
+
+export function getAuthGeneration() {
+  return _authGeneration
+}
+
+export function assertAuthGeneration(generation) {
+  if (generation === _authGeneration) return
+  const error = new Error('登录身份已变化，请重新请求')
+  error.code = 'AUTH_CONTEXT_CHANGED'
+  throw error
 }
 
 /**
@@ -74,9 +90,10 @@ let _refreshPromise = null
 
 async function tryRefreshToken() {
   // 合并并发的 refresh 请求
-  if (_refreshPromise) return _refreshPromise
+  const generation = _authGeneration
+  if (_refreshPromise?.generation === generation) return _refreshPromise.promise
 
-  _refreshPromise = (async () => {
+  const promise = (async () => {
     try {
       // 使用原生 fetch 避免递归调用 request()
       const res = await fetch('/api/auth/refresh', {
@@ -86,8 +103,11 @@ async function tryRefreshToken() {
       })
       if (!res.ok) return null
       const data = await res.json()
+      if (generation !== _authGeneration) return null
       if (data.token) {
+        // Refresh renews the token within the guarded login context.
         _accessToken = data.token
+        invalidateCache()
         return data // 返回 { token, user }
       }
       return null
@@ -95,10 +115,13 @@ async function tryRefreshToken() {
       return null
     }
   })()
-
-  const result = await _refreshPromise
-  _refreshPromise = null
-  return result
+  const refresh = { generation, promise }
+  _refreshPromise = refresh
+  try {
+    return await promise
+  } finally {
+    if (_refreshPromise === refresh) _refreshPromise = null
+  }
 }
 
 /**
@@ -177,6 +200,7 @@ export function getFriendlyError(err, fallback = '操作失败，请稍后重试
  * @returns {Promise<any>} - 解析后的 JSON 数据
  */
 async function request(url, options = {}) {
+  const generation = _authGeneration
   const {
     timeout = DEFAULT_TIMEOUT,
     retries = MAX_RETRIES,
@@ -191,6 +215,7 @@ async function request(url, options = {}) {
     const { controller, timer } = createTimeoutController(timeout)
 
     try {
+      assertAuthGeneration(generation)
       // 自动附加 Authorization header
       const authHeaders = { 'X-Requested-With': 'XMLHttpRequest' }
       const token = getAuthToken()
@@ -206,14 +231,17 @@ async function request(url, options = {}) {
       })
 
       cleanup(controller, timer)
+      assertAuthGeneration(generation)
 
       // 401 → 尝试自动刷新 token（只尝试一次，避免无限循环）
       if (res.status === 401 && !_isRetry && url !== '/api/auth/refresh' && url !== '/api/auth/login' && url !== '/api/auth/register') {
         const refreshResult = await tryRefreshToken()
+        assertAuthGeneration(generation)
         if (refreshResult) {
           // 刷新成功，用新 token 重试原始请求（仅一次）
           return request(url, { ...options, _isRetry: true })
         }
+        assertAuthGeneration(generation)
         // 刷新失败 → 触发登录弹窗
         if (onUnauthorized) onUnauthorized()
       }
@@ -231,6 +259,8 @@ async function request(url, options = {}) {
           data = text
         }
       }
+
+      assertAuthGeneration(generation)
 
       // HTTP 状态码错误处理
       if (!res.ok) {
@@ -267,7 +297,7 @@ async function request(url, options = {}) {
       }
 
       // 已处理的 HTTP 错误直接抛出
-      if (err.status) throw err
+      if (err.status || err.code === 'AUTH_CONTEXT_CHANGED') throw err
 
       // 网络错误可重试
       if (isRetryableError(err) && attempt < retries) {
@@ -302,7 +332,8 @@ export function cancelAllRequests() {
  */
 export async function get(url, options = {}) {
   const { ttl, noCache, ...fetchOptions } = options
-  const cacheKey = url
+  const generation = _authGeneration
+  const cacheKey = `${generation}:${url}`
 
   // Check cache unless bypassed
   if (!noCache && ttl !== 0) {
@@ -313,7 +344,7 @@ export async function get(url, options = {}) {
   const data = await request(url, { ...fetchOptions, method: 'GET' })
 
   // Cache successful response
-  if (ttl !== 0) setCache(cacheKey, data)
+  if (ttl !== 0 && generation === _authGeneration) setCache(cacheKey, data)
   return data
 }
 
@@ -358,8 +389,14 @@ export function upload(url, formData, options = {}) {
     xhr.open('POST', url)
 
     const token = getAuthToken()
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest')
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(restOptions.headers || {}),
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      if (value != null) xhr.setRequestHeader(name, String(value))
+    }
 
     xhr.timeout = restOptions.timeout || UPLOAD_TIMEOUT
 
@@ -377,9 +414,18 @@ export function upload(url, formData, options = {}) {
       } else {
         try {
           const data = JSON.parse(xhr.responseText)
-          reject(new Error(data.detail || getStatusMessage(xhr.status)))
+          const detail = data.detail
+          const error = new Error(typeof detail === 'object'
+            ? (detail.message || detail.code || getStatusMessage(xhr.status))
+            : (detail || getStatusMessage(xhr.status)))
+          error.status = xhr.status
+          error.code = typeof detail === 'object' ? detail.code : undefined
+          error.data = data
+          reject(error)
         } catch {
-          reject(new Error(getStatusMessage(xhr.status)))
+          const error = new Error(getStatusMessage(xhr.status))
+          error.status = xhr.status
+          reject(error)
         }
       }
     }
@@ -551,6 +597,35 @@ export async function uploadSSE(url, formData, onEvent, _isRetry = false) {
  * @param {object} options.headers - 额外请求头（例如 Last-Event-ID）
  * @param {boolean} _isRetry - 内部标记
  */
+// SSE 非终态 EOF 重连退避：1/3/10 秒，上限 30 秒 + 抖动（AC-010）
+const _SSE_BACKOFF_MS = [1000, 3000, 10000, 30000]
+
+function _sseReconnectDelay(attempt) {
+  const base = _SSE_BACKOFF_MS[Math.min(attempt, _SSE_BACKOFF_MS.length - 1)]
+  return base + Math.floor(Math.random() * 250)
+}
+
+function _sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function _retrySSEConnection(url, onEvent, options, isRetry, error, lastStatus) {
+  if (options.signal?.aborted) return
+  if (typeof options.isTerminal !== 'function') throw error
+  if (lastStatus != null && options.isTerminal(lastStatus)) throw error
+  const attempt = options.reconnectAttempt || 0
+  if (options.maxReconnects != null && attempt >= options.maxReconnects) throw error
+  await _sleep(_sseReconnectDelay(attempt))
+  if (options.signal?.aborted) return
+  options.onReconnect?.(attempt + 1)
+  return getSSE(
+    url,
+    onEvent,
+    { ...options, reconnectAttempt: attempt + 1 },
+    isRetry,
+  )
+}
+
 export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
   // 支持旧的 3 参数调用: getSSE(url, onEvent, true)
   if (options === true) {
@@ -576,12 +651,18 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
     const token = getAuthToken()
     if (token) authHeaders['Authorization'] = `Bearer ${token}`
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders, ...(options.headers || {}) },
-      signal: controller.signal,
-      credentials: 'same-origin',
-    })
+    let res
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders, ...(options.headers || {}) },
+        signal: controller.signal,
+        credentials: 'same-origin',
+      })
+    } catch (err) {
+      if (controller.signal.aborted || err?.name === 'AbortError') return
+      return _retrySSEConnection(url, onEvent, options, _isRetry, err)
+    }
 
     // 401 → 尝试刷新 token 并重试一次
     if (res.status === 401 && !_isRetry) {
@@ -595,11 +676,37 @@ export async function getSSE(url, onEvent, options = {}, _isRetry = false) {
       const text = await res.text()
       let detail
       try { detail = JSON.parse(text).detail } catch { detail = text }
-      throw new Error(detail || getStatusMessage(res.status))
+      const error = new Error(detail || getStatusMessage(res.status))
+      error.status = res.status
+      if (res.status >= 500 || res.status === 408 || res.status === 429) {
+        return _retrySSEConnection(url, onEvent, options, _isRetry, error)
+      }
+      throw error
     }
 
-    return await _consumeSSEStream(res.body.getReader(), onEvent)
+    let lastStatus
+    const _track = (event) => {
+      if (event && typeof event === 'object' && 'status' in event) lastStatus = event.status
+      return onEvent(event)
+    }
+    let result
+    try {
+      result = await _consumeSSEStream(res.body.getReader(), _track)
+    } catch (err) {
+      if (controller.signal.aborted || err?.name === 'AbortError') return
+      return _retrySSEConnection(url, onEvent, options, _isRetry, err, lastStatus)
+    }
+
+    // AC-010：正常 EOF 但业务未终态 → 退避重连；终态/被 abort 不再重连
+    if (typeof options.isTerminal === 'function' && !options.signal?.aborted) {
+      const status = lastStatus ?? result?.status
+      if (!options.isTerminal(status)) {
+        return _retrySSEConnection(url, onEvent, options, _isRetry, new Error('SSE stream ended'), status)
+      }
+    }
+    return result
   } finally {
+    // finally 释放 controller（正常关闭读取也必须释放）
     if (options.signal && onExternalAbort) {
       options.signal.removeEventListener('abort', onExternalAbort)
     }

@@ -40,249 +40,42 @@ def _load_public_rebuild_answer_cache(conn, job_position: str) -> dict:
     }
 
 
-def _ensure_observability_tables(conn):
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS worker_heartbeats (
-            worker_name TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            queue_name TEXT NOT NULL DEFAULT '',
-            last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_error TEXT NOT NULL DEFAULT '',
-            metadata_json TEXT NOT NULL DEFAULT '{}'
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS worker_cron_runs (
-            task_name TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            last_run_at TIMESTAMP,
-            last_finished_at TIMESTAMP,
-            last_error TEXT NOT NULL DEFAULT '',
-            last_result_json TEXT NOT NULL DEFAULT '{}',
-            run_count INTEGER NOT NULL DEFAULT 0
-        )
-        """
+
+from app.services import worker_observability as _worker_observability
+
+
+def record_worker_heartbeat(*args, **kwargs):
+    """Compatibility facade for callers that historically imported this from worker."""
+    return _worker_observability.record_worker_heartbeat(*args, **kwargs)
+
+
+async def record_worker_heartbeat_async(*args, **kwargs):
+    """Compatibility facade that preserves monkeypatchable worker fallback behavior."""
+    return await _worker_observability.record_worker_heartbeat_async(
+        *args, fallback=record_worker_heartbeat, **kwargs
     )
 
 
-def _connection_context(conn=None):
-    if conn is not None:
-        return nullcontext(conn)
-    from app.db.connection import get_db_connection
-
-    candidate = get_db_connection()
-    if hasattr(candidate, "execute"):
-        return nullcontext(candidate)
-    return candidate
+def record_cron_execution(*args, **kwargs):
+    """Compatibility facade for durable cron status writes."""
+    return _worker_observability.record_cron_execution(*args, **kwargs)
 
 
-def record_worker_heartbeat(
-    worker_name: str,
-    *,
-    status: str,
-    queue_name: str = "",
-    error: str = "",
-    metadata: dict | None = None,
-    conn=None,
-):
-    """Persist the latest worker state for offline-vs-empty diagnostics."""
-    with _connection_context(conn) as connection:
-        _ensure_observability_tables(connection)
-        payload = json.dumps(
-            metadata or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        connection.execute(
-            """
-            INSERT INTO worker_heartbeats
-                (worker_name, status, queue_name, last_seen_at, last_error, metadata_json)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
-            ON CONFLICT(worker_name) DO UPDATE SET
-                status = excluded.status,
-                queue_name = excluded.queue_name,
-                last_seen_at = CURRENT_TIMESTAMP,
-                last_error = excluded.last_error,
-                metadata_json = excluded.metadata_json
-            """,
-            (worker_name, status, queue_name, error[:500], payload),
-        )
-        connection.commit()
-    return {
-        "worker_name": worker_name,
-        "status": status,
-        "queue_name": queue_name,
-        "last_error": error[:500],
-        "metadata": metadata or {},
-    }
+def get_cron_status(*args, **kwargs):
+    return _worker_observability.get_cron_status(*args, **kwargs)
 
 
-async def record_worker_heartbeat_async(
-    worker_name: str,
-    *,
-    status: str,
-    queue_name: str = "",
-    error: str = "",
-    metadata: dict | None = None,
-) -> bool:
-    """Redis-first worker heartbeat; falls back to SQLite when Redis is down.
-
-    关联 spec R1 / ADR 0046:心跳记帐优先走 Redis,避免与读端抢同一把
-    SQLite 单写锁。返回 True=已写 Redis(本次不写 SQLite);False=Redis
-    不可用,已回退到 record_worker_heartbeat(SQLite,fail-open)。
-    """
-    from app.core.cache import worker_status_set
-
-    ok = await worker_status_set(worker_name, status)
-    if not ok:
-        record_worker_heartbeat(
-            worker_name,
-            status=status,
-            queue_name=queue_name,
-            error=error,
-            metadata=metadata,
-        )
-        return False
-    return True
-
-
-def record_cron_execution(
-    task_name: str,
-    *,
-    status: str,
-    result=None,
-    error: str = "",
-    conn=None,
-):
-    """Persist the latest scheduled-task result, including failures."""
-    with _connection_context(conn) as connection:
-        _ensure_observability_tables(connection)
-        result_json = json.dumps(result or {}, ensure_ascii=False, sort_keys=True, default=str)
-        is_running = status == "running"
-        connection.execute(
-            """
-            INSERT INTO worker_cron_runs
-                (task_name, status, last_run_at, last_finished_at, last_error,
-                 last_result_json, run_count)
-            VALUES (?, ?, CURRENT_TIMESTAMP,
-                    CASE WHEN ? = 1 THEN NULL ELSE CURRENT_TIMESTAMP END,
-                    ?, ?, CASE WHEN ? = 1 THEN 1 ELSE 0 END)
-            ON CONFLICT(task_name) DO UPDATE SET
-                status = excluded.status,
-                last_run_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP
-                                   ELSE worker_cron_runs.last_run_at END,
-                last_finished_at = CASE WHEN ? = 1 THEN worker_cron_runs.last_finished_at
-                                        ELSE CURRENT_TIMESTAMP END,
-                last_error = excluded.last_error,
-                last_result_json = excluded.last_result_json,
-                run_count = worker_cron_runs.run_count + CASE WHEN ? = 1 THEN 1 ELSE 0 END
-            """,
-            (
-                task_name,
-                status,
-                int(is_running),
-                error[:500],
-                result_json,
-                int(is_running),
-                int(is_running),
-                int(is_running),
-                int(is_running),
-            ),
-        )
-        connection.commit()
-
-
-def get_cron_status(task_name: str, *, conn=None) -> dict:
-    """Return a stable status shape even when a task has never run."""
-    with _connection_context(conn) as connection:
-        _ensure_observability_tables(connection)
-        row = connection.execute(
-            "SELECT * FROM worker_cron_runs WHERE task_name = ?", (task_name,)
-        ).fetchone()
-    if row is None:
-        return {"task_name": task_name, "status": "not_run", "run_count": 0}
-    return dict(row)
-
-
-def _cron_should_record_success(task_name: str) -> bool:
-    """上一次持久化状态已是成功且无错误时,本次成功无需再写 SQLite。
-
-    配合 observed_cron_task:成功且状态无变化时只刷 Redis,减少高频成功重写
-    对 SQLite 单写锁的获取(spec R1)。
-    """
-    with _connection_context() as connection:
-        _ensure_observability_tables(connection)
-        row = connection.execute(
-            "SELECT status, last_error FROM worker_cron_runs WHERE task_name = ?",
-            (task_name,),
-        ).fetchone()
-    if not row:
-        return False
-    return row["status"] == "succeeded" and not row["last_error"]
+def get_eval_worker_status(*args, **kwargs):
+    return _worker_observability.get_eval_worker_status(*args, **kwargs)
 
 
 def observed_cron_task(task):
-    """Wrap an ARQ cron task without swallowing errors or changing its name."""
+    def record_execution(*args, **kwargs):
+        return record_cron_execution(*args, **kwargs)
 
-    @wraps(task)
-    async def wrapped(ctx):
-        from app.core.cache import worker_status_set
-
-        task_name = task.__name__
-        redis_ok = await worker_status_set(task_name, "running")
-        if not redis_ok:
-            record_cron_execution(task_name, status="running")
-        try:
-            result = await task(ctx)
-        except Exception as exc:
-            record_cron_execution(task_name, status="failed", error=str(exc))
-            raise
-        if redis_ok:
-            await worker_status_set(task_name, "succeeded")
-            if _cron_should_record_success(task_name):
-                return result
-        record_cron_execution(task_name, status="succeeded", result=result)
-        return result
-
-    return wrapped
-
-
-def get_eval_worker_status(*, conn=None) -> dict:
-    """Classify an evaluation queue as empty, active, or worker-offline."""
-    with _connection_context(conn) as connection:
-        _ensure_observability_tables(connection)
-        counts = {
-            row["status"]: row["count"]
-            for row in connection.execute(
-                "SELECT status, COUNT(*) AS count FROM eval_runs GROUP BY status"
-            ).fetchall()
-        }
-        heartbeat = connection.execute(
-            "SELECT * FROM worker_heartbeats WHERE worker_name = 'eval-worker'"
-        ).fetchone()
-        stale_queued = connection.execute(
-            "SELECT COUNT(*) FROM eval_runs "
-            "WHERE status IN ('created', 'queued') "
-            "AND created_at < datetime('now', '-10 minutes')"
-        ).fetchone()[0]
-    queued = sum(counts.get(status, 0) for status in ("created", "queued", "running"))
-    if not queued:
-        queue_state = "queue_empty"
-    elif stale_queued:
-        queue_state = "queued_stuck"
-    elif heartbeat is None or heartbeat["status"] != "online":
-        queue_state = "worker_offline"
-    else:
-        queue_state = "worker_online"
-    return {
-        "queue_state": queue_state,
-        "counts": counts,
-        "stale_queued_count": stale_queued,
-        "heartbeat": dict(heartbeat) if heartbeat else None,
-    }
-
-
+    return _worker_observability.observed_cron_task(
+        task, record_execution=record_execution
+    )
 from app.worker_enqueue import (
     _get_redis_pool,
     enqueue_cluster_batch_job,
@@ -300,613 +93,18 @@ from app.worker_enqueue import (
 )
 
 
-async def recompute_embedding_task(ctx, job_id: int):
-    """ARQ: 全量 embedding 重算（模型更换后自动触发）。"""
-    from app.services.embedding_recompute import run_recompute
-
-    await run_recompute(job_id)
-
-
-async def cluster_review_task(ctx, task_id: str):
-    """ARQ worker：执行一个带 cluster_version 校验的 AI 质量评估。"""
-    from app.services.cluster_review_lifecycle import run_cluster_review_task
-
-    return await run_cluster_review_task(task_id)
-
-
-async def quality_review_scan_task(ctx, job_id: int):
-    """ARQ worker：执行管理员触发的误合并 + 漏合并全量扫描。"""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import (
-        QUALITY_REVIEW_SCAN_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-        touch_job,
-    )
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=QUALITY_REVIEW_SCAN_JOB_TYPE,
-            )
-            if not task:
-                return None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            conn.commit()
-            return dict(task), json.loads(payload_row["payload"]) if payload_row else {}
-
-    claimed = await asyncio.to_thread(_claim_and_load)
-    if claimed is None:
-        logger.info("聚合质量扫描已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    task, payload = claimed
-
-    def _progress(current: int, message: str):
-        with get_db_connection() as conn:
-            touch_job(
-                conn,
-                job_id,
-                worker_id,
-                progress_current=current,
-                progress_message=message,
-            )
-            conn.commit()
-
-    def _complete(result):
-        with get_db_connection() as conn:
-            complete_job(
-                conn,
-                job_id,
-                worker_id,
-                result=json.dumps(result, ensure_ascii=False),
-            )
-            conn.commit()
-
-    def _fail(error):
-        with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
-            conn.commit()
-            return outcome
-
-    try:
-        from app.services.clustering_maintenance import generate_quality_issues
-        from app.services.unmerged_quality import generate_unmerged_quality_issues
-
-        await asyncio.to_thread(_progress, 0, "正在分析聚类内误合并")
-        mismerge = await generate_quality_issues(
-            user_id=payload.get("user_id"),
-            limit=payload.get("mismerge_limit", 1000),
-            review_task_id=str(job_id),
-            trigger_reason="manual_full_scan",
-        )
-        await asyncio.to_thread(_progress, 1, "正在分析孤岛题漏合并")
-        unmerged = await generate_unmerged_quality_issues(
-            user_id=payload.get("user_id"),
-            limit=payload.get("singleton_limit", 1000),
-            candidate_limit=payload.get("candidate_limit", 3),
-            similarity_threshold=payload.get("similarity_threshold", 0.30),
-            review_task_id=str(job_id),
-            trigger_reason="manual_full_scan",
-        )
-        from app.services.cluster_review_lifecycle import sync_review_state_after_scan
-
-        def _sync_review_state():
-            with get_db_connection() as conn:
-                state = sync_review_state_after_scan(
-                    conn,
-                    (mismerge.get("scanned_cluster_ids") or [])
-                    + (unmerged.get("scanned_singleton_ids") or []),
-                    trigger_reason="manual_full_scan",
-                )
-                conn.commit()
-                return state
-
-        state = await asyncio.to_thread(_sync_review_state)
-        result = {
-            "status": "completed",
-            "mismerge": mismerge,
-            "unmerged": unmerged,
-            "review_state": state,
-        }
-        _complete(result)
-        return {"job_id": job_id, **result}
-    except Exception as exc:
-        outcome = _fail(str(exc)[:500])
-        logger.exception("聚合质量扫描失败: job_id=%s", job_id)
-        return {"status": outcome["status"], "job_id": job_id}
-
-
-async def startup(ctx):
-    """Worker 启动时初始化"""
-    from app.db.connection import init_db
-    from app.core.config import _reload_from_db
-    from app.services.embedding_service import reload_embedding_config
-
-    init_db()
-    await record_worker_heartbeat_async(
-        "arq-worker",
-        status="online",
-        queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
-        metadata={"pid": os.getpid()},
-    )
-    _reload_from_db()
-    reload_embedding_config()
-    try:
-        from redis.asyncio import from_url
-        from app.core.cache import set_cache_client
-        from app.core.config import REDIS_CACHE_URL
-
-        cache = from_url(REDIS_CACHE_URL, decode_responses=True)
-        await cache.ping()
-        set_cache_client(cache)
-        ctx["redis_cache"] = cache
-    except Exception as exc:
-        logger.warning("ARQ Worker Redis cache 初始化失败: %s", exc)
-    logger.info("ARQ Worker 已启动")
-
-
-async def shutdown(ctx):
-    """Worker 关闭时清理"""
-    await record_worker_heartbeat_async(
-        "arq-worker",
-        status="offline",
-        queue_name=os.environ.get("ARQ_QUEUE_NAME", "arq:default"),
-        metadata={"pid": os.getpid()},
-    )
-    from app.core.cache import close_cache_client
-
-    await close_cache_client()
-    logger.info("ARQ Worker 已关闭")
-
-
-async def _schedule_cluster_answer_jobs(
-    parent_job_id: int,
-    question_bank_ids: list[int],
-    *,
-    owner_id: int | None,
-    actor_id: int | None,
-) -> list[int]:
-    """Create durable answer jobs with the final question-bank scope.
-
-    The clustering worker may be invoked by an admin on behalf of a user.
-    ``owner_id`` is therefore the only source of truth for model/search scope:
-    public rows use the global/public configuration, personal rows use the
-    owning user's configuration.
-    """
-    ids = sorted({int(item) for item in (question_bank_ids or [])})
-    if not ids:
-        return []
-
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import create_answer_generation_jobs
-
-    llm_scope = "global" if owner_id is None else "user"
-    search_scope = "public" if owner_id is None else "user"
-    answer_user_id = owner_id if owner_id is not None else actor_id
-
-    def _create():
-        placeholders = ",".join("?" * len(ids))
-        with get_db_connection() as conn:
-            rows = conn.execute(
-                "SELECT id, question FROM question_bank "
-                f"WHERE id IN ({placeholders}) AND deleted_at IS NULL "
-                "AND question IS NOT NULL AND question != '' "
-                "AND owner_id IS ? AND (ai_answer IS NULL OR ai_answer = '')",
-                [*ids, owner_id],
-            ).fetchall()
-            tasks = [(int(row["id"]), row["question"]) for row in rows]
-            job_ids = create_answer_generation_jobs(
-                conn,
-                parent_job_id,
-                tasks,
-                answer_user_id,
-                llm_scope=llm_scope,
-                search_scope=search_scope,
-            )
-            conn.commit()
-            return job_ids
-
-    try:
-        return await asyncio.to_thread(_create)
-    except Exception:
-        # Answer enrichment is secondary to the durable clustering result.
-        # The answer job dispatcher can be retried independently; never roll
-        # back a successfully written public/personal cluster here.
-        logger.exception(
-            "聚类完成但答案任务创建失败: parent_job_id=%s, owner_id=%s",
-            parent_job_id,
-            owner_id,
-        )
-        return []
-
-
-async def cluster_batch_task(ctx, job_id: int):
-    """ARQ task: claim and process one database-owned clustering batch."""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import (
-        CLUSTER_BATCH_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-    )
-    from app.services.pipeline import (
-        BATCH_SIZE,
-        cluster_batch,
-        dequeue_batch,
-        mark_batch_done,
-        mark_batch_failed,
-    )
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=CLUSTER_BATCH_JOB_TYPE,
-            )
-            if not task:
-                return None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            conn.commit()
-            payload = json.loads(payload_row["payload"]) if payload_row else {}
-            return payload
-
-    payload = await asyncio.to_thread(_claim_and_load)
-    if payload is None:
-        logger.info("聚类攒批任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    def _complete(result):
-        with get_db_connection() as conn:
-            complete_job(conn, job_id, worker_id, result=json.dumps(result, ensure_ascii=False))
-            conn.commit()
-
-    def _fail(error):
-        with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
-            conn.commit()
-            return outcome
-
-    batch = []
-    try:
-        batch = dequeue_batch(BATCH_SIZE)
-        if not batch:
-            result = {"status": "empty", "new_count": 0}
-            _complete(result)
-            return {"job_id": job_id, **result}
-
-        cluster_result = await cluster_batch(
-            batch, user_id=payload.get("user_id"), return_new_ids=True
-        )
-        if isinstance(cluster_result, dict):
-            new_count = int(cluster_result.get("count", 0))
-            new_qb_ids = cluster_result.get("ids", [])
-        else:  # compatibility with lightweight test/legacy implementations
-            new_count = int(cluster_result or 0)
-            new_qb_ids = []
-        queue_ids = [item["queue_id"] for item in batch]
-        mark_batch_done(queue_ids)
-        from app.services.public_contributions import mark_public_contribution_queue_done
-
-        mark_public_contribution_queue_done(get_db_connection(), queue_ids)
-        await _schedule_cluster_answer_jobs(
-            job_id,
-            new_qb_ids,
-            owner_id=batch[0].get("owner_id"),
-            actor_id=payload.get("user_id"),
-        )
-        result = {"status": "done", "new_count": new_count, "processed": len(batch)}
-        _complete(result)
-        return {"job_id": job_id, **result}
-    except Exception as exc:
-        queue_ids = [item["queue_id"] for item in batch]
-        mark_batch_failed(queue_ids)
-        from app.services.public_contributions import mark_public_contribution_queue_failed
-
-        mark_public_contribution_queue_failed(get_db_connection(), queue_ids, str(exc))
-        outcome = _fail(str(exc)[:500])
-        logger.exception("聚类攒批任务失败: job_id=%s", job_id)
-        return {"status": outcome["status"], "job_id": job_id}
-
-
-async def cluster_rebuild_task(ctx, job_id: int):
-    """ARQ task: durably process every queued question for a full rebuild."""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import (
-        CLUSTER_REBUILD_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-        touch_job,
-    )
-    from app.services.pipeline import (
-        BATCH_SIZE,
-        cluster_batch,
-        dequeue_batch,
-        mark_batch_done,
-        mark_batch_failed,
-    )
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=CLUSTER_REBUILD_JOB_TYPE,
-            )
-            if not task:
-                return None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            conn.commit()
-            payload = json.loads(payload_row["payload"]) if payload_row else {}
-            return payload, int(task["progress_total"] or 1)
-
-    claimed = await asyncio.to_thread(_claim_and_load)
-    if claimed is None:
-        logger.info("全量聚类重建任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    payload, progress_total = claimed
-    processed = 0
-    total_new = 0
-    total_batches = 0
-    batch = []
-
-    def _touch(message: str):
-        with get_db_connection() as conn:
-            touch_job(
-                conn,
-                job_id,
-                worker_id,
-                progress_current=processed,
-                progress_total=max(progress_total, processed, 1),
-                progress_message=message,
-            )
-            conn.commit()
-
-    def _complete(result):
-        with get_db_connection() as conn:
-            complete_job(
-                conn,
-                job_id,
-                worker_id,
-                result=json.dumps(result, ensure_ascii=False),
-            )
-            conn.commit()
-
-    def _fail(error):
-        with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
-            conn.commit()
-            return outcome
-
-    try:
-        while True:
-            batch = dequeue_batch(BATCH_SIZE, owner_id=None)
-            if not batch:
-                result = {
-                    "status": "done",
-                    "batches": total_batches,
-                    "new_qb_count": total_new,
-                    "processed": processed,
-                }
-                _complete(result)
-                return {"job_id": job_id, **result}
-
-            total_batches += 1
-            cluster_result = await cluster_batch(
-                batch,
-                user_id=payload.get("user_id"),
-                skip_clean=True,
-                return_new_ids=True,
-            )
-            if isinstance(cluster_result, dict):
-                new_count = int(cluster_result.get("count", 0))
-                new_qb_ids = cluster_result.get("ids", [])
-            else:
-                new_count = int(cluster_result or 0)
-                new_qb_ids = []
-            queue_ids = [item["queue_id"] for item in batch]
-            mark_batch_done(queue_ids)
-            from app.services.public_contributions import mark_public_contribution_queue_done
-
-            mark_public_contribution_queue_done(get_db_connection(), queue_ids)
-            await _schedule_cluster_answer_jobs(
-                job_id,
-                new_qb_ids,
-                owner_id=batch[0].get("owner_id"),
-                actor_id=payload.get("user_id"),
-            )
-            processed += len(batch)
-            total_new += new_count
-            _touch(f"已完成 {processed} 道题，处理 {total_batches} 个批次")
-            await asyncio.sleep(0.5)
-    except Exception as exc:
-        if batch:
-            mark_batch_failed([item["queue_id"] for item in batch])
-            from app.services.public_contributions import mark_public_contribution_queue_failed
-
-            mark_public_contribution_queue_failed(
-                get_db_connection(), [item["queue_id"] for item in batch], str(exc)
-            )
-        outcome = _fail(str(exc)[:500])
-        logger.exception("全量聚类重建任务失败: job_id=%s", job_id)
-        return {"status": outcome["status"], "job_id": job_id}
-
-
-async def interview_reprocess_task(ctx, job_id: int):
-    """ARQ task: tag one interview, enqueue its questions and open clustering."""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import (
-        INTERVIEW_REPROCESS_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-        touch_job,
-    )
-    from app.services.pipeline import (
-        _run_cluster_batch_in_background,
-        enqueue_questions,
-        tag_interview,
-    )
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=INTERVIEW_REPROCESS_JOB_TYPE,
-            )
-            if not task:
-                return None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            payload = json.loads(payload_row["payload"]) if payload_row else {}
-            interview = conn.execute(
-                "SELECT id, url, company, round, questions_list, job_position "
-                "FROM interview WHERE id = ?",
-                (payload.get("interview_id"),),
-            ).fetchone()
-            conn.commit()
-            return payload, dict(interview) if interview else None
-
-    claimed = await asyncio.to_thread(_claim_and_load)
-    if claimed is None:
-        logger.info("面经重分析任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    payload, interview = claimed
-
-    def _set_analysis_status(status: str):
-        with get_db_connection() as conn:
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(interview)").fetchall()}
-            if "analysis_status" in columns:
-                conn.execute(
-                    "UPDATE interview SET analysis_status = ?, "
-                    "analysis_updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (status, payload.get("interview_id")),
-                )
-                conn.commit()
-
-    def _touch(message: str):
-        with get_db_connection() as conn:
-            touch_job(
-                conn,
-                job_id,
-                worker_id,
-                progress_current=0,
-                progress_total=1,
-                progress_message=message,
-            )
-            conn.commit()
-
-    def _complete(result):
-        with get_db_connection() as conn:
-            complete_job(
-                conn,
-                job_id,
-                worker_id,
-                result=json.dumps(result, ensure_ascii=False),
-            )
-            conn.commit()
-
-    def _fail(error):
-        with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
-            conn.commit()
-            return outcome
-
-    try:
-        if not interview:
-            raise ValueError("未找到待重分析的面经")
-        questions_list = str(interview.get("questions_list") or "")
-        if not questions_list.strip():
-            raise ValueError("该面经没有可分析的题目清单")
-
-        _set_analysis_status("processing")
-        _touch("正在调用 AI 标注题目")
-        user_id = payload.get("user_id")
-        tagged_rows = await tag_interview(
-            interview.get("url") or f"internal://{interview['id']}",
-            interview.get("company") or "未提供",
-            interview.get("round") or "未提供",
-            questions_list,
-            job_position=interview.get("job_position") or "",
-            user_id=user_id,
-            interview_id=interview["id"],
-        )
-        enqueue_questions(interview["id"])
-        scheduled = await _run_cluster_batch_in_background(user_id=user_id)
-
-        details = [
-            {
-                "question": row[3],
-                "cat1": row[4],
-                "cat2": row[5],
-                "tags": row[6],
-                "difficulty": row[7],
-            }
-            for row in tagged_rows
-        ]
-        result = {
-            "interview_id": interview["id"],
-            "tagged_count": len(tagged_rows),
-            "details": details,
-            "cluster_pending": True,
-            "cluster_scheduled": scheduled,
-        }
-        _set_analysis_status("completed")
-        _complete(result)
-        return {"job_id": job_id, "status": "completed", **result}
-    except Exception as exc:
-        _set_analysis_status("failed")
-        outcome = _fail(str(exc)[:500])
-        logger.exception("面经重分析任务失败: job_id=%s", job_id)
-        return {"job_id": job_id, "status": outcome["status"]}
-
-
-async def refresh_interview_distribution_task(ctx, scope: str, job_position: str):
-    """Recompute one distribution hierarchy after its facts were marked stale."""
-    from app.db.connection import get_db_connection
-    from app.services.interview_distribution import refresh_distribution_scope
-
-    conn = get_db_connection()
-    try:
-        result = refresh_distribution_scope(conn, scope, job_position)
-        conn.commit()
-        return {"status": "completed", **result}
-    except Exception:
-        conn.rollback()
-        raise
-
-
+from app.worker_cluster_tasks import (
+    _schedule_cluster_answer_jobs,
+    cluster_batch_task,
+    cluster_rebuild_task,
+    cluster_review_task,
+    interview_reprocess_task,
+    quality_review_scan_task,
+    recompute_embedding_task,
+    refresh_interview_distribution_task,
+    shutdown,
+    startup,
+)
 async def process_chat_side_effects_task(ctx, limit: int = 10):
     """Drain durable chat memory handoffs left by cancelled/restarted API workers."""
     from app.services import chat_service
@@ -1220,7 +418,8 @@ async def _build_master_bank_job(ctx, job_id: int):
                 mark_batch_done(queue_ids)
                 from app.services.public_contributions import mark_public_contribution_queue_done
 
-                mark_public_contribution_queue_done(get_db_connection(), queue_ids)
+                with get_db_connection() as connection:
+                    mark_public_contribution_queue_done(connection, queue_ids)
                 await _schedule_cluster_answer_jobs(
                     job_id,
                     new_qb_ids,
@@ -1292,6 +491,20 @@ async def _build_master_bank_job(ctx, job_id: int):
         raise
 
 
+def _normalize_error_code(error: object) -> str:
+    """Map upload failures through the shared AC-013 error taxonomy."""
+
+    from app.services.upload_retry_budget import normalize_upload_error_code
+
+    return normalize_upload_error_code(error)
+
+
+from app.worker_upload_tasks import credential_preflight_task
+
+
+SUBMIT_LEASE_HEARTBEAT_SECONDS = 30
+
+
 async def submit_import_task(ctx, job_id: int):
     """后台任务：执行上传导入（面经/JD 提取 + 打标 + 聚类）
 
@@ -1300,18 +513,100 @@ async def submit_import_task(ctx, job_id: int):
     """
     from app.db.connection import get_db_connection, run_db
     from app.services.job_lifecycle import (
-        claim_job,
+        claim_job_with_generation,
         complete_job,
         default_worker_id,
         fail_job,
         touch_job,
     )
+    from app.services.upload_lifecycle import FIRST_WORK_KEY, upload_execution_blocker
 
     worker_id = default_worker_id()
 
+    def _preflight_ready():
+        from app.services.job_lifecycle import (
+            defer_job_for_upload_preflight,
+            get_successful_upload_preflight,
+        )
+
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT j.root_import_id, j.upload_attempt_id, r.requester_id, "
+                "r.status AS root_status, r.policy_json "
+                "FROM jobs AS j LEFT JOIN upload_imports AS r "
+                "ON r.id = j.root_import_id WHERE j.id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None or not row["root_import_id"]:
+                return True, None
+
+            policy = {}
+            try:
+                policy = json.loads(row["policy_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            credential_scope = policy.get("credential_scope") or "user"
+            preflight = get_successful_upload_preflight(
+                conn,
+                root_import_id=row["root_import_id"],
+                attempt_id=row["upload_attempt_id"],
+                credential_scope=credential_scope,
+            )
+            user_id = int(row["requester_id"]) if credential_scope == "user" else None
+
+            current_fingerprint = None
+            if preflight and row["root_status"] != "needs_action":
+                try:
+                    from app.services.upload_credentials import resolve_upload_credentials
+
+                    current = resolve_upload_credentials(
+                        credential_scope=credential_scope,
+                        user_id=user_id,
+                        stage="extract",
+                    )
+                    current_fingerprint = current.config_fingerprint
+                except Exception:
+                    # A missing/invalid current config must be checked by a new
+                    # preflight job, which records the actionable failure.
+                    current_fingerprint = None
+
+                try:
+                    result = json.loads(preflight["result_json"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    result = {}
+                if (
+                    current_fingerprint
+                    and result.get("config_fingerprint") == current_fingerprint
+                ):
+                    return True, result.get("model")
+
+            # Some API routes enqueue submit_import directly. Defer that early
+            # delivery without claiming/consuming an attempt. If the saved
+            # checkpoint is absent/stale, create a fresh durable preflight job;
+            # the dispatcher will not release submit until that job succeeds.
+            if row["root_status"] != "needs_action":
+                from app.services.credential_preflight import create_credential_preflight_job
+
+                create_credential_preflight_job(
+                    conn,
+                    root_import_id=row["root_import_id"],
+                    requester_id=int(row["requester_id"]),
+                    credential_scope=credential_scope,
+                    user_id=user_id,
+                    attempt_id=row["upload_attempt_id"],
+                )
+            defer_job_for_upload_preflight(conn, job_id)
+            conn.commit()
+            return False, None
+
+    preflight_ready, preflight_model = await asyncio.to_thread(_preflight_ready)
+    if not preflight_ready:
+        logger.info("上传任务等待同批次模型预检: job_id=%s", job_id)
+        return {"status": "waiting_preflight", "job_id": job_id}
+
     def _claim():
         with get_db_connection() as conn:
-            task = claim_job(conn, job_id, worker_id)
+            task = claim_job_with_generation(conn, job_id, worker_id=worker_id)
             conn.commit()
             return dict(task) if task else None
 
@@ -1319,10 +614,18 @@ async def submit_import_task(ctx, job_id: int):
     if not claimed:
         logger.info("上传任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
         return {"status": "already_claimed_or_finished", "job_id": job_id}
+    # F12：本次领取的 lease_generation 是根状态写入与业务提交的 fence
+    lease_generation = int(claimed["lease_generation"])
 
     def _complete(result: str | None = None):
         with get_db_connection() as conn:
-            completed = complete_job(conn, job_id, worker_id, result=result)
+            completed = complete_job(
+                conn,
+                job_id,
+                worker_id,
+                result=result,
+                lease_generation=lease_generation,
+            )
             conn.commit()
             return completed
 
@@ -1334,6 +637,7 @@ async def submit_import_task(ctx, job_id: int):
                 worker_id,
                 error,
                 max_attempts=0 if terminal else 3,
+                lease_generation=lease_generation,
             )
             conn.commit()
             return outcome
@@ -1351,7 +655,190 @@ async def submit_import_task(ctx, job_id: int):
         return
 
     try:
+        # R02/R03：worker 按 root 读取完整服务端 policy 与 v2 归属，
+        # 不再靠 payload 里的旧字段猜策略（普通 share 审核意图必须贯穿）。
+        def _load_root_context():
+            with get_db_connection() as conn:
+                job = conn.execute(
+                    "SELECT j.root_import_id, j.upload_attempt_id, j.work_key, "
+                    "j.idempotency_key, a.attempt_no FROM jobs j "
+                    "LEFT JOIN upload_attempts a ON a.id = j.upload_attempt_id "
+                    "WHERE j.id = ?",
+                    (job_id,),
+                ).fetchone()
+                root = None
+                policy = {}
+                if job and job["root_import_id"]:
+                    root = conn.execute(
+                        "SELECT * FROM upload_imports WHERE id = ?",
+                        (job["root_import_id"],),
+                    ).fetchone()
+                if root:
+                    try:
+                        policy = json.loads(root["policy_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        policy = {}
+                return (dict(job) if job else None), (dict(root) if root else None), policy
+
+        job_row, root_row, policy = await asyncio.to_thread(_load_root_context)
+        root_import_id = job_row["root_import_id"] if job_row else None
+        attempt_id = job_row["upload_attempt_id"] if job_row else None
+        attempt_no = job_row["attempt_no"] if job_row else None
+        root_status = root_row["status"] if root_row else None
+
+        # R01：预检失败（needs_action）不派发提取——即使 job 已被调度也拒绝执行。
+        if root_import_id and root_status == "needs_action":
+            _fail("凭据预检未通过，请先修复模型配置", terminal=True)
+            return
+
+        if root_import_id and root_row:
+            def _check_execution_context():
+                with get_db_connection() as conn:
+                    fresh_root = conn.execute(
+                        "SELECT * FROM upload_imports WHERE id = ?", (root_import_id,)
+                    ).fetchone()
+                    return upload_execution_blocker(conn, fresh_root, policy)
+
+            blocker = await asyncio.to_thread(_check_execution_context)
+            if blocker:
+                error_code, error_message = blocker
+
+                def _block_before_processing():
+                    from app.services.upload_lifecycle import finalize_attempt_and_aggregate_root
+
+                    with get_db_connection() as conn:
+                        outcome = fail_job(
+                            conn,
+                            job_id,
+                            worker_id,
+                            f"{error_code}: {error_message}",
+                            max_attempts=0,
+                            lease_generation=lease_generation,
+                        )
+                        if outcome.get("status") != "failed":
+                            conn.commit()
+                            return False
+                        current_root = conn.execute(
+                            "SELECT input_version, pipeline_version FROM upload_imports WHERE id = ?",
+                            (root_import_id,),
+                        ).fetchone()
+                        conn.execute(
+                            "INSERT OR IGNORE INTO upload_stage_results ("
+                            "import_id, stage, unit_key, input_version, pipeline_version, "
+                            "status, error_code, job_id) "
+                            "VALUES (?, 'extract', ?, ?, ?, 'needs_action', ?, ?)",
+                            (
+                                root_import_id,
+                                f"source_validation:job:{job_id}",
+                                int(current_root["input_version"] or 1),
+                                current_root["pipeline_version"],
+                                error_code,
+                                job_id,
+                            ),
+                        )
+                        finalize_attempt_and_aggregate_root(
+                            conn,
+                            import_id=root_import_id,
+                            actor_id=int(payload.get("user_id") or 0),
+                            error_code=error_code,
+                            error_message=error_message,
+                            lease_generation=lease_generation,
+                        )
+                        conn.commit()
+                        return True
+
+                blocked = await asyncio.to_thread(_block_before_processing)
+                if blocked:
+                    logger.info(
+                        "上传任务执行前校验阻塞: import_id=%s code=%s",
+                        root_import_id,
+                        error_code,
+                    )
+                return {"status": "needs_action", "job_id": job_id, "error_code": error_code}
+
+        work_key = job_row["work_key"] if job_row else FIRST_WORK_KEY
+
+        # F08：恢复执行时读取已成功的 extract/classify 阶段检查点，
+        # 注入 input_state 让节点复用（不重跑 LLM、不重复打标）。
+        resume_extracted = None
+        resume_tagged = None
+        if root_import_id:
+            def _load_resume():
+                with get_db_connection() as conn:
+                    extract_ckpt = conn.execute(
+                        "SELECT result_json FROM upload_stage_results "
+                        "WHERE import_id = ? AND stage IN ('extract','fill') "
+                        "AND status = 'succeeded' ORDER BY id DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    classify_ckpt = conn.execute(
+                        "SELECT result_json FROM upload_stage_results "
+                        "WHERE import_id = ? AND stage IN ('classify','tag') "
+                        "AND status = 'succeeded' ORDER BY id DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    out = {"extracted": None, "tagged": None}
+                    if extract_ckpt:
+                        try:
+                            out["extracted"] = json.loads(extract_ckpt["result_json"] or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            out["extracted"] = None
+                    if classify_ckpt:
+                        try:
+                            out["tagged"] = json.loads(classify_ckpt["result_json"] or "{}")
+                        except (json.JSONDecodeError, TypeError):
+                            out["tagged"] = None
+                    return out
+
+            resume = await asyncio.to_thread(_load_resume)
+            if resume.get("extracted") and resume["extracted"].get("data"):
+                resume_extracted = resume["extracted"]
+            if resume.get("tagged") and resume["tagged"].get("tagged_rows"):
+                resume_tagged = resume["tagged"]["tagged_rows"]
+
+        # 从 root 派生的策略覆盖 payload 旧字段（R02）
+        # graph 的 target 词表是 personal/public（after_classify/jd_persist 都按它
+        # 判定），policy.write_scope 是 private/public：在唯一边界做一次规范化，
+        # 避免两侧词表漂移导致私人 JD 被当成公共待审数据。
+        write_scope = policy.get("write_scope") or payload.get("target", "personal")
+        target = "public" if write_scope == "public" else "personal"
+        target_intent = policy.get("target_intent") or payload.get("target_intent", "private")
+        request_public_review = bool(
+            policy.get("request_public_review", False)
+            or payload.get("request_public_review", False)
+        )
+        credential_scope = policy.get("credential_scope") or (
+            "global" if payload.get("is_admin") and payload.get("target") == "public" else "user"
+        )
+        is_admin = bool(
+            payload.get("is_admin", False) or policy.get("audit_public_import", False)
+        )
+
+        # 首次 job 的 attempt 归属（root 为 v2 时）
+        if root_import_id and attempt_id is None:
+            def _attach_attempt():
+                with get_db_connection() as conn:
+                    row = conn.execute(
+                        "SELECT id FROM upload_attempts WHERE import_id = ? "
+                        "AND status = 'active' ORDER BY attempt_no DESC LIMIT 1",
+                        (root_import_id,),
+                    ).fetchone()
+                    if row:
+                        conn.execute(
+                            "UPDATE jobs SET upload_attempt_id = ? WHERE id = ?",
+                            (row["id"], job_id),
+                        )
+                        conn.commit()
+                        return int(row["id"])
+                    return None
+
+            attempt_id = await asyncio.to_thread(_attach_attempt)
+
         from app.agents.submit.graph import stream_submit_graph
+        from app.services.upload_lifecycle import (
+            build_thread_id,
+            finalize_attempt_and_aggregate_root,
+        )
 
         # 构建 input_state（将 base64 图片还原为 bytes）
         raw_images = payload.get("image_data", [])
@@ -1364,16 +851,33 @@ async def submit_import_task(ctx, job_id: int):
             else:
                 image_data.append(img)  # 兼容直接传 bytes 的场景
 
+        thread_id = build_thread_id(
+            root_import_id or f"legacy-{job_id}", attempt_no or 0, job_id
+        )
         input_state = {
             "raw_text": payload.get("raw_text", ""),
             "image_data": image_data,
             "url": payload.get("url", ""),
             "season": payload.get("season", ""),
             "content_type_hint": payload.get("content_type_hint", ""),
-            "target": payload.get("target", "personal"),
+            "target": target,
+            "target_intent": target_intent,
+            "request_public_review": request_public_review,
+            "credential_scope": credential_scope,
+            "_eval_model": preflight_model,
             "user_id": payload.get("user_id"),
-            "is_admin": payload.get("is_admin", False),
+            "is_admin": is_admin,
             "job_position": payload.get("job_position", ""),
+            "import_id": root_import_id,
+            "attempt_id": attempt_id,
+            "_lease_generation": lease_generation,
+            "_input_version": int(root_row["input_version"]) if root_row else None,
+            "thread_id": thread_id,
+            "work_key": work_key,
+            "job_id": job_id,
+            # F08：检查点复用（恢复执行不重跑已成功阶段）
+            "_resume_extracted": resume_extracted,
+            "_resume_tagged_rows": resume_tagged,
         }
 
         # 阶段映射
@@ -1382,7 +886,17 @@ async def submit_import_task(ctx, job_id: int):
 
         def _update_progress(phase, message=""):
             idx = phase_index.get(phase, 0)
+            from app.services.upload_stage_names import checkpoint_for_upload_phase
+
+            durable_stage, unit_key = checkpoint_for_upload_phase(phase)
             with get_db_connection() as conn:
+                from app.services.upload_lifecycle import assert_upload_business_commit
+
+                conn.execute("BEGIN IMMEDIATE")
+                assert_upload_business_commit(
+                    conn, import_id=root_import_id, job_id=job_id,
+                    generation=lease_generation, input_version=input_state["_input_version"],
+                )
                 if not touch_job(
                     conn,
                     job_id,
@@ -1391,16 +905,105 @@ async def submit_import_task(ctx, job_id: int):
                     progress_total=len(PHASES),
                     progress_message=message,
                     progress_phase=phase,
+                    lease_generation=lease_generation,
                 ):
                     raise RuntimeError(f"上传任务 lease 已失效: job_id={job_id}")
+                # R03：execution 进度持久化进阶段检查点（幂等 UNIQUE）
+                if root_import_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO upload_stage_results ("
+                        "  import_id, stage, unit_key, input_version, pipeline_version, "
+                        "  status, job_id"
+                        ") VALUES (?, ?, ?, ?, ?, 'running', ?)",
+                        (root_import_id, durable_stage, unit_key, input_state["_input_version"], root_row["pipeline_version"], job_id),
+                    )
                 conn.commit()
 
         _update_progress("extract", "正在提取内容...")
 
+        async def _aggregate_root_failure(error_message: str, error_code: str | None = None):
+            """Persist a sanitized error and aggregate the contract status (R04)."""
+
+            if not root_import_id:
+                return
+            from app.services.upload_retry_budget import ERROR_POLICY, safe_upload_error_message
+
+            normalized = _normalize_error_code(error_code or error_message)
+            safe_message = safe_upload_error_message(normalized)
+            stage_status = (
+                "needs_action"
+                if ERROR_POLICY.get(normalized, {}).get("root_status") == "needs_action"
+                else "failed"
+            )
+
+            def _apply():
+                with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
+                    conn.execute(
+                        "UPDATE upload_stage_results SET status = ?, "
+                        "error_code = ?, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE import_id = ? AND job_id = ? AND input_version = ? AND status IN ('running', 'pending')",
+                        (stage_status, normalized, root_import_id, job_id, input_state["_input_version"]),
+                    )
+                    return finalize_attempt_and_aggregate_root(
+                        conn,
+                        import_id=root_import_id,
+                        actor_id=int(payload.get("user_id") or 0),
+                        error_code=normalized,
+                        error_message=safe_message,
+                        lease_generation=lease_generation,
+                    )
+
+            try:
+                aggregated = await asyncio.to_thread(_apply)
+                logger.info(
+                    "上传根任务失败聚合: import_id=%s status=%s code=%s",
+                    root_import_id,
+                    aggregated["status"],
+                    normalized,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "根任务失败聚合异常: import_id=%s exception_type=%s",
+                    root_import_id,
+                    type(exc).__name__,
+                )
+
         result_collector = {}
         last_phase = ""
         emitted_error = None
+        emitted_error_code = None
         saw_done = False
+
+        # Renew during long graph/model calls even when no progress event is emitted.
+        heartbeat_stop = asyncio.Event()
+        submit_task = asyncio.current_task()
+
+        async def _renew_submit_lease():
+            from app.services.job_lifecycle import heartbeat_job
+            while not heartbeat_stop.is_set():
+                try:
+                    await asyncio.wait_for(heartbeat_stop.wait(), timeout=SUBMIT_LEASE_HEARTBEAT_SECONDS)
+                    return
+                except asyncio.TimeoutError:
+                    pass
+                def _renew():
+                    with get_db_connection() as conn:
+                        alive = heartbeat_job(conn, job_id, lease_generation)
+                        conn.commit()
+                        return alive
+                try:
+                    alive = await asyncio.to_thread(_renew)
+                except Exception as exc:
+                    logger.warning("上传续租失败: job_id=%s exception_type=%s", job_id, type(exc).__name__)
+                    alive = False
+                if not alive:
+                    submit_task.cancel()
+                    return
+
+        lease_heartbeat_task = asyncio.create_task(_renew_submit_lease())
 
         # 消费 graph 事件流（只读取事件，不产出 SSE）
         try:
@@ -1414,8 +1017,16 @@ async def submit_import_task(ctx, job_id: int):
                         etype = event.get("type", "")
 
                         if etype == "error":
-                            emitted_error = event.get("message") or "处理失败"
-                            break
+                            emitted_error_code = event.get("error_code")
+                            from app.services.upload_retry_budget import safe_upload_error_message
+
+                            emitted_error = safe_upload_error_message(
+                                emitted_error_code or event.get("message") or "UNKNOWN_ERROR"
+                            )
+                            # Drain the async SSE generator to completion. Breaking
+                            # here closes it from the consumer's context while its
+                            # ContextVar token was set in the generator task.
+                            continue
 
                         if etype == "done":
                             saw_done = True
@@ -1431,22 +1042,46 @@ async def submit_import_task(ctx, job_id: int):
                 except (json.JSONDecodeError, ValueError):
                     pass
         except Exception as e:
-            logger.exception(f"graph 流式执行异常: job_id={job_id}")
-            emitted_error = str(e)[:500] or "任务执行异常"
+            from app.services.upload_retry_budget import safe_upload_error_message
+
+            emitted_error_code = _normalize_error_code(e)
+            emitted_error = safe_upload_error_message(emitted_error_code)
+            logger.warning(
+                "graph 流式执行异常: job_id=%s import_id=%s exception_type=%s code=%s",
+                job_id,
+                root_import_id,
+                type(e).__name__,
+                emitted_error_code,
+            )
+
+        finally:
+            heartbeat_stop.set()
+            lease_heartbeat_task.cancel()
+            await asyncio.gather(lease_heartbeat_task, return_exceptions=True)
 
         # 如果 graph yield 了 error 事件，立刻标记失败
         if emitted_error:
-            _fail(emitted_error)
+            await _aggregate_root_failure(emitted_error, emitted_error_code)
+            # The graph already exhausted this step's shared physical-call
+            # budget. A durable-job redelivery would reset that budget and
+            # exceed the AC-013 limit; a new owner retry creates a new attempt.
+            _fail(emitted_error, terminal=True)
             return
 
         # 读取最终结果（从 result_collector 获取，避免 thread_id 不匹配）
         final_state_values = result_collector.get("final_state") or {}
 
         if final_state_values.get("error"):
-            _fail(final_state_values["error"])
+            from app.services.upload_retry_budget import safe_upload_error_message
+
+            error_code = _normalize_error_code(final_state_values["error"])
+            safe_message = safe_upload_error_message(error_code)
+            await _aggregate_root_failure(safe_message, error_code)
+            _fail(safe_message, terminal=True)
             return
 
         if not final_state_values and not saw_done:
+            await _aggregate_root_failure("任务未返回有效结果")
             _fail("任务未返回有效结果")
             return
 
@@ -1499,6 +1134,9 @@ async def submit_import_task(ctx, job_id: int):
 
             def _create_answer_jobs():
                 with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
                     ids = create_answer_generation_jobs(
                         conn,
                         job_id,
@@ -1512,64 +1150,138 @@ async def submit_import_task(ctx, job_id: int):
 
             answer_job_ids = await asyncio.to_thread(_create_answer_jobs)
         result_data["answer_job_count"] = len(answer_job_ids)
+
+        # R04：worker 完成时在持久化事务中聚合根状态并推进 revision；
+        # 同时把本次执行的各阶段检查点标记 succeeded（幂等）。
+        if root_import_id:
+            match_failed = int(final_state_values.get("match_failed", 0) or 0) > 0
+
+            def _finalize_root(success_result: str | None):
+                with get_db_connection() as conn:
+                    from app.services.upload_lifecycle import assert_upload_business_commit
+                    conn.execute("BEGIN IMMEDIATE")
+                    assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
+                    seen_units = conn.execute(
+                        "SELECT stage, unit_key FROM upload_stage_results "
+                        "WHERE import_id = ? AND job_id = ? AND input_version = ? AND status = 'running'",
+                        (root_import_id, job_id, input_state["_input_version"]),
+                    ).fetchall()
+                    for stage_row in seen_units:
+                        # AC-006：匹配模型失败 → match 阶段标记 failed（成果
+                        # 保留 → 根 partial_failed，失败步骤可重试），其余
+                        # 阶段照常 succeeded。
+                        if match_failed and stage_row["stage"] in (
+                            "resolve", "persist", "match", "save"
+                        ):
+                            conn.execute(
+                                "UPDATE upload_stage_results SET status = 'failed', "
+                                "error_code = 'MATCH_FAILED', updated_at = CURRENT_TIMESTAMP "
+                                "WHERE import_id = ? AND stage = ? AND unit_key = ? "
+                                "AND job_id = ? AND input_version = ? AND status = 'running'",
+                                (
+                                    root_import_id,
+                                    stage_row["stage"],
+                                    stage_row["unit_key"], job_id, input_state["_input_version"],
+                                ),
+                            )
+                            continue
+                        # F08：extract/tag 阶段把完整结果（含逐题数据）写进
+                        # 检查点，恢复时可复用不重跑 LLM。阶段名以 PHASES
+                        # （extract/fill/tag/match/save/cluster）为准。
+                        if stage_row["stage"] in ("extract", "fill"):
+                            stage_payload = json.dumps(
+                                {
+                                    "doc_type": final_state_values.get("doc_type", ""),
+                                    "data": extracted_data,
+                                    "url": final_state_values.get("saved_url", ""),
+                                },
+                                ensure_ascii=False,
+                            )
+                        elif stage_row["stage"] in ("tag", "classify"):
+                            stage_payload = json.dumps(
+                                {
+                                    "tagged_rows": final_state_values.get("tagged_rows", []),
+                                },
+                                ensure_ascii=False,
+                            )
+                        else:
+                            stage_payload = success_result
+                        conn.execute(
+                            "UPDATE upload_stage_results SET status = 'succeeded', "
+                            "result_json = ?, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE import_id = ? AND stage = ? AND unit_key = ? "
+                            "AND job_id = ? AND input_version = ? AND status = 'running'",
+                            (
+                                stage_payload,
+                                root_import_id,
+                                stage_row["stage"],
+                                stage_row["unit_key"], job_id, input_state["_input_version"],
+                            ),
+                        )
+                    conn.commit()
+
+            await asyncio.to_thread(_finalize_root, json.dumps(result_data, ensure_ascii=False))
+
+        if root_import_id and request_public_review and not final_state_values.get("public_contribution_request_id"):
+            def _ensure_contribution():
+                from app.services.public_contributions import create_public_contribution_request, bind_contribution_request_to_root
+                from app.services.upload_lifecycle import assert_upload_business_commit
+                with get_db_connection() as conn:
+                    try:
+                        conn.execute("BEGIN IMMEDIATE")
+                        assert_upload_business_commit(conn, import_id=root_import_id, job_id=job_id, generation=lease_generation, input_version=input_state["_input_version"])
+                        interview_id = final_state_values.get("saved_interview_id")
+                        if interview_id:
+                            contribution = create_public_contribution_request(conn, "interview", int(interview_id), int(payload.get("user_id") or 0), commit=False)
+                            bind_contribution_request_to_root(conn, import_id=root_import_id, contribution_request_id=int(contribution["id"]))
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
+            await asyncio.to_thread(_ensure_contribution)
+
         _complete(result=json.dumps(result_data, ensure_ascii=False))
 
+        # 根聚合必须在 complete 之后（读 jobs 最终态），且在当前 worker 进程中
+        if root_import_id:
+            def _aggregate():
+                with get_db_connection() as conn:
+                    return finalize_attempt_and_aggregate_root(
+                        conn,
+                        import_id=root_import_id,
+                        actor_id=int(payload.get("user_id") or 0),
+                        interview_id=final_state_values.get("saved_interview_id"),
+                        lease_generation=lease_generation,
+                    )
+
+            aggregated = await asyncio.to_thread(_aggregate)
+            logger.info(
+                "上传根任务推进: import_id=%s status=%s revision=%s",
+                root_import_id,
+                aggregated["status"],
+                aggregated["revision"],
+            )
+
     except Exception as e:
-        logger.exception(f"上传导入任务失败: job_id={job_id}")
-        _fail(str(e)[:500])
+        from app.services.upload_retry_budget import safe_upload_error_message
+
+        error_code = _normalize_error_code(e)
+        safe_message = safe_upload_error_message(error_code)
+        logger.warning(
+            "上传导入任务失败: job_id=%s exception_type=%s code=%s",
+            job_id,
+            type(e).__name__,
+            error_code,
+        )
+        await _aggregate_root_failure(safe_message, error_code)
+        _fail(safe_message)
 
 
-async def _refresh_answer_batch_parent(parent_job_id: int):
-    """Finalize a batch parent after one child answer job changes state."""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import ANSWER_BATCH_JOB_TYPE
-
-    def _refresh():
-        with get_db_connection() as conn:
-            parent = conn.execute(
-                "SELECT id FROM jobs WHERE id = ? AND job_type = ?",
-                (parent_job_id, ANSWER_BATCH_JOB_TYPE),
-            ).fetchone()
-            if not parent:
-                return
-            counts = conn.execute(
-                "SELECT "
-                "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, "
-                "SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed, "
-                "COUNT(*) AS total "
-                "FROM jobs WHERE parent_job_id = ?",
-                (parent_job_id,),
-            ).fetchone()
-            completed = int(counts["completed"] or 0)
-            failed = int(counts["failed"] or 0)
-            total = int(counts["total"] or 0)
-            if total and completed + failed == total:
-                status = "failed" if failed else "completed"
-                result = json.dumps(
-                    {"generated": completed, "failed": failed, "total": total},
-                    ensure_ascii=False,
-                )
-                conn.execute(
-                    "UPDATE jobs SET status = ?, progress_current = ?, progress_total = ?, "
-                    "result = ?, completed_at = CURRENT_TIMESTAMP, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status NOT IN ('completed', 'failed')",
-                    (
-                        status,
-                        completed + failed,
-                        total,
-                        result,
-                        parent_job_id,
-                    ),
-                )
-            else:
-                conn.execute(
-                    "UPDATE jobs SET status = 'running', progress_current = ?, progress_total = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending', 'running')",
-                    (completed + failed, total, parent_job_id),
-                )
-            conn.commit()
-
-    await asyncio.to_thread(_refresh)
+from app.worker_answer_tasks import (
+    _generate_answer_job,
+    _refresh_answer_batch_parent,
+    generate_recitation_task,
+)
 
 
 async def generate_answer_task(ctx, job_id: int):
@@ -1581,94 +1293,6 @@ async def generate_answer_task(ctx, job_id: int):
         result = await _generate_answer_job(ctx, job_id)
         _WORKER_DB_SEMAPHORE.record_success()
         return result
-
-
-async def _generate_answer_job(ctx, job_id: int):
-    """ARQ task: generate one answer with durable claim/retry semantics."""
-    from app.db.connection import get_db_connection
-    from app.services.job_lifecycle import (
-        ANSWER_GENERATION_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-    )
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=ANSWER_GENERATION_JOB_TYPE,
-            )
-            if not task:
-                return None, None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            conn.commit()
-            return dict(task), json.loads(payload_row["payload"]) if payload_row else None
-
-    claimed, payload = await asyncio.to_thread(_claim_and_load)
-    if not claimed:
-        logger.info("答案任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    def _finish(result=None):
-        with get_db_connection() as conn:
-            completed = complete_job(conn, job_id, worker_id, result=result)
-            conn.commit()
-            return completed
-
-    def _fail(error: str, terminal: bool = False):
-        with get_db_connection() as conn:
-            outcome = fail_job(
-                conn,
-                job_id,
-                worker_id,
-                error,
-                max_attempts=0 if terminal else 3,
-            )
-            conn.commit()
-            return outcome
-
-    if not payload:
-        _fail("答案任务数据不存在", terminal=True)
-        return {"status": "failed", "job_id": job_id}
-
-    try:
-        from app.services.submit_service import background_generate_answer
-
-        answer_result = await background_generate_answer(
-            int(payload["question_id"]),
-            payload["question_text"],
-            payload.get("user_id"),
-            raise_on_error=True,
-            skip_search=bool(payload.get("skip_search", False)),
-            llm_scope=payload.get("llm_scope", "user"),
-            search_scope=payload.get("search_scope", "user"),
-        )
-        _finish(
-            json.dumps(
-                {
-                    "question_id": int(payload["question_id"]),
-                    **(answer_result or {}),
-                },
-                ensure_ascii=False,
-            )
-        )
-        if payload.get("parent_job_id"):
-            await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
-        return {"status": "completed", "job_id": job_id}
-    except Exception as exc:
-        logger.exception("答案生成任务失败: job_id=%s", job_id)
-        outcome = _fail(str(exc)[:500])
-        if payload.get("parent_job_id"):
-            await _refresh_answer_batch_parent(int(payload["parent_job_id"]))
-        return {"status": outcome["status"], "job_id": job_id}
 
 
 async def interview_import_analysis_task(ctx, job_id: int):
@@ -1726,120 +1350,6 @@ async def interview_import_analysis_task(ctx, job_id: int):
         raise
 
 
-async def generate_recitation_task(ctx, job_id: int):
-    """ARQ task: generate and persist one user's recitation answer."""
-    from app.db.connection import get_db_connection, run_db
-    from app.db.queries import get_user_job_position
-    from app.services.answer_enrichment import (
-        prepare_recitation_prompt,
-    )
-    from app.services.job_lifecycle import (
-        RECITATION_GENERATION_JOB_TYPE,
-        claim_job,
-        complete_job,
-        default_worker_id,
-        fail_job,
-    )
-    from app.services.llm import _call_llm_with_retry
-    from app.services.resume_service import get_resume_text
-
-    worker_id = default_worker_id()
-
-    def _claim_and_load():
-        with get_db_connection() as conn:
-            task = claim_job(
-                conn,
-                job_id,
-                worker_id,
-                job_type=RECITATION_GENERATION_JOB_TYPE,
-            )
-            if not task:
-                return None, None, None
-            payload_row = conn.execute(
-                "SELECT payload FROM job_payloads WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            question = (
-                conn.execute(
-                    "SELECT question, ai_answer FROM question_bank WHERE id = ?",
-                    (int(json.loads(payload_row["payload"])["question_id"]),),
-                ).fetchone()
-                if payload_row
-                else None
-            )
-            conn.commit()
-            return (
-                dict(task),
-                json.loads(payload_row["payload"]) if payload_row else None,
-                dict(question) if question else None,
-            )
-
-    claimed, payload, question = await asyncio.to_thread(_claim_and_load)
-    if not claimed:
-        logger.info("背诵稿任务已被其他 worker 抢占或已结束: job_id=%s", job_id)
-        return {"status": "already_claimed_or_finished", "job_id": job_id}
-
-    def _finish(result=None):
-        with get_db_connection() as conn:
-            complete_job(conn, job_id, worker_id, result=result)
-            conn.commit()
-
-    def _fail(error):
-        with get_db_connection() as conn:
-            outcome = fail_job(conn, job_id, worker_id, error)
-            conn.commit()
-            return outcome
-
-    if not payload or not question or not question["ai_answer"]:
-        _fail("背诵稿任务数据不存在或公共答案为空")
-        return {"status": "failed", "job_id": job_id}
-
-    try:
-        user_id = int(payload["user_id"])
-        _, job_position = get_user_job_position(user_id)
-        resume_text = get_resume_text(user_id)
-        prompt, search_sources = await prepare_recitation_prompt(
-            question=question["question"],
-            reference_answer=question["ai_answer"],
-            job_position=job_position or "",
-            resume_text=resume_text,
-            user_id=user_id,
-            skip_search=bool(payload.get("skip_search", False)),
-        )
-        answer = await _call_llm_with_retry(prompt, user_id=user_id)
-
-        def _upsert():
-            with get_db_connection() as conn:
-                conn.execute(
-                    "INSERT INTO user_question_view "
-                    "(user_id, question_bank_id, user_answer, updated_at) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(user_id, question_bank_id) DO UPDATE SET "
-                    "user_answer = ?, updated_at = CURRENT_TIMESTAMP",
-                    (user_id, int(payload["question_id"]), answer, answer),
-                )
-                conn.commit()
-
-        await run_db(_upsert)
-        from app.core.cache import invalidate_master_bank_cache
-
-        await invalidate_master_bank_cache()
-        _finish(
-            json.dumps(
-                {
-                    "question_id": int(payload["question_id"]),
-                    "answer": answer,
-                    "search_sources": search_sources,
-                },
-                ensure_ascii=False,
-            )
-        )
-        return {"status": "completed", "job_id": job_id}
-    except Exception as exc:
-        logger.exception("背诵稿任务失败: job_id=%s", job_id)
-        outcome = _fail(str(exc)[:500])
-        return {"status": outcome["status"], "job_id": job_id}
-
-
 from app.worker_scheduled import (
     _mark_job_complete,
     scheduled_compaction_task,
@@ -1848,6 +1358,7 @@ from app.worker_scheduled import (
     scheduled_harness_turn_dispatch_task,
     scheduled_harness_event_publisher_task,
     scheduled_cluster_review_dispatch_task,
+    scheduled_upload_queue_reconcile_task,
     scheduled_source_health_task,
     run_db_retention,
     scheduled_db_retention_task,
@@ -1873,6 +1384,7 @@ scheduled_submit_job_dispatch_task = observed_cron_task(scheduled_submit_job_dis
 scheduled_harness_turn_dispatch_task = observed_cron_task(scheduled_harness_turn_dispatch_task)
 scheduled_harness_event_publisher_task = observed_cron_task(scheduled_harness_event_publisher_task)
 scheduled_cluster_review_dispatch_task = observed_cron_task(scheduled_cluster_review_dispatch_task)
+scheduled_upload_queue_reconcile_task = observed_cron_task(scheduled_upload_queue_reconcile_task)
 scheduled_source_health_task = observed_cron_task(scheduled_source_health_task)
 scheduled_db_retention_task = observed_cron_task(scheduled_db_retention_task)
 scheduled_wal_checkpoint_task = observed_cron_task(scheduled_wal_checkpoint_task)
@@ -1891,6 +1403,7 @@ class WorkerSettings:
         process_chat_side_effects_task,
         build_master_bank_task,
         submit_import_task,
+        credential_preflight_task,
         generate_answer_task,
         generate_recitation_task,
         quality_review_scan_task,
@@ -1899,6 +1412,7 @@ class WorkerSettings:
         scheduled_submit_job_dispatch_task,
         scheduled_harness_event_publisher_task,
         scheduled_cluster_review_dispatch_task,
+        scheduled_upload_queue_reconcile_task,
         cluster_review_task,
         scheduled_source_health_task,
         scheduled_db_retention_task,
@@ -1926,6 +1440,8 @@ class WorkerSettings:
         # 质量评估从数据库 outbox 选取“当前版本未审核”的聚类，
         # 不再由固定 frequency 前 20 条的 cron 直接生成清单。
         cron(scheduled_cluster_review_dispatch_task, minute={0, 30}),
+        # AC-007：残余队列对账（每分钟，幂等）
+        cron(scheduled_upload_queue_reconcile_task, minute=set(range(0, 60))),
         cron(scheduled_source_health_task, hour={3}, minute={40}),
         cron(scheduled_db_retention_task, hour={4}, minute={0}),
         cron(scheduled_wal_checkpoint_task, hour={4}, minute={10}),

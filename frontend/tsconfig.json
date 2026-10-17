@@ -1,9 +1,15 @@
 {
   "compilerOptions": {
+    "allowJs": true,
     "baseUrl": ".",
+    "checkJs": false,
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "skipLibCheck": true,
+    "strict": false
   },
   "include": ["src/**/*"]
 }

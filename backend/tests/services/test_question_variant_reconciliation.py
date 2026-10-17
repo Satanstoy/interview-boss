@@ -223,6 +223,30 @@ def test_apply_matched_rejects_cross_cluster_duplicate(test_db):
         )
 
 
+def test_apply_matched_accepts_string_cluster_id_from_matcher(test_db):
+    """Matcher IDs are strings; SQLite's integer registry must compare by value."""
+    from app.services.pipeline.writer import apply_matched
+
+    _insert_qb(test_db, 42, "目标题簇", [])
+    test_db.commit()
+
+    apply_matched(
+        test_db,
+        [{"cluster_id": "42", "question": "新原题", "url": "https://x.example"}],
+        "后端开发",
+        {},
+    )
+
+    row = test_db.execute(
+        "SELECT original_questions FROM question_bank WHERE id = 42"
+    ).fetchone()
+    assert json.loads(row[0]) == ["新原题"]
+    assert test_db.execute(
+        "SELECT question_bank_id FROM question_variant_owners "
+        "WHERE normalized_question = '新原题'"
+    ).fetchone()[0] == 42
+
+
 def test_sync_normalized_tables_removes_orphaned_provenance_entries(test_db):
     """归并移除原题后，遗留的 JSON 来源条目也必须被清掉。"""
     from app.services.question_variant_reconciliation import _sync_normalized_tables

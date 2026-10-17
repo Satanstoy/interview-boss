@@ -83,10 +83,25 @@ storage_cleanup_evaluations "$tmp_dir/backend/data/evaluations"
 evaluation_count="$(find "$tmp_dir/backend/data/evaluations" -maxdepth 1 -type f -name 'eval_*' | wc -l)"
 [[ "$evaluation_count" -eq 3 ]] || fail "expected 3 evaluation artifacts (minimum retention including the recent artifact), got $evaluation_count"
 assert_file "$tmp_dir/backend/data/evaluations/eval_history_20260824.json"
+touch -d "10 days ago" "$tmp_dir/backend/data/evaluations/rescore_summary.json"
+storage_cleanup_evaluations "$tmp_dir/backend/data/evaluations"
+assert_file "$tmp_dir/backend/data/evaluations/rescore_summary.json"
 
 archive_count="$(find "$tmp_dir/archive" -mindepth 1 -maxdepth 1 -type d -name 'interview-boss-backup-*' | wc -l)"
 [[ "$archive_count" -eq 1 ]] || fail "expected 1 recent full project archive, got $archive_count"
 [[ -d "$tmp_dir/archive/interview-boss-backup-20260824" ]] || fail "recent full project archive was removed"
+
+budget_dir="$tmp_dir/budget"
+mkdir -p "$budget_dir"
+for index in 1 2 3 4; do
+  dd if=/dev/zero of="$budget_dir/artifact_${index}.db" bs=1024 count=1 status=none
+done
+BACKUP_RETENTION_DAYS=9999 BACKUP_MIN_KEEP_FILES=1 \
+  storage_prune_file_family "$budget_dir" 'artifact_*.db' 'budget artifact' 1 2048
+budget_bytes="$(find "$budget_dir" -maxdepth 1 -type f -name 'artifact_*.db' -printf '%s\n' | awk '{total += $1} END {print total + 0}')"
+[[ "$budget_bytes" -le 2048 ]] || fail "byte budget was not enforced: ${budget_bytes} bytes"
+budget_count="$(find "$budget_dir" -maxdepth 1 -type f -name 'artifact_*.db' | wc -l)"
+[[ "$budget_count" -ge 1 ]] || fail "byte budget removed all protected artifacts"
 
 assert_file "$tmp_dir/backups/keep-unrelated.txt"
 assert_absent "$tmp_dir/backups/interview-boss_20260811_000000.db"

@@ -22,6 +22,15 @@ async def _get_redis_pool():
     return await create_pool(RedisSettings.from_dsn(REDIS_URL))
 
 
+async def enqueue_credential_preflight_job(job_id: int):
+    """将凭据预检任务入队（R01：真实 provider 探测）。"""
+    pool = await _get_redis_pool()
+    try:
+        return await pool.enqueue_job("credential_preflight_task", job_id)
+    finally:
+        await pool.close()
+
+
 async def enqueue_cluster_batch_job(job_id: int):
     """将一个持久化聚类攒批任务入队。"""
     pool = await _get_redis_pool()

@@ -89,9 +89,10 @@ FROM python-base AS app-runtime
 WORKDIR /app
 
 # 非 root 用户（在 COPY 之前创建，这样 --chown 才能生效）
-RUN useradd --create-home --shell /bin/false appuser && \
-    mkdir -p /app/backend/data && \
-    chown -R appuser:appuser /app
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
+    mkdir -p /app/backend/data /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser/.cache
 
 # 从 builder 复制 Python 依赖（--chown 避免后续 chown -R 的 overlayfs copy-up）
 COPY --from=deps-builder --chown=appuser /app/.venv /app/.venv
@@ -100,7 +101,7 @@ COPY --from=deps-builder --chown=appuser /app/.venv /app/.venv
 COPY --chown=appuser backend/ ./backend/
 COPY --chown=appuser evals/ ./evals/
 
-# Entrypoint（以 root 修复 bind mount 权限，然后切换到 appuser）
+# Entrypoint 只负责 exec；镜像本身以 appuser 启动，不能在运行时夺回 root。
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -109,6 +110,7 @@ ENV PYTHONPATH=/app/backend
 ENV REDIS_URL=redis://redis:6379/0
 ENV PATH="/app/.venv/bin:$PATH"
 
+USER appuser
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]
 
@@ -119,9 +121,10 @@ CMD ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "800
 FROM python-base AS test-runtime
 WORKDIR /app
 
-RUN useradd --create-home --shell /bin/false appuser && \
-    mkdir -p /app/backend/data && \
-    chown -R appuser:appuser /app
+RUN groupadd --gid 1000 appuser && \
+    useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
+    mkdir -p /app/backend/data /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser/.cache
 
 COPY --from=deps-builder-dev --chown=appuser /app/.venv /app/.venv
 
@@ -132,6 +135,8 @@ COPY --chown=appuser frontend/package.json ./backend/frontend/
 COPY --chown=appuser Dockerfile docker-compose.yml .dockerignore pyproject.toml uv.lock ./
 COPY --chown=appuser nginx/ ./nginx/
 COPY --chown=appuser deploy/ ./deploy/
+COPY --chown=appuser scripts/ ./scripts/
+COPY --chown=appuser docs/architecture/schema.md ./docs/architecture/schema.md
 
 COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -140,6 +145,7 @@ ENV PYTHONPATH=/app/backend
 ENV REDIS_URL=redis://redis:6379/0
 ENV PATH="/app/.venv/bin:$PATH"
 
+USER appuser
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 
@@ -147,5 +153,10 @@ CMD ["uv", "run", "pytest", "backend/tests/", "-v"]
 FROM nginx:1.29-alpine AS nginx-runtime
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-RUN chmod -R a+rX /usr/share/nginx/html
-EXPOSE 80
+RUN chmod -R a+rX /usr/share/nginx/html && \
+    mkdir -p /tmp/nginx/client_temp /tmp/nginx/proxy_temp /var/cache/nginx && \
+    chown -R nginx:nginx /tmp/nginx /var/cache/nginx
+USER nginx
+EXPOSE 8080
+ENTRYPOINT ["nginx"]
+CMD ["-g", "daemon off;"]

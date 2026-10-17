@@ -32,6 +32,44 @@
                 @click="sourceType = tab.value"
               >{{ tab.label }}</Button>
             </div>
+            <section v-if="reviewItem" class="mb-4 space-y-4 rounded-lg border border-border p-4">
+              <div class="flex justify-between items-center">
+                <h3 class="font-semibold">审核详情</h3>
+                <Button variant="ghost" size="sm" @click="closeReview" :disabled="reviewBusy">返回列表</Button>
+              </div>
+              <p class="text-xs text-muted-foreground">{{ reviewItem.source_type === 'jd' ? 'JD 公司、来源和薪资需填写确认。' : '面经默认保留公司和轮次，可修改或清空；来源链接需填写确认。' }}请预览实际发布内容。</p>
+              <div v-for="field in sourceFields" :key="field.key">
+                <label :for="`review-source-${field.key}`" class="block text-sm mb-1">{{ field.label }}</label>
+                <input :id="`review-source-${field.key}`" v-model="draft.source[field.key]" :disabled="reviewBusy || reviewItem.legacy" class="w-full rounded border border-border bg-background px-3 py-2 text-sm" />
+              </div>
+              <div v-for="(item, index) in draft.items" :key="item.item_id" class="space-y-2 rounded border border-border p-3">
+                <label v-if="!reviewItem.legacy" class="flex gap-2 items-center text-sm">
+                  <input v-model="item.excluded" type="checkbox" :aria-label="`排除题目 ${index + 1}`" :disabled="reviewBusy" />排除题目 {{ index + 1 }}
+                </label>
+                <label :for="`review-question-${index}`" class="block text-sm">题干 {{ index + 1 }}</label>
+                <textarea :id="`review-question-${index}`" v-model="item.question" :disabled="reviewBusy || reviewItem.legacy" class="w-full rounded border border-border bg-background px-3 py-2 text-sm" />
+                <div v-for="field in itemFields" :key="field.key">
+                  <label :for="`review-${field.key}-${index}`" class="block text-sm">{{ field.label }} {{ index + 1 }}</label>
+                  <input :id="`review-${field.key}-${index}`" v-model="item[field.key]" :disabled="reviewBusy || reviewItem.legacy" class="w-full rounded border border-border bg-background px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <p v-if="reviewItem.legacy" class="text-sm text-muted-foreground">历史单题沿用提交的题干与分类；私人来源及私人模型答案不公开。</p>
+              <p v-if="reviewError" data-testid="review-error" class="text-sm text-destructive">{{ reviewError }}</p>
+              <Button v-if="reviewConflict" variant="outline" size="sm" @click="openReview(reviewItem)" :disabled="reviewBusy">重新读取详情（替换当前编辑）</Button>
+              <div class="flex gap-2">
+                <Button @click="previewReview" :disabled="reviewBusy || reviewConflict">预览公开内容</Button>
+                <Button @click="confirmReview" :disabled="reviewBusy || !preview || reviewConflict" class="bg-emerald-500 text-white">确认通过</Button>
+              </div>
+              <div v-if="preview" data-testid="review-projection-preview" class="rounded border border-border p-3 text-sm">
+                <h4 class="font-semibold mb-2">实际公开内容</h4>
+                <p v-for="(value, key) in preview.source" :key="key">{{ sourceLabel(key) }}：{{ value || '不公开 / 暂缺' }}</p>
+                <div v-for="item in preview.items" :key="item.item_id" class="mt-3 border-t border-border pt-2">
+                  <p>{{ item.question }}</p>
+                  <p v-for="original in originalQuestions(item)" :key="original" class="mt-1 text-muted-foreground">原题：{{ original }}</p>
+                  <p>{{ item.cat1 }} / {{ item.cat2 }} · {{ item.difficulty }} · {{ Array.isArray(item.tags) ? item.tags.join('、') : item.tags }}</p>
+                </div>
+              </div>
+            </section>
             <!-- Loading -->
             <div v-if="loading" class="flex flex-col items-center justify-center py-16 gap-3">
               <svg class="animate-spin h-6 w-6 text-primary-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -54,6 +92,7 @@
               <div
                 v-for="item in items"
                 :key="item.legacy ? `legacy-${item.id}` : `contribution-${item.id}`"
+                :data-review-key="reviewKey(item)"
                 class="border border-border rounded-xl p-4 hover:border-primary/30 hover:shadow-sm transition-all duration-200 animate-fade-in"
               >
                 <div class="flex items-start justify-between gap-3">
@@ -84,14 +123,14 @@
                   </div>
                   <div class="flex gap-2 shrink-0">
                     <Button
-                      @click="handleApprove(item.id)"
-                      :disabled="processingIds.has(item.id)"
+                      @click="openReview(item)"
+                      :disabled="reviewBusy || processingIds.has(reviewKey(item))"
                       size="sm"
                       class="bg-emerald-500 text-white hover:bg-emerald-600"
                     >通过</Button>
                     <Button
-                      @click="handleReject(item.id)"
-                      :disabled="processingIds.has(item.id)"
+                      @click="handleReject(item)"
+                      :disabled="reviewBusy || processingIds.has(reviewKey(item))"
                       variant="destructive"
                       size="sm"
                     >拒绝</Button>
@@ -116,8 +155,8 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-import { fetchPublicContributions, approvePublicContribution, rejectPublicContribution, fetchPendingQuestions, approveQuestion, rejectQuestion } from '@/api/index.js'
+import { computed, ref, watch } from 'vue'
+import { fetchPublicContributions, fetchPublicContribution, previewPublicContribution, approvePublicContribution, rejectPublicContribution, previewPendingQuestion, approveQuestion, rejectQuestion } from '@/api/index.js'
 import { useToast } from '@/composables/useNotification.js'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -142,18 +181,8 @@ watch(sourceType, () => { if (props.visible) loadPending() })
 async function loadPending() {
   loading.value = true
   try {
-    const [data, legacyData] = await Promise.all([
-      fetchPublicContributions({ sourceType: sourceType.value }),
-      !sourceType.value || sourceType.value === 'interview' ? fetchPendingQuestions() : Promise.resolve({ items: [] }),
-    ])
-    const contributionItems = data.items || []
-    const legacyItems = (legacyData.items || []).map(item => ({
-      ...item,
-      source_type: 'interview',
-      legacy: true,
-      summary: { company: '', round: '', job_title: '', item_count: 1, question_previews: [{ question: item.question }] },
-    }))
-    items.value = [...contributionItems, ...legacyItems]
+    const data = await fetchPublicContributions({ sourceType: sourceType.value })
+    items.value = data.items || []
   } catch (e) {
     showError('加载公共贡献失败: ' + (e.message || '未知错误'))
   } finally {
@@ -161,38 +190,137 @@ async function loadPending() {
   }
 }
 
-async function handleApprove(id) {
-  processingIds.value = new Set(processingIds.value).add(id)
+function reviewKey(item) {
+  return `${item.legacy ? 'legacy' : 'contribution'}-${item.id}`
+}
+
+const reviewItem = ref(null)
+const reviewBusy = ref(false)
+const reviewError = ref('')
+const reviewConflict = ref(false)
+const revision = ref(null)
+const draft = ref({ source: {}, items: [] })
+const preview = ref(null)
+let previewPayload = null
+let reviewGeneration = 0
+const fieldLabels = { company: '公开公司', round: '公开轮次', source_url: '公开来源 URL', focus: '公开考察重点', difficulty: '公开难度', season: '公开招聘季', job_title: '公开岗位名称', tech_stack: '公开技术栈', bonus: '公开加分项', position: '公开职位', salary: '公开薪资' }
+const sourceFields = computed(() => (reviewItem.value?.legacy ? [] : reviewItem.value?.source_type === 'jd'
+  ? ['company', 'job_title', 'tech_stack', 'bonus', 'position', 'salary', 'source_url']
+  : ['company', 'round', 'focus', 'difficulty', 'season', 'source_url']).map(key => ({ key, label: fieldLabels[key] })))
+const itemFields = [{ key: 'cat1', label: '一级分类' }, { key: 'cat2', label: '二级分类' }, { key: 'tags', label: '标签（逗号分隔）' }, { key: 'difficulty', label: '难度' }]
+const sourceLabel = key => fieldLabels[key] || key
+function originalQuestions(item) {
+  try { return JSON.parse(item.original_questions || '[]') } catch { return [] }
+}
+watch(draft, () => { preview.value = null; previewPayload = null; reviewGeneration++ }, { deep: true, flush: 'sync' })
+watch(() => props.visible, visible => { if (!visible) closeReview() })
+
+function closeReview() {
+  reviewGeneration++
+  reviewItem.value = null
+  preview.value = null
+  previewPayload = null
+  reviewError.value = ''
+  reviewConflict.value = false
+}
+
+async function openReview(item) {
+  const generation = ++reviewGeneration
+  reviewBusy.value = true
+  reviewError.value = ''
+  reviewConflict.value = false
+  preview.value = null
+  previewPayload = null
   try {
-    const item = items.value.find(candidate => candidate.id === id)
-    if (item?.legacy) await approveQuestion(id)
-    else await approvePublicContribution(id)
-    items.value = items.value.filter(i => i.id !== id)
-    success('已通过审核')
-    emit('reviewed')
-  } catch (e) {
-    showError('审核失败: ' + (e.message || '未知错误'))
-  } finally {
-    const next = new Set(processingIds.value)
-    next.delete(id)
-    processingIds.value = next
+    const detail = item.legacy ? await previewPendingQuestion(item.id) : await fetchPublicContribution(item.id)
+    if (generation !== reviewGeneration) return
+    if (!item.legacy && (!Number.isInteger(detail.revision) || detail.revision < 1)) throw new Error('审核详情缺少有效版本，请重新加载')
+    reviewItem.value = item
+    revision.value = detail.revision
+    const source = detail.snapshot?.source || {}
+    const fields = item.legacy ? [] : item.source_type === 'jd'
+      ? ['company', 'job_title', 'tech_stack', 'bonus', 'position', 'salary', 'source_url']
+      : ['company', 'round', 'focus', 'difficulty', 'season', 'source_url']
+    const confirmationFields = item.source_type === 'jd'
+      ? ['company', 'salary', 'source_url']
+      : ['source_url']
+    draft.value = {
+      source: Object.fromEntries(fields.map(key => [key, confirmationFields.includes(key) ? '' : source[key] ?? ''])),
+      items: (item.legacy ? [{ id: item.id, snapshot: detail.projection }] : item.source_type === 'jd' ? [] : detail.items || []).map(row => ({
+        item_id: row.id, question: row.snapshot?.question || '', cat1: row.snapshot?.cat1 || '', cat2: row.snapshot?.cat2 || '',
+        tags: Array.isArray(row.snapshot?.tags) ? row.snapshot.tags.join(', ') : row.snapshot?.tags || '', difficulty: row.snapshot?.difficulty || '', excluded: false,
+      })),
+    }
+  } catch (error) {
+    reviewError.value = error.message || '读取审核详情失败'
+    showError(reviewError.value)
+  } finally { reviewBusy.value = false }
+}
+
+function reviewPayload() {
+  return {
+    expected_revision: revision.value,
+    excluded_item_ids: draft.value.items.filter(item => item.excluded).map(item => item.item_id),
+    review_fields: {
+      source: Object.fromEntries(Object.entries(draft.value.source).map(([key, value]) => [key, String(value).trim() || null])),
+      items: draft.value.items.map(({ item_id, question, cat1, cat2, difficulty, tags }) => ({ item_id, question, cat1, cat2, difficulty, tags: tags.split(/[,，]/).map(tag => tag.trim()).filter(Boolean) })),
+    },
   }
 }
 
-async function handleReject(id) {
-  processingIds.value = new Set(processingIds.value).add(id)
+async function previewReview() {
+  reviewBusy.value = true
+  reviewError.value = ''
+  const generation = reviewGeneration
   try {
-    const item = items.value.find(candidate => candidate.id === id)
+    const payload = reviewPayload()
+    const result = reviewItem.value.legacy
+      ? await previewPendingQuestion(reviewItem.value.id)
+      : await previewPublicContribution(reviewItem.value.id, payload)
+    if (generation !== reviewGeneration) return
+    preview.value = reviewItem.value.legacy ? { source: {}, items: [{ item_id: reviewItem.value.id, ...result.projection }] } : result.projection
+    previewPayload = payload
+  } catch (error) {
+    reviewError.value = error.message || '预览失败'
+    if (error.status === 409) reviewConflict.value = true
+  } finally { reviewBusy.value = false }
+}
+
+async function confirmReview() {
+  if (!reviewItem.value || !preview.value || !previewPayload || reviewConflict.value) return
+  const item = reviewItem.value
+  const key = reviewKey(item)
+  reviewBusy.value = true
+  reviewError.value = ''
+  try {
+    if (item.legacy) await approveQuestion(item.id)
+    else await approvePublicContribution(item.id, previewPayload)
+    items.value = items.value.filter(row => reviewKey(row) !== key)
+    closeReview()
+    success('已通过审核')
+    emit('reviewed')
+  } catch (error) {
+    reviewError.value = error.message || '审核失败'
+    if (error.status === 409) reviewConflict.value = true
+    showError(reviewError.value)
+  } finally { reviewBusy.value = false }
+}
+
+async function handleReject(item) {
+  const id = item.id
+  const key = reviewKey(item)
+  processingIds.value = new Set(processingIds.value).add(key)
+  try {
     if (item?.legacy) await rejectQuestion(id)
     else await rejectPublicContribution(id)
-    items.value = items.value.filter(i => i.id !== id)
+    items.value = items.value.filter(i => reviewKey(i) !== key)
     success('已拒绝')
     emit('reviewed')
   } catch (e) {
     showError('操作失败: ' + (e.message || '未知错误'))
   } finally {
     const next = new Set(processingIds.value)
-    next.delete(id)
+    next.delete(key)
     processingIds.value = next
   }
 }
