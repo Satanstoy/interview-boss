@@ -1,8 +1,8 @@
 # InterviewBoss SQLite Schema
 
-> Generated: 2026-10-08
-> Source migration commit: d8952da4
-> Latest migration: 127 (reconcile_branch_identities)
+> Generated: 2026-10-17
+> Source migration commit: 402bb416
+> Latest migration: 129 (answer_review)
 > foreign_key_check: 0
 > Source of truth: `backend/app/db/migrations/` applied to a fresh in-memory SQLite database.
 > Runtime: SQLite WAL with `PRAGMA foreign_keys=ON`; soft-deleted rows use `deleted_at IS NULL` filters where documented by the owning service.
@@ -135,6 +135,8 @@
 | 125 | `upload_llm_api_format` | yes |
 | 126 | `question_promotions` | yes |
 | 127 | `reconcile_branch_identities` | yes |
+| 128 | `python_tags` | yes |
+| 129 | `answer_review` | yes |
 
 ## Tables (95)
 
@@ -469,7 +471,7 @@
 - Indexes: `idx_quality_issue_fingerprint` (issue_fingerprint); `idx_quality_issue_review_version` (qb_id, review_version, status); `uq_quality_issue_active_fingerprint` UNIQUE partial (issue_fingerprint); `uq_quality_issue_review_version` UNIQUE partial (qb_id, review_version, issue_type, variant_key)
 
 ### `question_bank`
-- Columns: `id`:INTEGER, `question`:TEXT, `cat1`:TEXT, `cat2`:TEXT, `tags`:TEXT, `difficulty`:TEXT, `frequency`:INTEGER, `ai_answer`:TEXT, `sources`:TEXT, `original_questions`:TEXT, `original_question_sources`:TEXT, `is_starred`:INTEGER, `owner_id`:INTEGER, `submitted_by`:INTEGER, `status`:TEXT, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `deleted_at`:TIMESTAMP, `job_position`:TEXT, `question_manually_edited`:INTEGER, `embedding`:BLOB, `cluster_id`:INTEGER, `embedding_model`:TEXT, `embedding_dim`:INTEGER, `answer_sources`:TEXT, `cluster_label`:TEXT
+- Columns: `id`:INTEGER, `question`:TEXT, `cat1`:TEXT, `cat2`:TEXT, `tags`:TEXT, `difficulty`:TEXT, `frequency`:INTEGER, `ai_answer`:TEXT, `sources`:TEXT, `original_questions`:TEXT, `original_question_sources`:TEXT, `is_starred`:INTEGER, `owner_id`:INTEGER, `submitted_by`:INTEGER, `status`:TEXT, `created_at`:TIMESTAMP, `updated_at`:TIMESTAMP, `deleted_at`:TIMESTAMP, `job_position`:TEXT, `question_manually_edited`:INTEGER, `embedding`:BLOB, `cluster_id`:INTEGER, `embedding_model`:TEXT, `embedding_dim`:INTEGER, `answer_sources`:TEXT, `cluster_label`:TEXT, `answer_review_status`:TEXT, `answer_review_issues`:TEXT
 - Foreign keys: `submitted_by` -> `users`.`id` (NO ACTION); `owner_id` -> `users`.`id` (NO ACTION)
 - Indexes: `idx_qb_cluster_id` (cluster_id); `idx_qb_deleted_owner_status` (deleted_at, owner_id, status); `idx_qb_job_position_visibility` (job_position, deleted_at, owner_id, status); `idx_qb_job_position` (job_position); `idx_qb_owner_status_position` (owner_id, status, job_position); `idx_qb_owner_status` (owner_id, status); `idx_qb_visibility_review_state` (visibility, review_state, job_position, deleted_at)
 

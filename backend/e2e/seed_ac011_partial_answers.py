@@ -14,7 +14,7 @@ from app.services.question_resolution import record_resolution
 
 
 USERNAME = "ac011_partial_answers"
-PASSWORD = "Ac011-partial-answer-real-stack-123!"
+TEST_PASSWORD = "Ac011-partial-answer-real-stack-123!"
 IMPORT_ID = "imp-ac011-partial-answer-real-stack"
 COMPANY = "AC011 部分答案恢复演练"
 SOURCE_URL = "https://ac011.example/partial-answer"
@@ -33,7 +33,7 @@ def main() -> None:
                 conn.execute(
                     "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                     "VALUES (?, ?, ?, 0, 'private') RETURNING id",
-                    (USERNAME, hash_password(PASSWORD), f"{USERNAME}@example.test"),
+                    (USERNAME, hash_password(TEST_PASSWORD), f"{USERNAME}@example.test"),
                 ).fetchone()["id"]
             )
         else:
@@ -255,7 +255,7 @@ def main() -> None:
                     "import_id": IMPORT_ID,
                     "user_id": user_id,
                     "username": USERNAME,
-                    "password": PASSWORD,
+                    "password": TEST_PASSWORD,
                     "interview_id": interview_id,
                     "position_id": position_id,
                     "submit_job_id": submit_job_id,

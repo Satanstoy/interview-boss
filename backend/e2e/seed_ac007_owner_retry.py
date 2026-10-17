@@ -13,7 +13,7 @@ from app.services.upload_repository import UPLOAD_PIPELINE_VERSION_DEFAULT
 
 OWNER = "ac007_owner"
 OTHER = "ac007_other"
-PASSWORD = "Ac007-owner-retry-real-stack-123!"
+TEST_PASSWORD = "Ac007-owner-retry-real-stack-123!"
 IMPORT_ID = "imp-ac007-owner-retry-real-stack"
 POSITION = "agent开发/大模型应用开发/大模型开发"
 CHECKPOINT_QUESTION = "AC007 checkpoint question: explain database transaction isolation."
@@ -30,7 +30,7 @@ def main() -> None:
                 cursor = conn.execute(
                     "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                     "VALUES (?, ?, ?, 0, 'private')",
-                    (username, hash_password(PASSWORD), f"{username}@example.test"),
+                    (username, hash_password(TEST_PASSWORD), f"{username}@example.test"),
                 )
                 user_id = int(cursor.lastrowid)
             else:
@@ -223,7 +223,7 @@ def main() -> None:
             "owner_id": user_ids[OWNER],
             "other_username": OTHER,
             "other_id": user_ids[OTHER],
-            "password": PASSWORD,
+            "password": TEST_PASSWORD,
             "admin_username": admin_username,
             "admin_id": int(admin["id"]),
             "job_id": job_id,

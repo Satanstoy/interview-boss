@@ -177,7 +177,10 @@ class TestBUG004SubmitRetry:
             mock_response.choices = [MagicMock(message=MagicMock(content='{"result": "ok"}'))]
             return mock_response
 
-        with patch('app.services.llm.client') as mock_client:
+        with (
+            patch('app.services.llm.client') as mock_client,
+            patch('app.services.llm.resolve_api_format_async', new_callable=AsyncMock, return_value='chat'),
+        ):
             mock_client.chat.completions.create = failing_then_success
             result = await _call_llm_with_retry("test prompt")
             assert call_count == 3  # 前两次失败，第三次成功

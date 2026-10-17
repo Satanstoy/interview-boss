@@ -59,13 +59,15 @@ class TestProviderDetection:
         assert _should_use_response_format("https://example.com/v1") is False
         assert _should_use_response_format("https://example.com/anthropic") is False
 
-    def test_make_client_openai(self):
+    def test_make_client_openai(self, monkeypatch):
         from app.services.llm import _make_client
+        monkeypatch.setattr('app.core.outbound_url._resolved_addresses', lambda host, port: {'93.184.216.34'})
         c = _make_client("test-key", "https://example.com/v1", 10.0, "openai")
         assert isinstance(c, AsyncOpenAI)
 
-    def test_make_client_anthropic(self):
+    def test_make_client_anthropic(self, monkeypatch):
         from app.services.llm import _make_client
+        monkeypatch.setattr('app.core.outbound_url._resolved_addresses', lambda host, port: {'93.184.216.34'})
         c = _make_client("test-key", "https://example.com/anthropic", 10.0, "anthropic")
         assert isinstance(c, AsyncAnthropic)
 

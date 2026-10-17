@@ -18,6 +18,8 @@ x-app-build: &app-build
   dockerfile: Dockerfile
   target: app-runtime
   network: host
+  entitlements:
+    - network.host
   args:
     BUILDKIT_INLINE_CACHE: "1"
     NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
@@ -192,6 +194,8 @@ services:
       dockerfile: Dockerfile
       target: test-runtime
       network: host
+      entitlements:
+        - network.host
       args:
         BUILDKIT_INLINE_CACHE: "1"
         NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
@@ -208,6 +212,7 @@ services:
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=test
+      - TEST_SOURCE_REPO_ROOT=/source
     volumes:
       - ./backend:/app/backend:ro
       - test-data:/app/backend/data
@@ -216,6 +221,12 @@ services:
       - ./scripts:/app/scripts:ro
       # schema 文档新鲜度测试需要读取仓库 docs/（否则容器只看到镜像内旧副本）
       - ./docs:/app/docs:ro
+      - ./.github:/app/.github:ro
+      - ./oauth-gateway:/app/oauth-gateway:ro
+      - ./docker-compose.real-e2e.yml:/app/docker-compose.real-e2e.yml:ro
+      - ./README.md:/app/README.md:ro
+      - ./.gitignore:/app/.gitignore:ro
+      - .:/source:ro
       - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network
@@ -236,6 +247,8 @@ services:
       dockerfile: Dockerfile
       target: nginx-runtime
       network: host
+      entitlements:
+        - network.host
       args:
         BUILDKIT_INLINE_CACHE: "1"
         NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}

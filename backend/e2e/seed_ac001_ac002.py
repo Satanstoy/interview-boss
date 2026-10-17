@@ -10,7 +10,7 @@ from app.db.connection import get_db_connection
 
 U1 = "ac001_ac002_u1"
 U2 = "ac001_ac002_u2"
-PASSWORD = "Ac001-ac002-real-stack-123!"
+TEST_PASSWORD = "Ac001-ac002-real-stack-123!"
 P1 = "AC001 后端 P1"
 P2 = "AC001 数据 P2"
 SEASONS = ("2025秋招", "2026春招")
@@ -52,7 +52,7 @@ def main() -> None:
                     "share_default, current_position_id) VALUES (?, ?, ?, 0, 'private', ?)",
                     (
                         username,
-                        hash_password(PASSWORD),
+                        hash_password(TEST_PASSWORD),
                         f"{username}@example.test",
                         position_ids[P1],
                     ),
@@ -194,7 +194,7 @@ def main() -> None:
                 {
                     "u1": U1,
                     "u2": U2,
-                    "password": PASSWORD,
+                    "password": TEST_PASSWORD,
                     "u1_id": user_ids[U1],
                     "u2_id": user_ids[U2],
                     "p1": {"id": position_ids[P1], "name": P1},

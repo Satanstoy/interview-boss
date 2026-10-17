@@ -10,7 +10,7 @@ from app.db.connection import get_db_connection
 
 
 USERNAME = "ac013_error_contract"
-PASSWORD = "Ac013-error-contract-real-stack-123!"
+TEST_PASSWORD = "Ac013-error-contract-real-stack-123!"
 
 
 def main() -> None:
@@ -21,7 +21,7 @@ def main() -> None:
                 conn.execute(
                     "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                     "VALUES (?, ?, ?, 0, 'private') RETURNING id",
-                    (USERNAME, hash_password(PASSWORD), f"{USERNAME}@example.test"),
+                    (USERNAME, hash_password(TEST_PASSWORD), f"{USERNAME}@example.test"),
                 ).fetchone()["id"]
             )
         else:
@@ -57,7 +57,7 @@ def main() -> None:
         conn.execute("UPDATE users SET current_position_id = ? WHERE id = ?", (position_id, user_id))
         conn.commit()
 
-    print(json.dumps({"username": USERNAME, "password": PASSWORD}, ensure_ascii=False))
+    print(json.dumps({"username": USERNAME, "password": TEST_PASSWORD}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
