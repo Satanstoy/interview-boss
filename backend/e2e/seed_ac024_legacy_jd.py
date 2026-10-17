@@ -10,7 +10,7 @@ from app.db.connection import get_db_connection
 
 OWNER = "ac024_legacy_jd_owner"
 OTHER = "ac024_legacy_jd_other"
-PASSWORD = "Ac024-legacy-jd-real-stack-123!"
+TEST_PASSWORD = "Ac024-legacy-jd-real-stack-123!"
 SOURCE_URL = "https://ac024.example/retried/private-source"
 PUBLIC_SOURCE_URL = "https://ac024.example/reviewed/public-jd"
 OLD_PUBLIC_JD_URL = "https://ac024.example/legacy/approved-jd"
@@ -43,7 +43,7 @@ def main() -> None:
                 conn.execute(
                     "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                     "VALUES (?, ?, ?, 0, 'private') RETURNING id",
-                    (username, hash_password(PASSWORD), f"{username}@example.test"),
+                    (username, hash_password(TEST_PASSWORD), f"{username}@example.test"),
                 ).fetchone()["id"]
             )
 

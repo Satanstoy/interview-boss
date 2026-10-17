@@ -14,7 +14,7 @@ from app.db.connection import get_db_connection
 
 
 OWNER_USERNAME = "ac007_queue_owner"
-PASSWORD = "Ac007-queue-real-stack-123!"
+TEST_PASSWORD = "Ac007-queue-real-stack-123!"
 PUBLIC_URL = "https://ac007-queue.example/public"
 PRIVATE_URL = "https://ac007-queue.example/private"
 POSITION = "后端"
@@ -28,7 +28,7 @@ def _user_id(conn, username: str, *, is_admin: bool = False) -> int:
     cursor = conn.execute(
         "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
         "VALUES (?, ?, ?, ?, 'private')",
-        (username, hash_password(PASSWORD), f"{username}@example.test", int(is_admin)),
+        (username, hash_password(TEST_PASSWORD), f"{username}@example.test", int(is_admin)),
     )
     return int(cursor.lastrowid)
 

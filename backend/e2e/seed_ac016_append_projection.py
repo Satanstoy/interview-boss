@@ -11,7 +11,7 @@ from app.db.connection import get_db_connection
 
 
 USERNAME = "ac016_owner"
-PASSWORD = "Ac016-append-projection-real-stack-123!"
+TEST_PASSWORD = "Ac016-append-projection-real-stack-123!"
 SOURCE_URL = "https://ac016.example/interview/shared"
 QUESTION_A = "AC016 question A: how does a distributed lock prevent stale writes?"
 
@@ -43,7 +43,7 @@ def main() -> None:
             conn.execute(
                 "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                 "VALUES (?, ?, ?, 0, 'private') RETURNING id",
-                (USERNAME, hash_password(PASSWORD), f"{USERNAME}@example.test"),
+                (USERNAME, hash_password(TEST_PASSWORD), f"{USERNAME}@example.test"),
             ).fetchone()["id"]
         )
         interview_id = int(
