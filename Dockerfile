@@ -121,6 +121,9 @@ CMD ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "800
 FROM python-base AS test-runtime
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid 1000 --create-home --shell /bin/false appuser && \
     mkdir -p /app/backend/data /home/appuser/.cache && \

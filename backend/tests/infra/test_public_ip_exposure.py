@@ -1,4 +1,5 @@
 import subprocess
+import os
 from pathlib import Path
 
 
@@ -7,14 +8,15 @@ PUBLIC_IP = ".".join(("81", "71", "140", "248"))
 
 
 def test_public_runtime_and_documentation_do_not_contain_origin_ip():
+    source_root = Path(os.environ.get("TEST_SOURCE_REPO_ROOT", REPO_ROOT))
     tracked_paths = subprocess.check_output(
-        ["git", "ls-files", "-z"], cwd=REPO_ROOT
+        ["git", "-c", f"safe.directory={source_root}", "ls-files", "-z"], cwd=source_root
     ).decode().split("\0")
     leaked = []
     for relative_path in tracked_paths:
         if not relative_path:
             continue
-        path = REPO_ROOT / relative_path
+        path = source_root / relative_path
         try:
             if PUBLIC_IP in path.read_text(encoding="utf-8"):
                 leaked.append(path)

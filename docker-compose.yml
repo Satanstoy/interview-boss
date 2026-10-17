@@ -212,6 +212,7 @@ services:
       - HF_HUB_OFFLINE=1
       - HF_HOME=/home/appuser/.cache/huggingface
       - ENV=test
+      - TEST_SOURCE_REPO_ROOT=/source
     volumes:
       - ./backend:/app/backend:ro
       - test-data:/app/backend/data
@@ -223,6 +224,9 @@ services:
       - ./.github:/app/.github:ro
       - ./oauth-gateway:/app/oauth-gateway:ro
       - ./docker-compose.real-e2e.yml:/app/docker-compose.real-e2e.yml:ro
+      - ./README.md:/app/README.md:ro
+      - ./.gitignore:/app/.gitignore:ro
+      - .:/source:ro
       - ${HF_CACHE_DIR:-/home/ubuntu/.cache/huggingface}:/home/appuser/.cache/huggingface:ro
     networks:
       - data-network
