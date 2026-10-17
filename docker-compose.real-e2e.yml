@@ -83,6 +83,11 @@ services:
       network: host
       entitlements:
         - network.host
+      args:
+        NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
+        PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.cloud.tencent.com/pypi/simple/}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        APK_MIRROR: ${APK_MIRROR:-mirrors.aliyun.com}
     image: interview-boss-app:real-e2e
     environment: *e2e-environment
     command: ["uv", "run", "uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
@@ -172,6 +177,8 @@ services:
     build:
       context: ./oauth-gateway
       dockerfile: Dockerfile
+      args:
+        PYPI_MIRROR: ${PYPI_MIRROR:-https://mirrors.cloud.tencent.com/pypi/simple/}
     image: interview-boss-oauth-gateway:real-e2e
     environment:
       ENV: test
@@ -219,6 +226,8 @@ services:
       network: host
       entitlements:
         - network.host
+      args:
+        NPM_MIRROR: ${NPM_MIRROR:-https://registry.npmmirror.com}
     image: interview-boss-nginx:real-e2e
     volumes:
       - ./nginx/nginx.real-e2e.conf:/etc/nginx/nginx.conf:ro
