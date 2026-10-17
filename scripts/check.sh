@@ -148,7 +148,8 @@ ensure_test_image() {
   check_test_build_space || return 1
   ensure_test_builder || return 1
 
-  if compose_test build --builder "$TEST_BUILDKIT_BUILDER" test; then
+  if compose_test build --print test | docker buildx bake \
+    --file - --builder "$TEST_BUILDKIT_BUILDER" --allow network.host; then
     record "PASS" "backend test image"
     TEST_IMAGE_READY=1
     return 0

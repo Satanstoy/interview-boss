@@ -132,7 +132,7 @@ jobs:
           CI_BUILDKIT_BUILDER: interview-boss-ci
         run: |
           docker buildx create --name "$CI_BUILDKIT_BUILDER" --driver docker-container --driver-opt network=host
-          docker compose build --builder "$CI_BUILDKIT_BUILDER" backend nginx
+          docker compose build --print backend nginx | docker buildx bake --file - --builder "$CI_BUILDKIT_BUILDER" --allow network.host
       - name: Trivy scan app image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
