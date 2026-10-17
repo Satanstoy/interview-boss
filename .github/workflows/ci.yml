@@ -79,6 +79,8 @@ jobs:
     name: Real disposable stack E2E (stub provider)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a
