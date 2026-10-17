@@ -185,7 +185,7 @@ run_backend() {
   run_blocking "backend full tests" \
     compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
       backend/tests \
-      -q --tb=no
+      -q --tb=short --maxfail=1
 
   local schema_source_commit
   schema_source_commit=$(git -C "$PROJECT_DIR" log -1 --format=%h -- backend/app/db/migrations 2>/dev/null || echo unknown)
