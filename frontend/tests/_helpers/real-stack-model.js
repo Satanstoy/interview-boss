@@ -1,11 +1,11 @@
 export async function configureDisposableUserModel(page) {
-  const responseStatus = await page.evaluate(async () => {
+  const result = await page.evaluate(async () => {
     const refreshed = await fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
     })
-    if (!refreshed.ok) return refreshed.status
+    if (!refreshed.ok) return { status: refreshed.status }
 
     const { token } = await refreshed.json()
     const configured = await fetch('/api/profile/llm', {
@@ -24,10 +24,11 @@ export async function configureDisposableUserModel(page) {
         llm_api_format: 'chat',
       }),
     })
-    return configured.status
+    return { status: configured.status, token }
   })
 
-  if (responseStatus !== 200) {
-    throw new Error(`Could not configure the disposable user model (HTTP ${responseStatus})`)
+  if (result.status !== 200) {
+    throw new Error(`Could not configure the disposable user model (HTTP ${result.status})`)
   }
+  return result.token
 }

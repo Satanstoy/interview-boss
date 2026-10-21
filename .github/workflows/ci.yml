@@ -43,6 +43,8 @@ jobs:
         run: cd frontend && npx playwright install --with-deps chromium
       - name: Frontend build & test
         run: ./scripts/check.sh frontend
+      - name: Frontend helper unit tests
+        run: cd frontend && node --test tests/unit/*.test.mjs
       - name: Frontend audit (WARN only, non-blocking)
         continue-on-error: true
         run: cd frontend && npm run audit:prod
