@@ -14,140 +14,21 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.services.faiss_index_manager import FAISSIndexManager
 import asyncio
+from .schema_helpers import sync_pipeline_sources
 
 
 # ============================================================
 # Helper
 # ============================================================
 def create_test_db():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            is_admin INTEGER DEFAULT 0,
-            bank_mode TEXT DEFAULT 'public',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE job_positions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE interview (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            focus TEXT,
-            questions_list TEXT,
-            difficulty TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            season TEXT DEFAULT '',
-            owner_id INTEGER REFERENCES users(id),
-            status TEXT DEFAULT 'approved',
-            job_position TEXT DEFAULT '',
-            deleted_at TIMESTAMP,
-            analysis_status TEXT DEFAULT 'idle',
-            analysis_stage TEXT,
-            analysis_result TEXT,
-            analysis_updated_at TIMESTAMP
-        );
-        CREATE TABLE questions_detail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            question TEXT,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            diff_tag TEXT,
-            job_position TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP
-        );
-        CREATE TABLE question_bank (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT NOT NULL,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            difficulty TEXT,
-            frequency INTEGER DEFAULT 1,
-            ai_answer TEXT,
-            answer_sources TEXT,
-            vector TEXT,
-            sources TEXT DEFAULT '[]',
-            original_questions TEXT DEFAULT '[]',
-            original_question_sources TEXT DEFAULT '[]',
-            is_starred INTEGER DEFAULT 0,
-            embedding BLOB,
-            cluster_id INTEGER DEFAULT NULL,
-            owner_id INTEGER,
-            submitted_by INTEGER,
-            status TEXT DEFAULT 'approved',
-            job_position TEXT DEFAULT '',
-            duplicate_of INTEGER DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP,
-            FOREIGN KEY (owner_id) REFERENCES users(id),
-            FOREIGN KEY (submitted_by) REFERENCES users(id)
-        );
-        CREATE TABLE question_position (
-            question_id INTEGER NOT NULL,
-            position_id INTEGER NOT NULL,
-            PRIMARY KEY (question_id, position_id),
-            FOREIGN KEY (question_id) REFERENCES question_bank(id) ON DELETE CASCADE,
-            FOREIGN KEY (position_id) REFERENCES job_positions(id) ON DELETE CASCADE
-        );
-        CREATE TABLE user_practice_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            user_answer TEXT,
-            evaluation_result TEXT,
-            score INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id)
-        );
-        CREATE TABLE user_question_view (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            is_starred INTEGER DEFAULT 0,
-            personal_tags TEXT DEFAULT '',
-            note TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE
-        );
-        CREATE TABLE analysis_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER NOT NULL,
-            question_detail_id INTEGER,
-            status TEXT DEFAULT 'pending',
-            owner_id INTEGER DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            processed_at TIMESTAMP,
-            locked_until TEXT,
-            contribution_request_id INTEGER,
-            UNIQUE(question_detail_id),
-            FOREIGN KEY (interview_id) REFERENCES interview(id)
-        );
-    """)
+    from .schema_helpers import create_pipeline_db
+
+    conn = create_pipeline_db()
     conn.execute(
-        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'testuser', 'hash', 1)"
+        "UPDATE users SET username = ?, password_hash = 'hash', is_admin = 1 WHERE id = 1",
+        ("testuser",),
     )
-    conn.execute("INSERT INTO job_positions (id, name) VALUES (1, 'agent开发')")
+    conn.execute("INSERT INTO job_positions (id, name) VALUES (1, ?)", ("agent开发",))
     conn.commit()
     return conn
 
@@ -197,6 +78,7 @@ def make_question_bank_row(
             ai_answer,
         ),
     )
+    sync_pipeline_sources(conn)
     conn.commit()
 
 
