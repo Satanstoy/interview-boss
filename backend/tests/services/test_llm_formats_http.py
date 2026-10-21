@@ -246,6 +246,7 @@ async def test_production_llm_clients_disable_sdk_owned_retries(monkeypatch):
     from types import SimpleNamespace
 
     llm = _import_llm_without_machine_upstream(monkeypatch)
+    monkeypatch.setattr("app.core.outbound_url._resolved_addresses", lambda host, port: {"93.184.216.34"})
     from app.services.upload_llm_accounting import upload_llm_context
 
     monkeypatch.setattr(
