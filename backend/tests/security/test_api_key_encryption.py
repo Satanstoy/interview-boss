@@ -5,6 +5,16 @@ import pytest
 from unittest.mock import patch
 
 
+@pytest.fixture(autouse=True)
+def encryption_key(monkeypatch):
+    from app.services.encryption import _reset_fernet
+
+    monkeypatch.setenv("JWT_SECRET", "TEST_SECRET_PLACEHOLDER")
+    _reset_fernet()
+    yield
+    _reset_fernet()
+
+
 class TestEncryptionRoundTrip:
     """encrypt_value / decrypt_value round-trip."""
 

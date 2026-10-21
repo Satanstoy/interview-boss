@@ -201,8 +201,8 @@ test('real upload → admin redacted review → one failed public item recovery 
     const excludedItem = adminDetail.items[excludedIndex]
     await adminPage.getByLabel(`题干 ${editedIndex + 1}`, { exact: true }).fill(EDITED_QUESTION)
     await adminPage.getByLabel(`排除题目 ${excludedIndex + 1}`, { exact: true }).check()
-    await expect(adminPage.getByLabel('公开公司')).toHaveValue('')
-    await expect(adminPage.getByLabel('公开轮次')).toHaveValue('')
+    await expect(adminPage.getByLabel('公开公司')).toHaveValue('AC029 隔离公司')
+    await expect(adminPage.getByLabel('公开轮次')).toHaveValue('AC029 一面')
     await expect(adminPage.getByLabel('公开来源 URL')).toHaveValue('')
     const previewPromise = adminPage.waitForResponse(response => endpointPath(response.url()) === `/api/admin/public-contributions/${requestId}/preview`)
     await adminPage.getByRole('button', { name: '预览公开内容', exact: true }).click()
