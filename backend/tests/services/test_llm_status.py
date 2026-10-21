@@ -243,7 +243,11 @@ def test_status_route_with_probe_flag(auth_client, monkeypatch, mock_llm):
     mock_llm.chat.completions.create.assert_awaited_once()
 
 
-def test_update_llm_config_clears_status_cache(auth_client, test_db):
+def test_update_llm_config_clears_status_cache(auth_client, test_db, monkeypatch):
+    from app.services import encryption
+
+    monkeypatch.setenv("JWT_SECRET", "TEST_SECRET_PLACEHOLDER")
+    monkeypatch.setattr(encryption, "_fernet_instance", None)
     client, user_id = auth_client
     llm_service._llm_status_cache[user_id] = (
         ("a", "b", "c"),

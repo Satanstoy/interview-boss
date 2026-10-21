@@ -2,6 +2,9 @@ import subprocess
 import sys
 import importlib.util
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
 
 
 def _load_verifier(monkeypatch):
@@ -21,6 +24,26 @@ def test_real_verifier_refuses_to_run_without_explicit_opt_in():
     )
     assert result.returncode != 0
     assert "RUN_REAL_INTERVIEW_DISTRIBUTION_E2E=1" in result.stderr
+
+
+@pytest.mark.parametrize("job_position", ["后端开发", "Agent & RAG"])
+def test_verifier_encodes_job_position(monkeypatch, tmp_path, job_position):
+    verifier = _load_verifier(monkeypatch)
+    requested_urls = []
+
+    def request_json(method, url, token):
+        requested_urls.append(url)
+        return {"distribution": {name: 0.2 for name in verifier._CANONICAL_TYPES}}
+
+    monkeypatch.setattr(verifier, "_request_json", request_json)
+    monkeypatch.setattr(sys, "argv", [
+        "verifier", "--job-position", job_position,
+        "--report", str(tmp_path / "report.json"),
+    ])
+
+    assert verifier.main() == 0
+    assert requested_urls[0].isascii()
+    assert parse_qs(urlsplit(requested_urls[0]).query)["job_position"] == [job_position]
 
 
 def test_runtime_alignment_rejects_unbound_or_mismatched_primary_events(monkeypatch):

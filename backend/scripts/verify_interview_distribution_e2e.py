@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -219,7 +220,7 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=16)
     parser.add_argument("--keep-conversation", action="store_true")
     args = parser.parse_args()
-    query = f"?job_position={args.job_position}" if args.job_position else ""
+    query = "?" + urlencode({"job_position": args.job_position}) if args.job_position else ""
     report: dict[str, Any] = {"verdict": "fail", "stats_response": None, "comparison": {}, "runtime": None, "error": None}
     try:
         payload = _request_json("GET", f"{args.base_url.rstrip('/')}/api/interview/distribution/default{query}", args.token)
