@@ -97,8 +97,9 @@ class TestSiliconflowBackend:
                 with pytest.raises(RuntimeError, match="api down"):
                     mod.encode_texts(["x"])
 
-    def test_siliconflow_client_caching(self):
+    def test_siliconflow_client_caching(self, monkeypatch):
         """Same key+url+model reuses the cached OpenAI sync client."""
+        monkeypatch.setattr("app.core.outbound_url._resolved_addresses", lambda host, port: {"93.184.216.34"})
         with mock.patch.dict(
             "os.environ",
             {
@@ -118,7 +119,8 @@ class TestSiliconflowBackend:
                     assert got1 is got2
                     m_openai.assert_called_once()
 
-    def test_siliconflow_client_keyed_cache_rebuilds_on_config_change(self):
+    def test_siliconflow_client_keyed_cache_rebuilds_on_config_change(self, monkeypatch):
+        monkeypatch.setattr("app.core.outbound_url._resolved_addresses", lambda host, port: {"93.184.216.34"})
         """Changing api_key/base_url/model creates a NEW client."""
         with mock.patch.dict(
             "os.environ",

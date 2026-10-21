@@ -1487,26 +1487,3 @@ def test_two_roots_submitted_same_second_do_not_cross_talk(isolated_stack):
     thread_a = build_thread_id(first["import_id"], 1, first["job_id"])
     thread_b = build_thread_id(second["import_id"], 1, second["job_id"])
     assert thread_a != thread_b, "固定时钟下的并发提交不得共享执行状态"
-
-
-def test_user_scope_never_borrows_system_stub(isolated_stack):
-    from app.services.upload_credentials import UploadCredentialError, resolve_upload_credentials
-
-    calls = {"global": 0}
-
-    def broken_user(uid):
-        raise RuntimeError("decrypt failed")
-
-    def global_loader():
-        calls["global"] += 1
-        return {"api_key": "k", "base_url": "https://s.invalid/v1", "model": "m", "timeout": 5}
-
-    with pytest.raises(UploadCredentialError):
-        resolve_upload_credentials(
-            credential_scope="user",
-            user_id=101,
-            stage="extract",
-            user_config_loader=broken_user,
-            global_config_loader=global_loader,
-        )
-    assert calls["global"] == 0

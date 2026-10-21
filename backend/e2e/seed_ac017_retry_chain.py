@@ -11,7 +11,7 @@ from app.services.upload_repository import UPLOAD_PIPELINE_VERSION_DEFAULT
 
 
 OWNER = "ac017_owner"
-PASSWORD = "Ac017-cross-generation-retry-real-stack-123!"
+TEST_PASSWORD = "Ac017-cross-generation-retry-real-stack-123!"
 IMPORT_ID = "imp-ac017-cross-generation-retry"
 QUESTION_A = "AC017_PARALLEL_ANSWER_A: explain optimistic locking."
 QUESTION_B = "AC017_PARALLEL_ANSWER_B: explain queue idempotency."
@@ -28,7 +28,7 @@ def main() -> None:
             conn.execute(
                 "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                 "VALUES (?, ?, ?, 0, 'private') RETURNING id",
-                (OWNER, hash_password(PASSWORD), f"{OWNER}@example.test"),
+                (OWNER, hash_password(TEST_PASSWORD), f"{OWNER}@example.test"),
             ).fetchone()["id"]
         )
         conn.execute(

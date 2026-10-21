@@ -148,7 +148,8 @@ ensure_test_image() {
   check_test_build_space || return 1
   ensure_test_builder || return 1
 
-  if compose_test build --builder "$TEST_BUILDKIT_BUILDER" test; then
+  if compose_test build --print test | docker buildx bake \
+    --file - --builder "$TEST_BUILDKIT_BUILDER" --allow network.host; then
     record "PASS" "backend test image"
     TEST_IMAGE_READY=1
     return 0
@@ -184,7 +185,7 @@ run_backend() {
   run_blocking "backend full tests" \
     compose_test run --rm -e PYTHONPYCACHEPREFIX=/tmp/pycache test uv run pytest \
       backend/tests \
-      -q --tb=no
+      -q --tb=short --maxfail=1
 
   local schema_source_commit
   schema_source_commit=$(git -C "$PROJECT_DIR" log -1 --format=%h -- backend/app/db/migrations 2>/dev/null || echo unknown)

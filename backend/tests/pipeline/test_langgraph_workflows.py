@@ -7,7 +7,7 @@ LangGraph 工作流与原始业务逻辑一致性测试
 3. 提取质量重试 (extraction quality < 7 triggers retry, max 2)
 4. 分类质量重试 (tagging quality < 7 triggers retry, max 2)
 5. JD 提交流程 (doc_type=jd, no classify step)
-6. 题库重建流程 (build_bank_graph)
+6. 题库重建 worker 注册（执行覆盖见 test_build_worker_workflow.py）
 7. 批量生成答案流程 (batch_generate_graph)
 8. 节点级单元测试 (quality evaluation, event builders)
 
@@ -15,7 +15,6 @@ LangGraph 工作流与原始业务逻辑一致性测试
 """
 
 import json
-import sqlite3
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,184 +29,15 @@ import time
 
 
 def create_test_db():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            is_admin INTEGER DEFAULT 0,
-            bank_mode TEXT DEFAULT 'public',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            current_position_id INTEGER,
-            personal_position TEXT DEFAULT ''
-        );
-        CREATE TABLE job_positions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE interview (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            focus TEXT,
-            questions_list TEXT,
-            difficulty TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            season TEXT DEFAULT '',
-            owner_id INTEGER,
-            status TEXT DEFAULT 'approved',
-            job_position TEXT DEFAULT '',
-            url_signature TEXT DEFAULT '',
-            updated_at TIMESTAMP,
-            deleted_at TIMESTAMP,
-            analysis_status TEXT DEFAULT 'idle',
-            analysis_stage TEXT,
-            analysis_result TEXT,
-            analysis_updated_at TIMESTAMP
-        );
-        CREATE TABLE questions_detail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            question TEXT,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            diff_tag TEXT,
-            job_position TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP,
-            deleted_at TIMESTAMP
-        );
-        CREATE TABLE question_bank (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT NOT NULL,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            difficulty TEXT,
-            frequency INTEGER DEFAULT 1,
-            ai_answer TEXT,
-            answer_sources TEXT,
-            vector TEXT,
-            sources TEXT DEFAULT '[]',
-            original_questions TEXT DEFAULT '[]',
-            original_question_sources TEXT DEFAULT '[]',
-            is_starred INTEGER DEFAULT 0,
-            embedding BLOB,
-            cluster_id INTEGER DEFAULT NULL,
-            owner_id INTEGER,
-            submitted_by INTEGER,
-            status TEXT DEFAULT 'approved',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP,
-            job_position TEXT DEFAULT '',
-            duplicate_of INTEGER DEFAULT NULL,
-            FOREIGN KEY (owner_id) REFERENCES users(id),
-            FOREIGN KEY (submitted_by) REFERENCES users(id)
-        );
-        CREATE TABLE question_position (
-            question_id INTEGER NOT NULL,
-            position_id INTEGER NOT NULL,
-            PRIMARY KEY (question_id, position_id),
-            FOREIGN KEY (question_id) REFERENCES question_bank(id) ON DELETE CASCADE,
-            FOREIGN KEY (position_id) REFERENCES job_positions(id) ON DELETE CASCADE
-        );
-        CREATE TABLE question_sources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_bank_id INTEGER NOT NULL,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE
-        );
-        CREATE TABLE question_original_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_bank_id INTEGER NOT NULL,
-            question TEXT,
-            sources_json TEXT DEFAULT '[]',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_bank_id) REFERENCES question_bank(id) ON DELETE CASCADE
-        );
-        CREATE TABLE analysis_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER NOT NULL,
-            question_detail_id INTEGER,
-            status TEXT DEFAULT 'pending',
-            owner_id INTEGER DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            processed_at TIMESTAMP,
-            locked_until TEXT,
-            contribution_request_id INTEGER,
-            FOREIGN KEY (interview_id) REFERENCES interview(id)
-        );
-        CREATE TABLE user_practice_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            user_answer TEXT,
-            evaluation_result TEXT,
-            score INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE user_question_view (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            is_starred INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE user_profile (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT,
-            UNIQUE(user_id, key)
-        );
-        CREATE TABLE refresh_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            jti TEXT NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE taxonomy (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            position_name TEXT NOT NULL,
-            categories_json TEXT NOT NULL,
-            source TEXT DEFAULT 'system',
-            owner_id INTEGER,
-            is_public INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-    conn.execute(
-        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'admin', 'hash', 1)"
-    )
-    conn.execute(
-        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (2, 'user', 'hash', 0)"
-    )
+    from .schema_helpers import create_pipeline_db
+
+    conn = create_pipeline_db()
+    conn.execute("UPDATE users SET username = 'admin', password_hash = 'hash', is_admin = 1 WHERE id = 1")
+    conn.execute("INSERT INTO users (id, username, password_hash) VALUES (2, 'user', 'hash')")
     conn.execute("INSERT INTO job_positions (id, name) VALUES (1, '后端开发')")
     conn.execute(
-        "INSERT INTO user_profile (user_id, key, value) VALUES (1, 'current_job_position', '后端开发')"
-    )
-    conn.execute(
-        "INSERT INTO user_profile (user_id, key, value) VALUES (2, 'current_job_position', '后端开发')"
+        "INSERT INTO user_profile (key, value) VALUES ('current_job_position', '后端开发') "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     )
     conn.commit()
     return conn
@@ -925,82 +755,6 @@ class TestSubmitGraphRouting:
 
 
 # ═══════════════════════════════════════════════
-#  5. Build Graph 节点级测试
-# ═══════════════════════════════════════════════
-
-
-class TestBuildNodes:
-    """测试 build_bank_graph 各节点"""
-
-    def test_backup_db_node(self, mock_db):
-        from app.agents.build.nodes import backup_db_node
-
-        with patch("shutil.copy2") as mock_copy:
-            result = asyncio.run(backup_db_node({"user_id": 1}))
-        assert "backup_path" in result
-        assert result["events"][0]["step"] == "tag"
-        mock_copy.assert_called_once()
-
-    def test_clear_qb_node(self, mock_db):
-        from app.agents.build.nodes import clear_qb_node
-
-        conn = mock_db
-        conn.execute("INSERT INTO question_bank (question) VALUES ('测试题')")
-        conn.commit()
-        assert conn.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0] == 1
-
-        result = asyncio.run(clear_qb_node({"user_id": 1}))
-        assert conn.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0] == 0
-
-    def test_load_all_node_enqueues(self, mock_db):
-        from app.agents.build.nodes import load_all_node
-
-        conn = mock_db
-        # 插入测试面经 + 题目
-        conn.execute(
-            "INSERT INTO interview (id, url, company, round, job_position) VALUES (100, 'https://test.com', '字节', '一面', '后端开发')"
-        )
-        conn.execute(
-            "INSERT INTO questions_detail (id, interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (200, 100, 'https://test.com', '字节', '一面', 'Redis持久化', '数据库', 'Redis', '', 'L2-中等', '后端开发')"
-        )
-        conn.commit()
-
-        result = asyncio.run(load_all_node({"user_id": 1}))
-        assert result["total_questions"] == 1
-        assert result["processed_count"] == 0
-
-    def test_cluster_loop_node_processes_batches(self, mock_db):
-        from app.agents.build.nodes import cluster_loop_node
-
-        conn = mock_db
-
-        # 模拟队列中有数据
-        conn.execute(
-            "INSERT INTO interview (id, url, company, round, job_position) VALUES (101, 'https://t.com', '公司', '一面', '后端开发')"
-        )
-        conn.execute(
-            "INSERT INTO questions_detail (id, interview_id, url, company, round, question, cat1, cat2, tags, diff_tag, job_position) VALUES (301, 101, 'https://t.com', '公司', '一面', 'Q1', 'A', 'B', '', 'L2', '后端开发')"
-        )
-        conn.execute(
-            "INSERT INTO analysis_queue (interview_id, question_detail_id, status) VALUES (101, 301, 'pending')"
-        )
-        conn.commit()
-
-        with (
-            patch("app.services.pipeline.cluster_batch", AsyncMock(return_value=1)),
-            patch("app.services.pipeline.mark_batch_done"),
-        ):
-            result = asyncio.run(
-                cluster_loop_node(
-                    {"user_id": 1, "total_questions": 1, "processed_count": 0}
-                )
-            )
-
-        assert result["processed_count"] >= 0
-        assert result["progress_pct"] == 100.0
-
-
-# ═══════════════════════════════════════════════
 #  6. Batch Generate Graph 测试
 # ═══════════════════════════════════════════════
 
@@ -1388,7 +1142,7 @@ class TestSubmitGraphE2E:
 
 
 class TestGraphStructure:
-    """验证三个 Graph 的节点和边结构与设计文档一致"""
+    """验证现行 Graph 结构与题库重建 worker 注册。"""
 
     def test_submit_graph_nodes(self):
         from app.agents.submit.graph import submit_graph
@@ -1410,19 +1164,10 @@ class TestGraphStructure:
         }
         assert nodes == expected
 
-    def test_build_bank_graph_nodes(self):
-        from app.agents.build.graph import build_bank_graph
+    def test_build_bank_worker_registered(self):
+        from app.worker import WorkerSettings, build_master_bank_task
 
-        nodes = set(build_bank_graph.nodes.keys())
-        expected = {
-            "__start__",
-            "backup_db",
-            "clear_qb",
-            "load_all",
-            "cluster_loop",
-            "restore_answers",
-        }
-        assert nodes == expected
+        assert build_master_bank_task in WorkerSettings.functions
 
     def test_batch_generate_graph_nodes(self):
         from app.agents.batch_generate.graph import batch_generate_graph

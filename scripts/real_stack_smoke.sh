@@ -621,7 +621,8 @@ if [ "${REAL_STACK_REUSE_BUILT_IMAGES:-0}" = "1" ]; then
   compose up --no-build -d --wait --wait-timeout 180
 else
   ensure_real_stack_builder
-  compose build --builder "$REAL_STACK_BUILDER" backend worker nginx oauth-gateway llm-stub
+  compose build --print backend worker nginx oauth-gateway llm-stub | \
+    docker buildx bake --file - --builder "$REAL_STACK_BUILDER" --allow network.host
   compose up -d --wait --wait-timeout 180
 fi
 

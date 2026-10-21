@@ -400,7 +400,9 @@ class TestDockerDeployScript:
         content = self._read()
         assert "--dry-run" in content
         assert "--aggressive" in content
-        assert "DEPLOY_PRUNE_HOST_ARTIFACTS" in content
+        cleanup = content.split("do_cleanup() {", 1)[1].split("\n}", 1)[0]
+        assert 'STORAGE_RETENTION_DRY_RUN=1 storage_cleanup_backups "$PROJECT_DIR"' in cleanup
+        assert 'STORAGE_RETENTION_DRY_RUN=1 prune_unused_docker "$aggressive"' in cleanup
 
 
 class TestMirrorSelectionScript:

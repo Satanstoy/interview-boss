@@ -965,8 +965,8 @@ async def test_admin_public_import_persists_approved_projection_audit(
     assert audit["status"] == "approved_for_processing"
     assert audit["reviewed_by"] == 201
     projection = json.loads(audit["review_projection_json"])
-    assert projection["source"]["company"] is None
-    assert projection["source"]["round"] is None
+    assert projection["source"]["company"] == "AC 审计公司"
+    assert projection["source"]["round"] == "一面"
     assert projection["source"]["source_url"] is None
     assert projection["items"][0]["question"] == "事务隔离级别有哪些？"
 
@@ -974,7 +974,7 @@ async def test_admin_public_import_persists_approved_projection_audit(
         "SELECT url, company, round, publish_status FROM interview WHERE id = ?",
         (result["saved_interview_id"],),
     ).fetchone()
-    assert tuple(interview) == ("", "", "", "pending")
+    assert tuple(interview) == ("", "AC 审计公司", "一面", "pending")
 
     event = test_db.execute(
         "SELECT actor_id, action, to_status, metadata_json "

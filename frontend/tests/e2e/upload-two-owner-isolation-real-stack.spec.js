@@ -12,7 +12,7 @@ async function register(page, username) {
   await page.getByLabel('邮箱').fill(`${username}@example.test`)
   await page.getByRole('button', { name: '注册', exact: true }).click()
   await expect(page).toHaveURL(/\/master-bank/, { timeout: 30000 })
-  await configureDisposableUserModel(page)
+  return configureDisposableUserModel(page)
 }
 
 async function submitInterview(page, marker, company, question) {
@@ -31,24 +31,17 @@ async function submitInterview(page, marker, company, question) {
   return body.import_id
 }
 
-async function snapshotFor(page, importId) {
-  return page.evaluate(async (id) => {
-    const refreshed = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    })
-    if (!refreshed.ok) return { status: refreshed.status, body: null }
-    const { token } = await refreshed.json()
+async function snapshotFor(page, importId, token) {
+  return page.evaluate(async ({ id, token }) => {
     const response = await fetch(`/api/upload-imports/${encodeURIComponent(id)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     return { status: response.status, body: await response.json() }
-  }, importId)
+  }, { id: importId, token })
 }
 
-async function observeOwnResult(page, importId, otherMarker, question) {
-  const ownSnapshot = await snapshotFor(page, importId)
+async function observeOwnResult(page, importId, token, otherMarker, question) {
+  const ownSnapshot = await snapshotFor(page, importId, token)
   expect(ownSnapshot.status).toBe(200)
   expect(ownSnapshot.body.status).toBe('completed')
   expect(ownSnapshot.body.result?.interview_id).toBeTruthy()
@@ -82,7 +75,7 @@ test('near-simultaneous owners keep every real worker result and read path isola
   const pageB = await contextB.newPage()
 
   try {
-    await Promise.all([register(page, userA), register(pageB, userB)])
+    const [tokenA, tokenB] = await Promise.all([register(page, userA), register(pageB, userB)])
 
     const [importA, importB] = await Promise.all([
       submitInterview(
@@ -108,20 +101,22 @@ test('near-simultaneous owners keep every real worker result and read path isola
     await expect.poll(() => existsSync(`${handshake}.done`), { timeout: 90000 }).toBe(true)
 
     await Promise.all([
-      expect.poll(async () => (await snapshotFor(page, importA)).body?.status, { timeout: 300000 })
+      expect.poll(async () => (await snapshotFor(page, importA, tokenA)).body?.status, { timeout: 300000 })
         .toBe('completed'),
-      expect.poll(async () => (await snapshotFor(pageB, importB)).body?.status, { timeout: 300000 })
+      expect.poll(async () => (await snapshotFor(pageB, importB, tokenB)).body?.status, { timeout: 300000 })
         .toBe('completed'),
     ])
-    const [snapshotA, snapshotB] = await Promise.all([snapshotFor(page, importA), snapshotFor(pageB, importB)])
+    const [snapshotA, snapshotB] = await Promise.all([
+      snapshotFor(page, importA, tokenA), snapshotFor(pageB, importB, tokenB),
+    ])
     expect(snapshotA.status).toBe(200)
     expect(snapshotB.status).toBe(200)
     expect(snapshotA.body.status).toBe('completed')
     expect(snapshotB.body.status).toBe('completed')
 
     const [crossA, crossB] = await Promise.all([
-      snapshotFor(page, importB),
-      snapshotFor(pageB, importA),
+      snapshotFor(page, importB, tokenA),
+      snapshotFor(pageB, importA, tokenB),
     ])
     expect(crossA.status).toBe(404)
     expect(crossB.status).toBe(404)
@@ -130,12 +125,14 @@ test('near-simultaneous owners keep every real worker result and read path isola
       observeOwnResult(
         page,
         importA,
+        tokenA,
         'AC009_USER_B_REAL_STACK',
         'AC009_USER_A 专属问题：解释事务隔离。',
       ),
       observeOwnResult(
         pageB,
         importB,
+        tokenB,
         'AC009_USER_A_REAL_STACK',
         'AC009_USER_B 专属问题：解释消息幂等。',
       ),

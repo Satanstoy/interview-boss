@@ -18,6 +18,7 @@ import asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.services.faiss_index_manager import FAISSIndexManager
+from .schema_helpers import sync_pipeline_sources
 
 
 # ─────────────────────────────────────────────
@@ -26,203 +27,17 @@ from app.services.faiss_index_manager import FAISSIndexManager
 
 
 def create_test_db():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript("""
-        CREATE TABLE users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            is_admin INTEGER DEFAULT 0,
-            bank_mode TEXT DEFAULT 'public',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            current_position_id INTEGER,
-            personal_position TEXT DEFAULT ''
-        );
-        CREATE TABLE job_positions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE interview (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            focus TEXT,
-            questions_list TEXT,
-            difficulty TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            season TEXT DEFAULT '',
-            owner_id INTEGER,
-            status TEXT DEFAULT 'approved',
-            job_position TEXT DEFAULT '',
-            url_signature TEXT DEFAULT '',
-            updated_at TIMESTAMP,
-            deleted_at TIMESTAMP,
-            analysis_status TEXT DEFAULT 'idle',
-            analysis_stage TEXT,
-            analysis_result TEXT,
-            analysis_updated_at TIMESTAMP
-        );
-        CREATE TABLE questions_detail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER,
-            url TEXT,
-            company TEXT,
-            round TEXT,
-            question TEXT,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            diff_tag TEXT,
-            job_position TEXT DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP,
-            deleted_at TIMESTAMP
-        );
-        CREATE TABLE question_bank (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT NOT NULL,
-            cat1 TEXT,
-            cat2 TEXT,
-            tags TEXT,
-            difficulty TEXT,
-            frequency INTEGER DEFAULT 1,
-            ai_answer TEXT,
-            answer_sources TEXT,
-            vector TEXT,
-            sources TEXT DEFAULT '[]',
-            original_questions TEXT DEFAULT '[]',
-            original_question_sources TEXT DEFAULT '[]',
-            is_starred INTEGER DEFAULT 0,
-            embedding BLOB,
-            cluster_id INTEGER DEFAULT NULL,
-            owner_id INTEGER,
-            submitted_by INTEGER,
-            status TEXT DEFAULT 'approved',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            deleted_at TIMESTAMP,
-            job_position TEXT DEFAULT '',
-            duplicate_of INTEGER DEFAULT NULL,
-            FOREIGN KEY (owner_id) REFERENCES users(id),
-            FOREIGN KEY (submitted_by) REFERENCES users(id)
-        );
-        CREATE TABLE question_position (
-            question_id INTEGER NOT NULL,
-            position_id INTEGER NOT NULL,
-            PRIMARY KEY (question_id, position_id),
-            FOREIGN KEY (question_id) REFERENCES question_bank(id) ON DELETE CASCADE,
-            FOREIGN KEY (position_id) REFERENCES job_positions(id) ON DELETE CASCADE
-        );
-        CREATE TABLE analysis_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            interview_id INTEGER NOT NULL,
-            question_detail_id INTEGER,
-            status TEXT DEFAULT 'pending',
-            owner_id INTEGER DEFAULT NULL,
-            contribution_request_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            processed_at TIMESTAMP,
-            locked_until TEXT,
-            UNIQUE(question_detail_id),
-            FOREIGN KEY (interview_id) REFERENCES interview(id)
-        );
-        CREATE TABLE jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_type TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            progress_current INTEGER DEFAULT 0,
-            progress_total INTEGER DEFAULT 0,
-            progress_message TEXT,
-            result TEXT,
-            error TEXT,
-            created_by INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP,
-            attempts INTEGER NOT NULL DEFAULT 0,
-            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            locked_until TEXT,
-            arq_job_id TEXT,
-            worker_id TEXT,
-            last_error TEXT,
-            started_at TEXT,
-            idempotency_key TEXT,
-            parent_job_id INTEGER
-        );
-        CREATE UNIQUE INDEX uq_test_jobs_idempotency
-            ON jobs(job_type, idempotency_key)
-            WHERE idempotency_key IS NOT NULL;
-        CREATE TABLE job_payloads (
-            job_id INTEGER PRIMARY KEY,
-            payload TEXT NOT NULL,
-            FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
-        );
-        CREATE TABLE cluster_review_state (
-            cluster_id INTEGER PRIMARY KEY,
-            current_version TEXT NOT NULL,
-            reviewed_version TEXT,
-            status TEXT NOT NULL DEFAULT 'needs_review',
-            priority INTEGER NOT NULL DEFAULT 50,
-            last_trigger_reason TEXT,
-            last_reviewed_at TEXT,
-            last_error TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE cluster_review_tasks (
-            id TEXT PRIMARY KEY,
-            cluster_id INTEGER NOT NULL,
-            review_version TEXT NOT NULL,
-            trigger_reason TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            attempts INTEGER NOT NULL DEFAULT 0,
-            available_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            locked_until TEXT,
-            arq_job_id TEXT,
-            last_error TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            started_at TEXT,
-            finished_at TEXT,
-            UNIQUE(cluster_id, review_version)
-        );
-        CREATE TABLE user_practice_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            user_answer TEXT,
-            evaluation_result TEXT,
-            score INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE user_question_view (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            question_bank_id INTEGER NOT NULL,
-            is_starred INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE user_profile (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT,
-            UNIQUE(user_id, key)
-        );
-    """)
+    from .schema_helpers import create_pipeline_db
+
+    conn = create_pipeline_db()
     conn.execute(
-        "INSERT INTO users (id, username, password_hash, is_admin) VALUES (1, 'admin', 'hash', 1)"
+        "UPDATE users SET username = ?, password_hash = 'hash', is_admin = 1 WHERE id = 1",
+        ("admin",),
     )
-    conn.execute("INSERT INTO job_positions (id, name) VALUES (1, '后端开发')")
+    conn.execute("INSERT INTO job_positions (id, name) VALUES (1, ?)", ("后端开发",))
     conn.execute(
-        "INSERT INTO user_profile (user_id, key, value) VALUES (1, 'current_job_position', '后端开发')"
+        "INSERT INTO user_profile (key, value) VALUES ('current_job_position', '后端开发') "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     )
     conn.commit()
     return conn
@@ -857,6 +672,7 @@ class TestCleanupThoroughness:
 
         cursor = conn.cursor()
         cursor.execute("BEGIN")
+        sync_pipeline_sources(conn)
         _cleanup_old_sources_txn_v2(cursor, url, "后端开发")
         conn.commit()
 
@@ -894,6 +710,7 @@ class TestCleanupThoroughness:
 
         cursor = conn.cursor()
         cursor.execute("BEGIN")
+        sync_pipeline_sources(conn)
         _cleanup_old_sources_txn_v2(cursor, url, "后端开发")
         conn.commit()
 

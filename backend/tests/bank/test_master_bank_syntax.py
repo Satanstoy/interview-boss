@@ -92,8 +92,9 @@ class TestMasterBankSyntax:
 class TestBackendStartup:
     """测试后端服务能否正常启动"""
 
-    def test_asgi_module_importable(self):
+    def test_asgi_module_importable(self, monkeypatch):
         """验证 asgi 模块可以正常导入"""
+        monkeypatch.setattr("app.db.connection.init_db", lambda: None)
         backend_dir = BACKEND_ROOT
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))

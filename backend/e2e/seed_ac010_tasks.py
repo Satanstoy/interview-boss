@@ -10,7 +10,7 @@ from app.db.connection import get_db_connection
 from app.services.upload_repository import UPLOAD_PIPELINE_VERSION_DEFAULT
 
 
-PASSWORD = "Ac010-real-stack-account-switch-123!"
+TEST_PASSWORD = "Ac010-real-stack-account-switch-123!"
 USERS = ("ac010_u1", "ac010_u2")
 
 
@@ -22,7 +22,7 @@ def main() -> None:
             cursor = conn.execute(
                 "INSERT INTO users (username, password_hash, email, is_admin, share_default) "
                 "VALUES (?, ?, ?, 0, 'private')",
-                (username, hash_password(PASSWORD), email),
+                (username, hash_password(TEST_PASSWORD), email),
             )
             user_id = int(cursor.lastrowid)
             conn.execute(
@@ -228,7 +228,7 @@ def main() -> None:
             }
         )
         conn.commit()
-    print(json.dumps({"password": PASSWORD, "roots": roots}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"password": TEST_PASSWORD, "roots": roots}, ensure_ascii=False, sort_keys=True))
 
 
 if __name__ == "__main__":

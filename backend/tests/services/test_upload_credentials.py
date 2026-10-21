@@ -264,3 +264,26 @@ def test_system_payer_call_is_not_charged_to_user_quota():
     )
     assert conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 0
     conn.close()
+
+
+def test_user_scope_never_borrows_system_stub():
+    from app.services.upload_credentials import UploadCredentialError, resolve_upload_credentials
+
+    calls = {"global": 0}
+
+    def broken_user(uid):
+        raise RuntimeError("decrypt failed")
+
+    def global_loader():
+        calls["global"] += 1
+        return {"api_key": "k", "base_url": "https://s.invalid/v1", "model": "m", "timeout": 5}
+
+    with pytest.raises(UploadCredentialError):
+        resolve_upload_credentials(
+            credential_scope="user",
+            user_id=101,
+            stage="extract",
+            user_config_loader=broken_user,
+            global_config_loader=global_loader,
+        )
+    assert calls["global"] == 0

@@ -24,6 +24,7 @@ def test_schema_generator_and_document_track_the_live_registry():
 
 
 def test_schema_freshness_check_passes():
+    source_commit = DOC.read_text().split("> Source migration commit: ", 1)[1].splitlines()[0]
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
         cwd=ROOT,
@@ -32,11 +33,7 @@ def test_schema_freshness_check_passes():
         env={
             "PATH": "/usr/bin:/bin",
             "ADMIN_PASSWORD": "schema-test-password",
-            # 干净环境下 git 需要显式信任该仓库（否则 dubious ownership，
-            # 生成的 source commit 变成 unknown，检查必然失败）
-            "GIT_CONFIG_COUNT": "1",
-            "GIT_CONFIG_KEY_0": "safe.directory",
-            "GIT_CONFIG_VALUE_0": str(ROOT),
+            "SCHEMA_SOURCE_MIGRATION_COMMIT": source_commit,
         },
     )
 

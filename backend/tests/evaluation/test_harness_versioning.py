@@ -120,4 +120,4 @@ def test_eval_run_can_pin_a_project_harness_release_for_ab(test_db):
         seed=24,
     )
     default_snapshot = json.loads(default_run["snapshot_json"])
-    assert default_snapshot["harness_release"]["version"] == "2.0"
+    assert default_snapshot["harness_release"]["version"] == current["version"]
