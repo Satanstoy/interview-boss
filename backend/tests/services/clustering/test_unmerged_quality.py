@@ -137,7 +137,11 @@ def test_execute_unmerged_issue_merges_source_and_records_history(test_db, monke
     ).fetchone()
     execute_issue(test_db, issue)
 
-    assert test_db.execute("SELECT id FROM question_bank WHERE id = 200").fetchone() is None
+    retained_source = test_db.execute(
+        "SELECT deleted_at FROM question_bank WHERE id = 200"
+    ).fetchone()
+    assert retained_source is not None
+    assert retained_source["deleted_at"] is not None
     target = test_db.execute(
         "SELECT frequency, original_questions FROM question_bank WHERE id = 100"
     ).fetchone()
@@ -170,7 +174,10 @@ def test_serialize_old_done_unmerged_issue_recovers_deleted_source_from_history(
         "SELECT qb_id, source_qb_id FROM quality_issue WHERE id = ?",
         (issue["id"],),
     ).fetchone()
-    assert tuple(historical_row) == (None, 200)
+    assert tuple(historical_row) == (200, 200)
+    assert test_db.execute(
+        "SELECT deleted_at FROM question_bank WHERE id = 200"
+    ).fetchone()[0] is not None
 
     serialized = serialize_issue(
         test_db.execute("SELECT * FROM quality_issue WHERE id = ?", (issue["id"],)).fetchone(),

@@ -10,31 +10,29 @@ import inspect
 class TestInterviewFilteredByPosition:
     """面经/JD 库应按用户岗位过滤"""
 
-    def test_get_data_uses_user_job_position(self):
-        """
-        验证 get_data 端点使用 get_user_job_position(user['id'])
-        而非 get_current_job_position() 来获取岗位
-        """
-        from app.routers.data import get_data
+    def test_get_data_uses_user_job_position(self, client, test_db):
+        from app.core.auth import create_access_token
 
-        source = inspect.getsource(get_data)
-
-        # 应使用 get_user_job_position
-        assert "get_user_job_position" in source, (
-            "get_data 应使用 get_user_job_position(user['id']) 按用户岗位过滤"
+        position_id = test_db.execute(
+            "INSERT INTO job_positions (name) VALUES ('CI 用户岗位')"
+        ).lastrowid
+        test_db.execute("UPDATE users SET current_position_id = ? WHERE id = 1", (position_id,))
+        own_id = test_db.execute(
+            "INSERT INTO interview (url, owner_id, job_position, questions_list) "
+            "VALUES ('https://example.com/own-position', 1, 'CI 用户岗位', '用户岗位题目')"
+        ).lastrowid
+        test_db.execute(
+            "INSERT INTO interview (url, owner_id, job_position, questions_list) "
+            "VALUES ('https://example.com/other-position', 1, '其它岗位', '其它岗位题目')"
         )
-
-        # 不应使用 get_current_job_position（全局岗位）
-        # 注意：import 语句中可能出现，但函数体内不应直接调用
-        lines = source.split("\n")
-        for line in lines:
-            stripped = line.strip()
-            # 跳过 import 行
-            if "import" in stripped or "from" in stripped:
-                continue
-            assert "get_current_job_position()" not in stripped, (
-                f"get_data 不应使用全局 get_current_job_position(): {stripped}"
-            )
+        test_db.commit()
+        token = create_access_token({"user_id": 1, "type": "access"})
+        response = client.get(
+            "/api/data/interview?scope=mine",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["items"]] == [own_id]
 
     def test_data_router_imports_get_user_job_position(self):
         """验证 data.py 导入了 get_user_job_position"""

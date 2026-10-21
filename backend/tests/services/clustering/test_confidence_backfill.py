@@ -167,35 +167,29 @@ class TestBackfillConfidenceMigration:
 class TestCompactConfidenceFallback:
     """测试 compaction 流程中置信度 fallback 逻辑"""
 
-    @pytest.mark.asyncio
-    async def test_do_merge_to_existing_uses_fallback_confidence(self):
-        """当 confidence=0 时，_do_merge_to_existing 应使用 embedding fallback"""
+    def test_do_merge_to_existing_uses_fallback_confidence(self, test_db, monkeypatch):
+        """零置信度合并必须记录实际计算结果并保留来源历史。"""
         from app.services.pipeline.compact import _do_merge_to_existing
 
-        with patch('app.services.pipeline.compact.get_db_connection') as mock_conn, \
-             patch('app.services.pipeline.compact._snapshot_question') as mock_snapshot, \
-             patch('app.services.pipeline.compact._record_merge_history') as mock_record, \
-             patch('app.services.pipeline.compact.delete_all_for_qb'), \
-             patch('app.services.pipeline.compact.sync_question_bank_projections'), \
-             patch('app.services.pipeline.compact._compute_merge_confidence', return_value=0.87):
+        test_db.executemany(
+            "INSERT INTO question_bank (id, question, cat2, owner_id, status) "
+            "VALUES (?, ?, 'B1', NULL, 'approved')",
+            [(100, "测试旧题"), (200, "测试变体")],
+        )
+        monkeypatch.setattr("app.services.pipeline.compact.get_db_connection", lambda: test_db)
+        monkeypatch.setattr(
+            "app.services.pipeline.compact._compute_merge_confidence",
+            lambda survivor_id, question: 0.87,
+        )
+        entry = dict(test_db.execute("SELECT * FROM question_bank WHERE id = 200").fetchone())
+        with test_db:
+            _do_merge_to_existing(100, entry, confidence=0, phase="test")
 
-            mock_conn.return_value = MagicMock()
-            mock_conn.return_value.execute.return_value.fetchone.return_value = {
-                'question': '测试旧题', 'sources': '[]', 'original_questions': '[]',
-                'original_question_sources': '[]', 'ai_answer': None,
-                'answer_sources': None
-            }
-            mock_snapshot.return_value = {}
-
-            entry = {'id': 200, 'question': '测试', 'sources': '[]',
-                     'original_questions': '[]', 'original_question_sources': '[]',
-                     'cat2': 'B1', 'ai_answer': None}
-
-            _do_merge_to_existing(100, entry, confidence=0, phase='test')
-
-            # Should have called _record_merge_history with fallback confidence > 0
-            mock_record.assert_called_once()
-            call_kwargs = mock_record.call_args
-            recorded_confidence = call_kwargs[1].get('confidence', call_kwargs[0][7] if len(call_kwargs[0]) > 7 else 0)
-            # With the fix, confidence should be > 0 (from fallback)
-            assert recorded_confidence > 0 or True  # Will pass after fix
+        history = test_db.execute(
+            "SELECT confidence FROM merge_history WHERE survivor_id = 100"
+        ).fetchone()
+        assert history is not None
+        assert history["confidence"] == pytest.approx(0.87)
+        assert test_db.execute(
+            "SELECT deleted_at FROM question_bank WHERE id = 200"
+        ).fetchone()[0] is not None

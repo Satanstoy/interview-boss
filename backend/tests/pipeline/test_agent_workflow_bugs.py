@@ -165,18 +165,21 @@ class TestBug008:
     """BUG-008: clear_qb_node 应使用 with conn 而非裸 BEGIN/COMMIT"""
 
     def test_clear_qb_uses_manual_transaction(self):
-        """检查 clear_qb_node 源码是否使用 BEGIN/COMMIT"""
+        """当前 worker 清库事务必须在异常时回滚。"""
+        import ast
         import inspect
-        from app.agents.build.nodes import clear_qb_node
-        source = inspect.getsource(clear_qb_node)
+        from app.worker import _build_master_bank_job
 
-        if 'conn.execute("BEGIN")' in source or "conn.execute('BEGIN')" in source:
-            # 检查是否使用了 with conn 替代
-            if 'with get_db_connection()' not in source and 'with conn' not in source:
-                pytest.fail(
-                    "BUG-008: clear_qb_node 使用裸 BEGIN/COMMIT，"
-                    "应使用 'with conn:' 上下文管理器"
-                )
+        tree = ast.parse(inspect.getsource(_build_master_bank_job))
+        clear_bank = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_clear_bank"
+        )
+        source = ast.unparse(clear_bank)
+        assert "with get_db_connection()" in source
+        assert "conn.commit()" in source
+        assert "conn.rollback()" in source
+        assert any(isinstance(node, ast.Raise) for node in ast.walk(clear_bank))
 
 
 # ═══════════════════════════════════════════════════
@@ -226,18 +229,25 @@ class TestBug009:
 class TestBug010:
     """BUG-010: build 节点应使用 run_db 包装数据库操作"""
 
-    def test_backup_db_node_uses_run_db(self):
-        """backup_db_node 应通过 run_db 执行数据库操作"""
-        import inspect
-        from app.agents.build.nodes import backup_db_node
-        source = inspect.getsource(backup_db_node)
+    def test_backup_db_node_uses_run_db(self, tmp_path):
+        """当前 worker 的在线备份必须包含未 checkpoint 的 WAL 数据。"""
+        import sqlite3
+        from app.worker import _backup_db_online
 
-        # 检查是否直接调用了 get_db_connection() 而没有通过 run_db
-        has_direct_db = 'get_db_connection().execute' in source
-        uses_run_db = 'await run_db' in source or 'run_db(' in source
-
-        if has_direct_db and not uses_run_db:
-            pytest.fail(
-                "BUG-010: backup_db_node 直接调用 get_db_connection().execute()，"
-                "应通过 run_db 包装以确保线程安全"
-            )
+        source_path = tmp_path / "source.db"
+        backup_path = tmp_path / "backup.db"
+        source = sqlite3.connect(source_path)
+        source.execute("PRAGMA journal_mode=WAL")
+        source.execute("CREATE TABLE records (value INTEGER)")
+        source.execute("INSERT INTO records VALUES (42)")
+        source.commit()
+        try:
+            _backup_db_online(str(source_path), str(backup_path))
+            backup = sqlite3.connect(backup_path)
+            try:
+                assert backup.execute("SELECT value FROM records").fetchone()[0] == 42
+                assert backup.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            finally:
+                backup.close()
+        finally:
+            source.close()

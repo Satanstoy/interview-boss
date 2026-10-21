@@ -57,10 +57,15 @@ class TestBug004InterviewJobPosition:
 class TestBug003DataQueryFiltering:
     """验证 data.py 查询按 job_position 过滤"""
 
-    def test_data_query_includes_job_position_filter(self):
+    def test_data_query_includes_job_position_filter(self, app_db_isolation):
         """验证 get_data 函数的查询包含 job_position 过滤"""
-        from app.routers.data import get_data
-        import inspect
-        source = inspect.getsource(get_data)
-        assert 'job_position' in source, \
-            "get_data 函数应包含 job_position 过滤逻辑"
+        from app.routers.data import _visibility_where_and_params
+
+        conn = app_db_isolation
+        position_id = conn.execute(
+            "INSERT INTO job_positions (name) VALUES ('CI 用户岗位')"
+        ).lastrowid
+        conn.execute("UPDATE users SET current_position_id = ? WHERE id = 1", (position_id,))
+        where, params = _visibility_where_and_params(conn, "interview", {"id": 1})
+        assert "job_position" in where
+        assert params[-1] == "CI 用户岗位"

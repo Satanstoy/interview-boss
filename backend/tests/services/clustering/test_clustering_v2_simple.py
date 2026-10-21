@@ -154,7 +154,7 @@ class TestMatchAndClusterCat2Logic:
         assert len(result["matched"]) == 1
         assert result["matched"][0]["qd_id"] == 101
         assert result["matched"][0]["cluster_id"] == "50"
-        mock_load.assert_called_once_with("C3.数据库基础", days=14)
+        mock_load.assert_called_once_with("C3.数据库基础", days=14, owner_id=None)
 
     @pytest.mark.asyncio
     async def test_phase1_5_not_called_when_no_recent_singletons(self, test_db):
@@ -214,7 +214,7 @@ class TestMatchAndClusterCat2Logic:
                     )
 
         # 验证：调用时使用了正确的 days 参数
-        mock_load.assert_called_once_with("C3.数据库基础", days=14)
+        mock_load.assert_called_once_with("C3.数据库基础", days=14, owner_id=None)
 
 
 class TestProcessIncrementalBatch:

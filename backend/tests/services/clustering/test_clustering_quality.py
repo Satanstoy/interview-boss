@@ -116,7 +116,8 @@ class TestPromptFormat:
             ("MATCH_EXISTING_PROMPT", MATCH_EXISTING_PROMPT),
             ("CLUSTER_NEW_PROMPT", CLUSTER_NEW_PROMPT),
         ]:
-            assert "真正重复的题目应该合并" in prompt, f"{prompt_name} 缺少核心原则"
+            assert "同一份完整答案能回答双方全部明确追问" in prompt, f"{prompt_name} 缺少核心原则"
+            assert "范围或约束不同则保留独立题" in prompt
 
     def test_confidence_threshold_is_set(self):
         """测试：置信度阈值已合理设置"""
