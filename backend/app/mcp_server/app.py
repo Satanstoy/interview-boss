@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -200,6 +201,15 @@ mcp = FastMCP(
     ),
     streamable_http_path="/",
     stateless_http=True,
+    # The public entrypoint is nginx -> oauth-gateway -> backend. FastMCP
+    # defaults host to 127.0.0.1 and therefore auto-enables DNS rebinding
+    # protection with a loopback-only allowlist, so the forwarded Host
+    # (backend:8000) is rejected with 421 "Invalid Host header". The endpoint
+    # is not exposed on the host and MCPAuthMiddleware requires a Bearer token
+    # on every /mcp path, so the protection has no remaining threat to cover.
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False
+    ),
 )
 
 
